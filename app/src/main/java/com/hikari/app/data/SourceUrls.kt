@@ -239,9 +239,40 @@ object SourceUrls {
     }
 
     /**
+     * The version-stripped form of [fileKey]: repos that version their file
+     * names (`Reanime-v24.cs3` → `-v25` → `-v26`, the AllForU builds-branch
+     * convention) rename the file on EVERY upstream bump, so the installed
+     * copy's key never equals the listing's key and the row reads Install
+     * forever — for every extension of such a repo, on every device. The
+     * stripped key (`owner/repo/reanime.cs3`) is the lineage identity both
+     * spellings share, so the row converges on Installed/Update instead.
+     *
+     * Deliberately narrow — only a trailing `-vN`/`_vN` build marker is
+     * stripped, never a bare number, so two genuinely different files
+     * (`movie-2023` vs `movie-2024`) keep distinct identities and can never
+     * match (or uninstall) each other.
+     */
+    private val VERSION_SUFFIX = Regex("^(.*?)[-_ ]v\\d[\\w.]*$", RegexOption.IGNORE_CASE)
+
+    fun strippedFileKey(raw: String): String? {
+        val k = fileKey(raw) ?: return null
+        val i = k.lastIndexOf('/')
+        if (i < 0) return null
+        val file = k.substring(i + 1)
+        val dot = file.lastIndexOf('.')
+        val name = if (dot > 0) file.substring(0, dot) else file
+        val ext = if (dot > 0) file.substring(dot) else ""
+        val stem = VERSION_SUFFIX.find(name)?.groupValues?.get(1) ?: return null
+        if (stem.length < 2) return null
+        return k.substring(0, i + 1) + stem.lowercase() + ext
+    }
+
+    /**
      * Every string [raw] should be recognised by: itself, its canonical form,
-     * and its file key. Anything sourced from [raw] then matches a repo listing
-     * that spells the URL differently, in either direction.
+     * its file key, and its version-stripped file key. Anything sourced from
+     * [raw] then matches a repo listing that spells the URL differently, in
+     * either direction — including a listing that renamed the file for a new
+     * build (`-v24` → `-v25`).
      */
     private val matchKeysCache =
         object : LinkedHashMap<String, List<String>>(256, 0.75f, true) {
@@ -255,7 +286,8 @@ object SourceUrls {
         if (c.isEmpty()) return emptyList()
         synchronized(matchKeysCache) { matchKeysCache[c]?.let { return it } }
         val canon = canonical(c)
-        val keys = listOfNotNull(c, canon.takeIf { it != c }, fileKey(c))
+        val file = fileKey(c)
+        val keys = listOfNotNull(c, canon.takeIf { it != c }, file, strippedFileKey(c).takeIf { it != file })
         synchronized(matchKeysCache) { matchKeysCache[c] = keys }
         return keys
     }

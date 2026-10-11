@@ -224,7 +224,16 @@ object NetworkStream {
         } catch (_: Throwable) {
             emptyList()
         }
-        val chosen = sources.ifEmpty { listOf(sourceOf(url, name)) }
+        val chosen = sources.ifEmpty {
+            // A box share page is NEVER playable bytes: handing it back as a
+            // "server" only moves the failure into the player
+            // (CONTAINER_UNSUPPORTED on HTML) while the cover counts a server
+            // that can never play. Report no servers honestly, so the sheet
+            // and the shared log say the API refused (see the terabox errno
+            // lines) instead of failing in the player.
+            if (isBoxLink(url) && boxShareKey(url) != null) return@withContext emptyList()
+            listOf(sourceOf(url, name))
+        }
         chosen.distinctBy { it.url }.map {
             it.copy(
                 headers = withStreamHeaders(it.headers, url),
@@ -595,11 +604,17 @@ private class BReader(val b: ByteArray) {
             Logs.log("NetStream", "terabox: no page html for $origin (share + /main both empty)")
             return emptyList()
         }
+        // The reference client sends a per-session `browserid` cookie on the
+        // API calls; without one the list endpoint can refuse an otherwise
+        // identical request.
+        if (jar.none { it.substringBefore('=').trim().equals("browserid", ignoreCase = true) }) {
+            jar.add("browserid=" + freshBrowserId())
+        }
         val tokens = fetchText(
             "$origin/api/shorturlinfo?shorturl=$key&root=1",
             BOX_UA,
             jar,
-            referer = origin,
+            referer = url,
         ) ?: run {
             Logs.log("NetStream", "terabox: shorturlinfo unreachable for $origin")
             return emptyList()
@@ -617,7 +632,7 @@ private class BReader(val b: ByteArray) {
             return emptyList()
         }
 
-        var list = boxList(origin, key, token, jar, sekey)
+        var list = boxList(origin, key, token, jar, sekey, pageUrl = url)
         if (list == null) {
             // A fresh page read (new cookies + token) is what a "verify" answer
             // asks for; one retry is enough for a challenge that is really just
@@ -628,18 +643,21 @@ private class BReader(val b: ByteArray) {
             val retryHome = fetchText(url, BOX_UA, retryJar, referer = origin)
                 ?: fetchText("$origin/main", BOX_UA, retryJar)
                 ?: home
+            if (retryJar.none { it.substringBefore('=').trim().equals("browserid", ignoreCase = true) }) {
+                retryJar.add("browserid=" + freshBrowserId())
+            }
             val retryTokens = fetchText(
                 "$origin/api/shorturlinfo?shorturl=$key&root=1",
                 BOX_UA,
                 retryJar,
-                referer = origin,
+                referer = url,
             )
             if (!retryTokens.isNullOrBlank() &&
                 runCatching { JSONObject(retryTokens).optInt("errno", -1) }.getOrDefault(-1) == 0
             ) {
                 sekey = boxSekeyOf(retryTokens) ?: sekey
             }
-            list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey)
+            list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey, pageUrl = url)
         }
         val entries = list ?: return emptyList()
         // The share's metadata call is not needed for the dlinks, but it is what
@@ -684,6 +702,14 @@ private class BReader(val b: ByteArray) {
         return flags.any { first.optInt(it, 0) == 1 || first.optBoolean(it, false) }
     }
 
+    /** A per-session `browserid` cookie value, the way the reference client
+     *  mints one (44 random bytes, base64) for its API calls. */
+    private fun freshBrowserId(): String {
+        val bytes = ByteArray(44)
+        runCatching { java.security.SecureRandom().nextBytes(bytes) }
+        return android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+    }
+
     /** `/share/list` for one share — the account of the entries at its root,
      *  plus (bounded) the video files inside any folder it holds. */
     private suspend fun boxList(
@@ -692,8 +718,9 @@ private class BReader(val b: ByteArray) {
         jsToken: String,
         jar: MutableList<String>,
         sekey: String?,
+        pageUrl: String,
     ): List<JSONObject>? {
-        val root = boxListPage(origin, key, jsToken, jar, sekey, dir = null) ?: return null
+        val root = boxListPage(origin, key, jsToken, jar, sekey, pageUrl, dir = null) ?: return null
         val out = ArrayList<JSONObject>(root)
         // A share of a season is a folder of episodes: one level down, and at
         // most a few folders, keeps a huge share from turning into a hundred
@@ -705,7 +732,7 @@ private class BReader(val b: ByteArray) {
             val dir = e.optString("path").trim()
             if (dir.isBlank()) continue
             folders++
-            out += boxListPage(origin, key, jsToken, jar, sekey, dir = dir).orEmpty()
+            out += boxListPage(origin, key, jsToken, jar, sekey, pageUrl, dir = dir).orEmpty()
         }
         return out
     }
@@ -716,6 +743,7 @@ private class BReader(val b: ByteArray) {
         jsToken: String,
         jar: MutableList<String>,
         sekey: String?,
+        pageUrl: String,
         dir: String?,
     ): List<JSONObject>? {
         val query = buildString {
@@ -725,12 +753,15 @@ private class BReader(val b: ByteArray) {
             append("&shorturl=").append(key)
             append("&by=name&order=asc&num=20000&page=1")
             if (dir.isNullOrBlank()) {
-                append("&root=1")
+                // The reference client sends an empty `dir` alongside `root=1`
+                // (not root alone), and the share page itself as Referer, the
+                // way a browser's own API calls look.
+                append("&dir=&root=1")
             } else {
                 append("&dir=").append(URLEncoder.encode(dir, "UTF-8"))
             }
         }
-        val text = fetchText(query, BOX_UA, jar, referer = origin) ?: return null
+        val text = fetchText(query, BOX_UA, jar, referer = pageUrl) ?: return null
         val json = runCatching { JSONObject(text) }.getOrNull() ?: return null
         val errno = json.optInt("errno", -1)
         if (errno != 0) {

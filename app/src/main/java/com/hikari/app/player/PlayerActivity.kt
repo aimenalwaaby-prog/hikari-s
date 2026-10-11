@@ -7229,7 +7229,7 @@ class PlayerActivity : ComponentActivity() {
         // blank until the next touch-driven traversal, even though the rows
         // are already children ("servers show only after I touch the list").
         list.requestLayout()
-        val watcher: () -> Unit = {
+        fun paintChooser() {
             // A rebuild changes the content height, so put the scroll offsets
             // back AFTER the new rows are laid out (scrollTo clamps to the new
             // maximum) — otherwise a server landing while the user reads the
@@ -7264,6 +7264,29 @@ class PlayerActivity : ComponentActivity() {
             }
             if (wasAtBottom) sv?.post { sv.scrollTo(0, Int.MAX_VALUE) } else sv?.post { sv.scrollTo(0, keepY) }
             chipScroll.post { chipScroll.scrollTo(keepX, 0) }
+        }
+        // Live servers land in bursts (hundreds for big titles): running the
+        // full sync+sections+rebuild+layout pass on EVERY tick saturates the
+        // main thread, the sheet freezes, and the OS kills the app. Coalesce
+        // rapid ticks — at most one paint per 750ms, with a trailing paint so
+        // the last servers still land.
+        var lastChooserPaintMs = 0L
+        var chooserTrailingQueued = false
+        val watcher: () -> Unit = {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastChooserPaintMs < 750) {
+                if (!chooserTrailingQueued) {
+                    chooserTrailingQueued = true
+                    list.postDelayed({
+                        chooserTrailingQueued = false
+                        lastChooserPaintMs = android.os.SystemClock.uptimeMillis()
+                        if (dialog.isShowing) paintChooser()
+                    }, 800)
+                }
+            } else {
+                lastChooserPaintMs = now
+                paintChooser()
+            }
         }
         sourcesWatchers.add(watcher)
         var hintTicker: Job? = null

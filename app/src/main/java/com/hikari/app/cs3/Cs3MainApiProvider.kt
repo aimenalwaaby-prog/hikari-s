@@ -448,7 +448,7 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
      * declares nothing. The lookup path uses it so an attempt never cuts the
      * plugin off earlier than its own extraction below would.
      */
-suspend fun effectivePluginTimeoutMs(): Long {
+    suspend fun effectivePluginTimeoutMs(): Long {
         val overrideMs = runCatching {
             com.hikari.app.HikariApp.instance.store.serverTimeoutFor(config.id)
                 ?.coerceIn(20, 100)?.times(1000L)
@@ -800,7 +800,7 @@ suspend fun effectivePluginTimeoutMs(): Long {
         // CloudStream does.
         val canonicalUrl = resp.url.takeIf { it.isNotBlank() } ?: item.id
         if (canonicalUrl != item.id) {
-putLoad(canonicalUrl, resp)
+            putLoad(canonicalUrl, resp)
         }
         val mt = when (resp) {
             is MovieLoadResponse -> MediaType.MOVIE
@@ -911,7 +911,6 @@ putLoad(canonicalUrl, resp)
             // allowed to block the other: once one finishes, the other gets a
             // short grace window and then we play what we have.
             // CloudStream lets each plugin declare its own loadLinks budget
-// CloudStream lets each plugin declare its own loadLinks budget
             // (MainAPI.loadLinksTimeoutMs, CloudStream default 2 minutes — see
             // [effectivePluginTimeoutMs]). The user's per-extension
             // server-search time wins when set for this repo (Settings →
@@ -922,25 +921,20 @@ putLoad(canonicalUrl, resp)
             // CopyOnWriteArrayList, not mutableListOf: a plugin's loadLinks
             // invokes these callbacks from its OWN coroutines, and providers
             // that fan out over several extractors (Goojara-style) call back
-            // from several threads at once. Two concurrent `ArrayList.add` calls
-            // is how a source list gets corrupted — the recorded crash
+            // from several threads at once. Two concurrent `ArrayList.add`
+            // calls is how a source list gets corrupted — the recorded crash
             // (`ArrayIndexOutOfBoundsException: length=49; index=49` at
-            // `java.util.ArrayList.add`, thrown from an extension's callback) is
-            // exactly that race, so the app's own callbacks are never plain
-            // ArrayLists.
+            // `java.util.ArrayList.add`, thrown from an extension's callback)
+            // is exactly that race, so the app's own callbacks are never
+            // plain ArrayLists.
             val links = CopyOnWriteArrayList<com.lagradost.cloudstream3.utils.ExtractorLink>()
             val subs = CopyOnWriteArrayList<SubtitleFile>()
             val worker = Thread.currentThread()
-            // The user's per-extension server-search time wins when set for
-            // this repo (Settings → Playback & Servers → Server search time);
-            // otherwise the plugin's own declared budget stands. Only the WAIT
-            // grows — a definitive failure still surfaces the moment it
-            // happens, via the merge loop below.
             val overrideMs = runCatching {
                 com.hikari.app.HikariApp.instance.store.serverTimeoutFor(config.id)
                     ?.coerceIn(20, 100)?.times(1000L)
             }.getOrDefault(null)
-val pluginTimeout = overrideMs ?: effectivePluginTimeoutMs()
+            val pluginTimeout = overrideMs ?: effectivePluginTimeoutMs()
             // How long the merge loop waits in total. Extended if a fast-empty
             // plugin run triggers its one retry (below), so the retry is never
             // cut off by a deadline that assumed a single attempt.
@@ -1007,6 +1001,41 @@ val pluginTimeout = overrideMs ?: effectivePluginTimeoutMs()
                             if (freshData != data) {
                                 links.clear()
                                 runOnce(freshBudget, freshData)
+                            }
+                        }
+                        // Same stale-data class, one step further out: the
+                        // plugin came back empty-handed on a PAGE url (not an
+                        // opaque payload), so find out whether that page is
+                        // even alive before blaming the extraction. A
+                        // 404/410 page means the plugin's stored data is stale
+                        // (the site moved it, the upstream removed it) — the
+                        // silent auto-updater swaps builds overnight, and a
+                        // listing cached from the previous build can point at
+                        // pages that no longer exist. Re-load() fresh and
+                        // retry once exactly like the hollow case; a live page
+                        // skips this entirely (the miss is in the engines, not
+                        // the data), and an unchanged re-load retries nothing.
+                        if ((completed != true || links.isEmpty()) && !isHollowPayload(data) &&
+                            data.startsWith("http", ignoreCase = true)
+                        ) {
+                            val dead = withTimeoutOrNull(10_000) { pageGone(data) } ?: false
+                            if (dead) {
+                                com.hikari.app.data.Logs.log(
+                                    "Provider",
+                                    a.name + ": data page is gone (HTTP 404/410) — re-resolving fresh like a hollow payload",
+                                )
+                                val orig = originalIdOf(data) ?: item.id
+                                invalidateHollow(data)
+                                val freshBudget = minOf(pluginTimeout, 15_000L)
+                                deadline = maxOf(deadline, System.currentTimeMillis() + freshBudget * 2 + 1_000)
+                                val fresh = withTimeoutOrNull(freshBudget) { loadResponse(orig) }
+                                val freshData = fresh?.url?.takeIf {
+                                    it.isNotBlank() && !isHollowPayload(it)
+                                } ?: data
+                                if (freshData != data) {
+                                    links.clear()
+                                    runOnce(freshBudget, freshData)
+                                }
                             }
                         }
                         if (completed == null) {
@@ -1206,6 +1235,25 @@ val pluginTimeout = overrideMs ?: effectivePluginTimeoutMs()
     // impersonation, so the sites that needed it failed anyway. It only ever
     // ran on pages every other engine had already failed on, which is exactly
     // where it was least likely to succeed. See the CHANGELOG.
+
+    /**
+     * True when the page behind a plugin's data url is definitively gone
+     * (HTTP 404/410) — the signal the dead-page freshness retry above runs
+     * on. Narrow on purpose: any other answer (a live page, a bot wall, a
+     * timeout) is NOT staleness, and the later [probePageReachability] still
+     * reports it honestly when everything fails. Never throws.
+     */
+    private suspend fun pageGone(pageUrl: String): Boolean {
+        if (!pageUrl.startsWith("http", ignoreCase = true)) return false
+        return try {
+            com.hikari.app.net.Http.getQuiet(pageUrl).use { res ->
+                res.code == 404 || res.code == 410
+            }
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            false
+        }
+    }
 
     /**
      * When every engine came up empty, one bounded look at the title page
@@ -1518,13 +1566,13 @@ val pluginTimeout = overrideMs ?: effectivePluginTimeoutMs()
         val it = loadCache.entries.iterator()
         while (it.hasNext()) {
             val (k, v) = it.next()
-if (v.second.url == url) it.remove()
+            if (v.second.url == url) it.remove()
         }
     }
 
     /** Finds the original search/page id that produced a (rewritten) url. */
     private fun originalIdOf(url: String): String? {
-for ((k, v) in loadCache) if (v.second.url == url) return k
+        for ((k, v) in loadCache) if (v.second.url == url) return k
         return null
     }
 
@@ -1545,7 +1593,6 @@ for ((k, v) in loadCache) if (v.second.url == url) return k
         }
     }
 
-
     /** One load() attempt, treating a plugin crash as a miss (never throwing). */
     private suspend fun tryLoad(a: MainAPI, id: String): LoadResponse? = try {
         // Like the CloudStream app's own APIRepository.load: fix the url first
@@ -1560,7 +1607,7 @@ for ((k, v) in loadCache) if (v.second.url == url) return k
     }
 
     private suspend fun loadResponse(id: String): LoadResponse? {
-cachedLoad(id)?.let { return it }
+        cachedLoad(id)?.let { return it }
         val a = api ?: return null
         // Some providers' load() walks many pages (e.g. PimpBunny model pages
         // paginate up to 50) — cap it so the detail screen can never hang.
@@ -1578,8 +1625,8 @@ cachedLoad(id)?.let { return it }
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
             null
-        } ?: return null
-putLoad(id, r)
+} ?: return null
+        putLoad(id, r)
         return r
     }
 

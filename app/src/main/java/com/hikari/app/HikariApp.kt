@@ -319,6 +319,15 @@ class HikariApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // OkHttp 5's PublicSuffixDatabase reads through the application
+        // context, and ours is never set: androidx-startup (which normally
+        // calls OkHttp.initialize) is stripped/disabled in this build, so
+        // EVERY request that touches cookies throws IllegalStateException on
+        // the OkHttp dispatcher thread and the app dies right after launch
+        // (the "Unable to load PublicSuffixDatabase.list resource" crash —
+        // Caused by "Platform applicationContext not initialized"). Do it
+        // explicitly here, first, before any thread can make a request.
+        runCatching { okhttp3.OkHttp.initialize(this) }
         // Diagnostics first: everything after this point is logged, and the
         // crash handler below needs the log directory to already exist.
         Logs.init(this)
