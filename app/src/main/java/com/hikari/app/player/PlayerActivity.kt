@@ -841,6 +841,14 @@ class PlayerActivity : ComponentActivity() {
      *  is stripped so only the video shows in the small window. */
     private var inPip = false
 
+    /** Armed while a PiP window is up. Dismissing the window stops here WITHOUT
+     *  finishing on some devices: the video is gone but both players keep going
+     *  with no UI (the "PiP closed but the sound keeps coming" report). [onStop]
+     *  silences everything when it sees this still armed outside PiP; [onResume]
+     *  (a return to fullscreen) disarms it. Plain backgrounding never arms it,
+     *  so background audio stays a feature. */
+    private var pipExitSilenceArmed = false
+
     /** "Server too slow" dialog: a 3s auto-switch countdown with Wait/Switch.
      *  Wait re-arms the watchdog for 30 more seconds, then re-prompts. */
     private var slowDialog: Dialog? = null
@@ -1322,8 +1330,38 @@ class PlayerActivity : ComponentActivity() {
      */
     private var pinchZoomEnabled = false
     private var videoZoom = 1f
+    /** True from the second finger's first scale step until the pinch ends.
+     *  While set, the surface belongs to the zoom alone: taps, timeline
+     *  scrub and brightness/volume drags neither start nor continue (a
+     *  two-finger pinch used to scrub the video and move the sliders too). */
+    private var pinchActive = false
     private val pinchDetector: ScaleGestureDetector by lazy {
         ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                pinchActive = true
+                // The pinch owns the surface now: drop anything a single
+                // finger may have started (hold-to-fast, an in-progress scrub
+                // or brightness/volume drag) instead of finishing it.
+                holdSpeedTimer?.let { speedHandler.removeCallbacks(it) }
+                holdSpeedTimer = null
+                if (holdingFast) {
+                    holdingFast = false
+                    applySpeed(SPEEDS[speedIndex])
+                }
+                if (horizontalMode) {
+                    horizontalMode = false
+                    hideScrubFeedback()
+                }
+                if (verticalMode != 0) endVerticalGesture()
+                // A pinch is not a tap: the lift must not toggle the controls.
+                suppressNextTap = true
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                pinchActive = false
+            }
+
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 if (!pinchZoomEnabled || controlsLocked) return false
                 videoZoom = (videoZoom * detector.scaleFactor).coerceIn(1f, 4f)
@@ -2007,8 +2045,20 @@ class PlayerActivity : ComponentActivity() {
             // gestures below own the interaction (media3's built-in click-to-
             // toggle never fires). Touches on the controller's own buttons /
             // seekbar go to those children first and never reach us.
-            gestureDetector.onTouchEvent(event)
             pinchDetector.onTouchEvent(event)
+            // Two fingers = zoom only: while a pinch is active — or a second
+            // finger is down before the detector has begun one — no tap,
+            // timeline scrub or brightness/volume drag may start or continue.
+            // Single-finger gestures work exactly as before.
+            if (pinchActive || event.pointerCount > 1) {
+                if (event.actionMasked == MotionEvent.ACTION_UP ||
+                    event.actionMasked == MotionEvent.ACTION_CANCEL
+                ) {
+                    pinchActive = false
+                }
+                true
+            } else {
+            gestureDetector.onTouchEvent(event)
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     holdingFast = false
@@ -2132,6 +2182,7 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
             true
+            }
         }
 
         // All our controls (Back/Title/Favourite/Download/PiP/Options/Lock in the
@@ -2787,6 +2838,9 @@ class PlayerActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip = isInPictureInPictureMode
+        // Arm the dismiss guard (see [pipExitSilenceArmed]); the exit branch
+        // below leaves it armed until onResume clears it.
+        if (isInPictureInPictureMode) pipExitSilenceArmed = true
         val pv = playerView ?: return
         if (isInPictureInPictureMode) {
             hideLoadingBanner(immediate = true)
@@ -14268,6 +14322,9 @@ class PlayerActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        // Back on the full screen (including a tap on the PiP window) — a
+        // later stop is a plain backgrounding, never a PiP dismiss.
+        pipExitSilenceArmed = false
         hideSystemUi()
         // The remote's targets are set up once the whole window exists (see
         // [applyTvFocus]); a no-op on every device that is not a television.
@@ -14331,6 +14388,13 @@ class PlayerActivity : ComponentActivity() {
         // something is playing, so whatever it is holding is real watch time
         // that leaving the player must not throw away.
         flushWatchSeconds()
+        // A dismissed PiP window lands here with the dismiss guard still armed
+        // (no resume in between): silence the main and dual-audio players —
+        // otherwise the sound keeps coming with no window anywhere. A plain
+        // backgrounding never arms the guard, and onDestroy (when it follows)
+        // releases everything anyway.
+        if (pipExitSilenceArmed && !inPip) silencePlaybackForExit()
+        pipExitSilenceArmed = false
         if (com.lagradost.cloudstream3.CommonActivity.activity === this) {
             com.lagradost.cloudstream3.CommonActivity.setActivityInstance(null)
         }

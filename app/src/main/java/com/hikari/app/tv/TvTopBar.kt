@@ -102,8 +102,10 @@ fun TvProviderPill(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        modifier = modifier.tvPress(previewPass = true, onClick = onClick),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.60f),
+        modifier = modifier
+            .tvPress(previewPass = true, onClick = onClick)
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), RoundedCornerShape(50)),
     ) {
         Row(
             Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -139,8 +141,10 @@ fun TvProfilePill(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        modifier = modifier.tvPress(previewPass = true, onClick = onClick),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.60f),
+        modifier = modifier
+            .tvPress(previewPass = true, onClick = onClick)
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), RoundedCornerShape(50)),
     ) {
         Row(
             Modifier.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),

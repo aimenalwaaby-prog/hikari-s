@@ -2691,7 +2691,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             remember = false,
         )
             .getOrElse { throw Exception("Could not fetch repo: ${it.message}") }
-val root = runCatching { JSONObject(text) }.getOrElse { err ->
+        val root = runCatching { JSONObject(text) }.getOrElse { err ->
             // A repo stored under the WRONG kind (added before its kind
             // existed, or pasted as a CS3/Hikari URL): the kegareta Anymex
             // indexes are bare JSON arrays, which never parse as a JSONObject
@@ -7988,21 +7988,28 @@ private fun PluginRow(
         updateAvailable -> onUpdate ?: onUninstall
         else -> onUninstall
     }
-    Row(
+    // The name sits on its own line, full width, inside a glass card; the
+    // action buttons live in a second row below it (the reference provider-
+    // card shape). The old single row put five targets beside the text and
+    // squeezed the name to "Re:…" whenever an Update was pending — the buttons
+    // can never steal the name's width again.
+    GlassCard(
         Modifier
             .fillMaxWidth()
-            
             .padding(vertical = 6.dp)
-            // The row is a focus TARGET, not just a container. A plain Row has
-            // no focus node at all, so on a television the D-pad could only ever
-            // land on the small button at the row's right end and the row the
-            // user thinks of as "the option" never lit up — the reported "I
-            // press the remote and nothing on screen shows which option I am
-            // on". `tvPress` adds the focus node (with the same focus ring every
-            // other control in the app wears) and the centre press; touch is
-            // untouched, and the trailing buttons stay their own targets, so
-            // pressing Right still steps onto them.
-            .tvPress(previewPass = false, onClick = { rowAction?.invoke() }),
+    ) {
+        Column(
+            Modifier
+                .padding(12.dp)
+                // The card is a focus TARGET, not just a container: `tvPress`
+                // adds the focus node (with the same focus ring every other
+                // control in the app wears) and the centre press runs the
+                // row's own trailing action. The buttons below stay their own
+                // targets, so pressing Right still steps onto them.
+                .tvPress(previewPass = false, onClick = { rowAction?.invoke() }),
+        ) {
+    Row(
+        Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -8062,12 +8069,19 @@ private fun PluginRow(
                 )
             }
         }
+        }
+        // Actions below the name — Test, Uninstall, Update, Install — with the
+        // full width to themselves, so the name above can never collapse.
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
         if (onTest != null) {
             TextButton(onClick = onTest, enabled = !testing, modifier = Modifier.tvPress(previewPass = true, enabled = !testing, onClick = onTest)) {
                 Text(if (testing) tr("Testing…") else tr("Test"))
             }
         }
-        Spacer(Modifier.width(8.dp))
         if (installed) {
             if (updateAvailable && onUpdate != null) {
                 TextButton(onClick = onUninstall, modifier = Modifier.tvPress(previewPass = true, onClick = onUninstall)) {
@@ -8122,7 +8136,9 @@ private fun PluginRow(
                 Text(tr("Install"))
             }
         }
-    }
+            } // actions row
+        } // card column
+    } // glass card
 }
 
 /**

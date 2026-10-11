@@ -2,6 +2,7 @@ package com.hikari.app.tv
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,6 +96,7 @@ fun TvCinematicHero(
                 .fillMaxWidth()
                 .height(h)
                 .clip(RoundedCornerShape(20.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
                 // Left/Right steps through featured titles. Preview (not the
                 // plain handler) so the focus system never sees the keypress
                 // and the hero keeps focus while browsing.
@@ -278,6 +280,7 @@ private fun TvHeroScoreChip(text: String) {
     Surface(
         color = Color.Black.copy(alpha = 0.55f),
         shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
     ) {
         Text(
             "★ $text",

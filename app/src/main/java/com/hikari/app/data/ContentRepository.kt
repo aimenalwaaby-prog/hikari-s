@@ -1969,6 +1969,40 @@ class ContentRepository(private val manager: ProviderManager) {
                 )
             }
             if (attempt >= maxAttempts + (if (recovered) 1 else 0)) {
+                // Clean-room retry (universal, CS3 origin only): the provider
+                // ANSWERED — no timeout, no exception — but with zero servers.
+                // That is the silent-fan-out-failure shape: a meta provider
+                // whose internal sources all died on poisoned runtime state
+                // (an empty dynamic-URL table from a failed init at plugin
+                // load, a rotated domain, a transient upstream outage on the
+                // first run) reports success-with-nothing, exactly like "same
+                // title, same extension, plays in CloudStream, no servers
+                // here". One bounded retry runs on a FRESH runtime with FRESH
+                // input (new lock, reloaded plugin instance that re-runs the
+                // plugin's own load/init, evicted load + episode caches,
+                // re-resolved episodes for series). Cooldown-gated per
+                // provider, origin-only so a genuinely empty title costs one
+                // reload instead of one per sweep member — and a lookup that
+                // already ran fresh through here retries nothing. A site wall
+                // the provider itself reported (refused/bot-check/dead page)
+                // skips this: reloading cannot lift it, and the honest reason
+                // below already says so.
+                val cleanRoomed = cleanRoomRetry(p, item, episode, attemptBudgetMs, isOrigin, timedOut, lastWhy)
+                if (cleanRoomed.isNotEmpty()) {
+                    val combined =
+                        supplementDubSubVariants(p, item, episode, cleanRoomed, attemptBudgetMs)
+                    providerOutcome.remove(p.config.id)
+                    if (passSeq >= 0L) providerOutcomeSeq.remove(p.config.id)
+                    com.hikari.app.providers.ExtensionRecovery.noteSuccess(p.config.id)
+                    com.hikari.app.data.Logs.log(
+                        "Provider",
+                        p.config.name.ifBlank { p.config.id } +
+                            " [${p.config.type.groupLabel}]" +
+                            ": clean-room retry answered — " +
+                            "${combined.size} server(s)",
+                    )
+                    return combined
+                }
                 // Stale input, healed here instead of failing the tap: the
                 // episode `data` string (or the title load behind it) this
                 // lookup replayed can predate the installed provider build (a
@@ -2130,6 +2164,96 @@ class ContentRepository(private val manager: ProviderManager) {
             currentCoroutineContext().ensureActive()
             emptyList()
         }
+    }
+
+    /**
+     * One bounded clean-room retry for a CloudStream origin lookup that
+     * ANSWERED empty (see the call site in [fetchStreams]). Fires only when
+     * every attempt really returned (no timeout, no exception), the provider
+     * is the title's own CS3 extension, and its own message is either missing
+     * or the empty-success shape — never for a site wall it reported itself,
+     * never for a deserialization failure (that routes to
+     * [healStaleEpisodePayload]). Empty unless every step succeeds — this
+     * never masks a genuine "no servers".
+     */
+    private suspend fun cleanRoomRetry(
+        p: ContentProvider,
+        item: MediaItem,
+        episode: Episode?,
+        fullTimeoutMs: Long,
+        isOrigin: Boolean,
+        timedOut: Boolean,
+        lastWhy: String?,
+    ): List<StreamSource> {
+        if (!isOrigin || timedOut || lastWhy != null) return emptyList()
+        if (p.config.type != ProviderType.CS3) return emptyList()
+        val api = p as? Cs3MainApiProvider ?: return emptyList()
+        val said = providerStreamMessage(p)
+        if (isDeserializationFailure(said)) return emptyList()
+        if (said != null && !isEmptySuccess(said)) return emptyList()
+        if (said != null && isSiteWall(said)) return emptyList()
+        return try {
+            if (!com.hikari.app.providers.ExtensionRecovery.recoverEmpty(
+                    HikariApp.instance, p.config
+                )
+            ) return emptyList()
+            api.evictLoadCacheFor(item.id)
+            runCatching { com.hikari.app.data.MetaCache.evictEpisodes(item.uniqueId) }
+            val freshEp = if (episode == null) {
+                null
+            } else {
+                val freshEps = withTimeoutOrNull(20_000L) { api.getEpisodes(item) }.orEmpty()
+                if (freshEps.isEmpty()) return emptyList()
+                runCatching {
+                    com.hikari.app.data.MetaCache.putEpisodes(
+                        com.hikari.app.data.MetaCache.episodesKey(item.uniqueId),
+                        freshEps,
+                    )
+                }
+                freshEps.firstOrNull { it.season == episode.season && it.number == episode.number }
+                    ?: freshEps.firstOrNull { it.number == episode.number }
+                    ?: return emptyList()
+            }
+            val budget = minOf(fullTimeoutMs, 120_000L)
+            withTimeoutOrNull(budget) { api.getStreams(item, freshEp) }.orEmpty()
+        } catch (e: Throwable) {
+            currentCoroutineContext().ensureActive()
+            emptyList()
+        }
+    }
+
+    /**
+     * True when a provider's own message is the answered-empty shape — it
+     * ran and found nothing — as opposed to a specific diagnosis.
+     */
+    private fun isEmptySuccess(text: String?): Boolean {
+        if (text == null) return true
+        val t = text.lowercase()
+        return t.contains("no stream links") ||
+            t.contains("no playable source") ||
+            t.contains("no sources for this title") ||
+            t.contains("no servers")
+    }
+
+    /**
+     * True when a provider's own message already names a wall reloading
+     * cannot lift (refusal, bot check, dead/gone page, unreachable site).
+     */
+    private fun isSiteWall(text: String?): Boolean {
+        if (text.isNullOrBlank()) return false
+        val t = text.lowercase()
+        return t.contains("refused") ||
+            t.contains("bot check") ||
+            t.contains("cannot pass") ||
+            t.contains("challenge") ||
+            t.contains("http 401") ||
+            t.contains("http 403") ||
+            t.contains("http 404") ||
+            t.contains("http 410") ||
+            t.contains("http 5") ||
+            t.contains("gone (http") ||
+            t.contains("empty page") ||
+            t.contains("could not be reached")
     }
 
     /**

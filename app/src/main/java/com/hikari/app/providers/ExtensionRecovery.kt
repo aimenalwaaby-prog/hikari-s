@@ -70,6 +70,72 @@ object ExtensionRecovery {
         return System.currentTimeMillis() - last >= RECOVER_COOLDOWN_MS
     }
 
+    /** Minimum gap between two clean-room retries of the same provider. */
+    private const val EMPTY_RECOVER_COOLDOWN_MS = 60_000L
+
+    private val lastEmptyRecoverAt = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Clean-room retry for a provider that ANSWERED with zero servers (no
+     * timeout, no exception): fresh lock, fresh extension instance,
+     * skip-list cleared — the same primitives as [recover] but without the
+     * stall gating, so a silently-failed fan-out (a meta provider whose
+     * internal sources all died on poisoned runtime state: an empty
+     * dynamic-URL table from a failed init at load, a rotated domain, a
+     * transient upstream outage on the first run) gets one retry on a
+     * runtime that just re-ran the plugin's own load(). Returns false when
+     * the per-provider cooldown says a retry ran recently — the caller then
+     * falls through to its other cures instead of reloading per tap. Never
+     * throws.
+     */
+    suspend fun recoverEmpty(app: HikariApp, config: ProviderConfig): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - (lastEmptyRecoverAt[config.id] ?: 0L) < EMPTY_RECOVER_COOLDOWN_MS) return false
+        lastEmptyRecoverAt[config.id] = now
+        runCatching {
+            Logs.log(
+                "Provider",
+                (config.name.ifBlank { config.id }) +
+                    " [${config.type.groupLabel}]: answered empty — " +
+                    "one clean-room retry on a fresh runtime",
+            )
+            // 1. New calls stop queueing behind anything stuck (all engines).
+            ProviderGate.breaker(config.id)
+            // 2. The answered-empty instance itself goes (engines with caches).
+            when (config.type) {
+                ProviderType.HIKARI -> {
+                    (app.providers.byId(config.id) as? StallResettable)?.resetForStall()
+                    runCatching {
+                        val f = java.io.File(config.url)
+                        if (f.isFile) com.hikari.app.hiki.HikariPluginManager.evict(config.url)
+                    }
+                }
+                ProviderType.CS3 -> {
+                    runCatching {
+                        val f = java.io.File(config.url)
+                        if (f.isFile) {
+                            com.hikari.app.cs3.Cs3PluginManager.reload(app, f)
+                        }
+                    }
+                }
+                ProviderType.ANIYOMI -> {
+                    runCatching {
+                        com.hikari.app.aniyomi.AniyomiExtensionManager.evict(config.url)
+                    }
+                }
+                ProviderType.MANGA -> {
+                    runCatching {
+                        com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                    }
+                }
+                else -> Unit
+            }
+            // 3. Ask it again right away.
+            com.hikari.app.data.ContentRepository.clearHung(config.id)
+        }
+        return true
+    }
+
     /**
      * Breaks the wedge for [config]: fresh lock, fresh extension instance,
      * skip-list cleared. Never throws — recovery failing must not fail the

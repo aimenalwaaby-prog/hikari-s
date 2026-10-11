@@ -57,7 +57,8 @@ fun TvSettingsSourceCard(
   Surface(
     tonalElevation = 2.dp,
     shape = RoundedCornerShape(20.dp),
-    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
     modifier = modifier
       .clip(RoundedCornerShape(20.dp))
       .clickable(onClick = onClick)
@@ -129,7 +130,7 @@ fun TvCinemaCard(
     modifier.width(cardWidth).clickable(onClick = onClick).tvPress(previewPass = true, onClick = onClick),
   ) {
     Box(
-      Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+      Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
       contentAlignment = Alignment.Center,
     ) {
       Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
@@ -161,7 +162,7 @@ fun TvVerticalCard(
     modifier.width(cardWidth).clickable(onClick = onClick).tvPress(previewPass = true, onClick = onClick),
   ) {
     Box(
-      Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+      Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
       contentAlignment = Alignment.Center,
     ) {
       Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
@@ -238,7 +239,7 @@ fun TvCinemaRow(
       if (onShowAll != null) TextButton(onClick = onShowAll, modifier = Modifier.tvPress(previewPass = true, onClick = onShowAll)) { Text(tr("Show All"), fontWeight = FontWeight.Bold) }
     }
     Spacer(Modifier.height(10.dp))
-LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
       val seen = LinkedHashSet<String>()
       val unique = items.filter { it.uniqueId.let { k -> if (seen.add(k)) true else false } }
       items(unique, key = { it.uniqueId }) { item ->

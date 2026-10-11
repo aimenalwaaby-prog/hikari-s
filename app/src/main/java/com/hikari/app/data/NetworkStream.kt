@@ -674,13 +674,17 @@ private class BReader(val b: ByteArray) {
 
         val headers = boxHeaders(origin, jar)
         val files = ArrayList<StreamSource>()
+        var noDlink = 0
         for (e in entries) {
             val dlink = e.optString("dlink").trim()
-            if (dlink.isBlank() || !dlink.startsWith("http")) continue
+            if (dlink.isBlank() || !dlink.startsWith("http")) { noDlink++; continue }
             val file = e.optString("server_filename").ifBlank { e.optString("filename") }.trim()
             if (file.isNotBlank() && !looksLikeVideo(file)) continue
             files += sourceOf(dlink, file.ifBlank { key }, headers = headers)
             if (files.size >= 8) break
+        }
+        if (files.isEmpty() && entries.isNotEmpty()) {
+            Logs.log("NetStream", "terabox: ${entries.size} entries but no playable dlinks (noDlink=$noDlink) for $origin")
         }
         return files
     }
@@ -700,17 +704,23 @@ private class BReader(val b: ByteArray) {
 
     /** The share page's own `sign`+`timestamp` (Baidu-family request signing —
      *  the list call's real credential; see the [terabox] flow). Read from the
-     *  page's embedded data (`"sign":"…"`, `"timestamp":…` — the `yunData`
-     *  fields the web client's own calls carry). Null when the page is
+     *  page's embedded data (the `yunData` blob the web client's own calls
+     *  carry: `"sign":"…"`, `"timestamp":…`) or back out of the page URL's own
+     *  query. The timestamp may be seconds (10 digits) or millis (13) — the
+     *  API wants seconds, so millis are truncated. Null when the page is
      *  bot-walled or carries neither, in which case the list call goes out
      *  unsigned exactly as before. */
     private fun boxSignOf(html: String?): Pair<String, Long>? {
         if (html.isNullOrBlank()) return null
-        val sign = Regex(""""sign"\s*:\s*"([0-9a-fA-F]{20,})"""").find(html)?.groupValues?.get(1)
-            ?: Regex("""[?&]sign=([0-9a-fA-F]{20,})""").find(html)?.groupValues?.get(1)
+        val sign = Regex(""""sign"\s*:\s*"([A-Za-z0-9+/=_-]{16,})"""").find(html)?.groupValues?.get(1)
+            ?: Regex("""yunData\.sign\s*=\s*['"]([^'"]+)['"]""").find(html)?.groupValues?.get(1)
+            ?: Regex("""[?&]sign=([A-Za-z0-9+/=_-]{16,})""").find(html)?.groupValues?.get(1)
             ?: return null
-        val ts = Regex(""""timestamp"\s*:\s*(\d{10})""").find(html)?.groupValues?.get(1)?.toLongOrNull()
-            ?: Regex("""[?&]timestamp=(\d{10})""").find(html)?.groupValues?.get(1)?.toLongOrNull()
+        val rawTs = Regex(""""timestamp"\s*:\s*"?(\d{10,13})"?""").find(html)?.groupValues?.get(1)
+            ?: Regex("""yunData\.timestamp\s*=\s*['"]?(\d{10,13})""").find(html)?.groupValues?.get(1)
+            ?: Regex("""[?&]timestamp=(\d{10,13})""").find(html)?.groupValues?.get(1)
+            ?: return null
+        val ts = (if (rawTs.length > 10) rawTs.substring(0, 10) else rawTs).toLongOrNull()
             ?: return null
         return sign to ts
     }
@@ -773,7 +783,10 @@ private class BReader(val b: ByteArray) {
     ): List<JSONObject>? {
         val query = buildString {
             append("$origin/share/list?$BOX_APP_QUERY")
-            if (jsToken.isNotBlank()) append("&jsToken=").append(jsToken)
+            // The token can carry URL-hostile characters — encode it exactly
+            // like the sekey below (an unencoded token breaks the whole query
+            // and the call is refused as if it were never signed).
+            if (jsToken.isNotBlank()) append("&jsToken=").append(URLEncoder.encode(jsToken, "UTF-8"))
             if (!sekey.isNullOrBlank()) append("&sekey=").append(URLEncoder.encode(sekey, "UTF-8"))
             // The page's own signature — the web client's calls always carry
             // it, and the endpoint refuses unsigned calls with errno 105.

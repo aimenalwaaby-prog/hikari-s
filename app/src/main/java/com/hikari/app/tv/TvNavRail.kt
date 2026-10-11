@@ -1,6 +1,7 @@
 package com.hikari.app.tv
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -144,17 +145,17 @@ fun TvNavRail(
         modifier = modifier
             .width(TvUi.RAIL_WIDTH)
             .fillMaxHeight()
-            // A touch of its own surface behind the rail, so the tabs do not
-            // float over a bright poster collage. Deliberately faint: the page
-            // backdrop must still show through it.
+            // The reference client's floating glass pill: a dark frosted bar
+            // with a hairline edge, standing off the backdrop — not a
+            // full-height gradient wash. Deliberately NO clip here: the
+            // focused tab's labelled pill expands past the bar over the
+            // content, and clipping would cut it off.
+            .padding(start = 10.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
             .background(
-                Brush.horizontalGradient(
-                    listOf(
-                        scheme.surface.copy(alpha = 0.55f),
-                        scheme.surface.copy(alpha = 0.12f),
-                    )
-                )
+                Color(0xFF14161C).copy(alpha = 0.72f),
+                RoundedCornerShape(28.dp),
             )
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(28.dp))
             .padding(vertical = 18.dp),
     ) {
         // How much height each tab may have: what is left after the wordmark,
@@ -266,6 +267,17 @@ private fun TvNavRailItem(
                     selected -> scheme.primary.copy(alpha = 0.18f)
                     else -> Color.Transparent
                 }
+            )
+            // Glass hairline on the lit rows, like the reference rail's
+            // glowing active pill — the unlit rows stay borderless.
+            .border(
+                1.dp,
+                when {
+                    expanded -> scheme.primary.copy(alpha = 0.55f)
+                    selected -> scheme.primary.copy(alpha = 0.35f)
+                    else -> Color.Transparent
+                },
+                shape,
             )
             .clickable(onClick = onClick)
             // The row is what the remote walks; when it lands here the strip

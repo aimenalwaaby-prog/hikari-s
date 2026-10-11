@@ -4532,10 +4532,14 @@ fun DetailScreen(
                     item {
                         DetailsBlock(
                             d = det,
-                            ratings = if (showDetailRating) ratings else emptyList(),
-                            // Even with the strip hidden the block's own rows
-                            // (year, certification, director) still render, so
-                            // the callback stays wired for when it comes back.
+                            // TV already shows ratings + year/runtime/cert in
+                            // the hero (reference layout) — the block below
+                            // keeps only status/country/language/votes/
+                            // release/director/writers so nothing shows twice.
+                            ratings = if (showDetailRating && !isTvLayout) ratings else emptyList(),
+                            hideHeadline = isTvLayout,
+                            // The callback stays wired for when the strip
+                            // comes back (setting on, phone layout).
                             onRatingClick = { ratingInfo = it },
                         )
                     }
@@ -4543,10 +4547,11 @@ fun DetailScreen(
                 // Production companies / networks — one tap opens everything
                 // that studio or network made (a TMDB entity grid; see the
                 // TmdbSourceType.COMPANY/NETWORK queries). It sits ABOVE the cast
-                // row, the order the reference client uses. Television gets it
-                // too — the reference TV layout's studio plates live on this
-                // page, and the row is skipped when the lookup found nothing.
-                extras?.companies?.takeIf { it.isNotEmpty() }?.let { companies ->
+                // row, the order the reference client uses. Phone-only: TV
+                // reads them in the hero's own plate row (reference layout),
+                // so the page row below would show every studio twice — and
+                // the row is skipped when the lookup found nothing.
+                if (!isTvLayout) extras?.companies?.takeIf { it.isNotEmpty() }?.let { companies ->
                     item {
                         ProductionRow(companies) { c ->
                             val spec = TmdbSpec(
@@ -6817,6 +6822,11 @@ private fun DetailsBlock(
     d: TitleDetails,
     ratings: List<TitleRating>,
     onRatingClick: (TitleRating) -> Unit,
+    /** On TV the headline (year · runtime · age cert) already sits in the
+     *  hero next to the ratings strip (reference layout) — hide it here so
+     *  neither shows twice. Status/country/language/votes/release date/
+     *  director/writers still render; only the duplicated top line goes. */
+    hideHeadline: Boolean = false,
 ) {
     val stats = ArrayList<String>(4)
     d.year?.let { stats.add(it.toString()) }
@@ -6837,15 +6847,16 @@ private fun DetailsBlock(
     val cert = d.certification?.trim()?.takeIf { it.isNotEmpty() }
 
     // A TMDB record with nothing usable would otherwise render an empty block.
-    if (stats.isEmpty() && meta.isEmpty() && ratings.isEmpty() && cert == null &&
+    // On TV the headline never counts toward "usable" — it lives in the hero.
+    if ((hideHeadline || stats.isEmpty()) && meta.isEmpty() && ratings.isEmpty() && (hideHeadline || cert == null) &&
         d.director.isNullOrBlank() && d.writers.isEmpty()
     ) return
 
     Column(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
         // Year · runtime, with the age rating as its own bordered box next to
-        // them — the way IMDb prints "PG-13". TMDB often has a rating only for
-        // a region other than the US, and any of them beats showing nothing.
-        if (stats.isNotEmpty() || cert != null) {
+        // them — the way IMDb prints "PG-13". TV hides this whole line: the
+        // hero already prints it (reference layout), and twice is the bug.
+        if (!hideHeadline && (stats.isNotEmpty() || cert != null)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 4.dp)
