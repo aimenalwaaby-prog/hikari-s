@@ -820,6 +820,15 @@ class PlayerActivity : ComponentActivity() {
     /** The live search has finished (every installed provider answered). */
     private var liveSearchDone = false
 
+    /**
+     * Field mirror of the live job's `originSettled` (the title's own
+     * extension has answered): the status-verdict collector below runs in a
+     * different coroutine scope that cannot see that local, and it must not
+     * fail the player on a sweep verdict written while the origin is still
+     * working (see the wait extension above).
+     */
+    private var liveOriginSettled = false
+
     /** The once-per-session "ask for a fresh link for THIS server before
      *  failing over" reconnect has already been used. */
     private var sameServerRelinkUsed = false
@@ -2558,6 +2567,7 @@ class PlayerActivity : ComponentActivity() {
                     StreamsLive.originSettledFlow(liveId).collect { settled ->
                         if (settled && !originSettled) {
                             originSettled = true
+                            liveOriginSettled = true
                             // Recorded, not obeyed: the origin answering no longer
                             // releases anything (see the note above) — this is the
                             // line that says WHICH provider answered and how many
@@ -2794,7 +2804,7 @@ class PlayerActivity : ComponentActivity() {
                     // but only once the origin itself has settled. A sweep
                     // verdict written while the title's own extension is still
                     // working is not an answer (see the wait extension above).
-                    if (awaitLive && !liveSearchDone && originSettled && sources.isEmpty() &&
+                    if (awaitLive && !liveSearchDone && liveOriginSettled && sources.isEmpty() &&
                         s != null && isNoResultVerdict(s)
                     ) {
                         liveSearchDone = true
