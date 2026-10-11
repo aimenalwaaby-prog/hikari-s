@@ -1182,7 +1182,7 @@ object Td {
      * costs nothing beside the calls themselves. Nulls when TDLib refuses.
      */
     suspend fun chatMediaCounts(chatId: Long): Pair<Int?, Int?> {
-        fun total(filter: TdApi.SearchMessagesFilter): Int? {
+        suspend fun total(filter: TdApi.SearchMessagesFilter): Int? {
             val found = query(
                 TdApi.SearchChatMessages(
                     chatId,
