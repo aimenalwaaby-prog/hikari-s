@@ -121,6 +121,13 @@ object ServerMeta {
         else -> q
     }
 
+    /** File size the texts state ("3.82 GB"), else null — the row's size badge. */
+    fun sizeOf(name: String, details: String): String? {
+        val joint = "$name $details"
+        return sizeRe.find(joint)?.groupValues?.getOrNull(1)?.trim()
+            ?.uppercase()?.replace("\\s+".toRegex(), " ")
+    }
+
     /** True when the row advertises more than one audio language inside one stream. */
     fun isMultiAudio(name: String, details: String): Boolean {
         val joint = "$name $details".lowercase()

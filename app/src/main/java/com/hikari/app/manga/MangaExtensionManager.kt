@@ -347,17 +347,48 @@ object MangaExtensionManager {
         return "$id|$name|$lang"
     }
 
-    /** One display name per source: a ` (n)` suffix on colliding names only. */
+    /** One display name per source: colliding names get the site host (Mihon parity),
+     *  with a numeric suffix when the host is also identical (or absent). */
     private fun disambiguate(sources: List<MangaSource>, fallback: String): List<String> {
         val raw = sources.map { runCatching { it.name }.getOrNull()?.takeIf { n -> n.isNotBlank() } ?: fallback }
-        val counts = raw.groupingBy { it }.eachCount()
-        val seen = HashMap<String, Int>()
-        return raw.map { n ->
-            if ((counts[n] ?: 0) <= 1) return@map n
-            val i = (seen[n] ?: 0) + 1
-            seen[n] = i
-            "$n ($i)"
+        val hosts = sources.map {
+            runCatching {
+                val http = it as? eu.kanade.tachiyomi.source.online.HttpSource ?: return@runCatching ""
+                hostOf(http.baseUrl).orEmpty()
+            }.getOrDefault("")
         }
+        fun shortOf(h: String): String =
+            h.removePrefix("www.").substringBefore('.').takeIf { it.isNotBlank() } ?: h
+        // Indices sharing one raw name, so same-host subgroups can be numbered.
+        val byName = HashMap<String, MutableList<Int>>()
+        raw.forEachIndexed { idx, n -> byName.getOrPut(n) { ArrayList() } += idx }
+        val out = raw.toMutableList()
+        for ((n, idxs) in byName) {
+            if (idxs.size <= 1) continue
+            val shorts = idxs.map { shortOf(hosts.getOrNull(it).orEmpty()) }
+            if (shorts.toSet().size <= 1) {
+                // All blank or all the same host: number them ("MangaDot (1)" …).
+                idxs.forEachIndexed { k, idx -> out[idx] = "$n (${k + 1})" }
+            } else {
+                // Distinct hosts: suffix each; number inside a shared host.
+                val seenInHost = HashMap<String, Int>()
+                for ((k, idx) in idxs.withIndex()) {
+                    val s = shorts[k]
+                    if (s.isBlank()) {
+                        val i = (seenInHost[""] ?: 0) + 1
+                        seenInHost[""] = i
+                        out[idx] = "$n ($i)"
+                    } else if (shorts.count { it == s } > 1) {
+                        val i = (seenInHost[s] ?: 0) + 1
+                        seenInHost[s] = i
+                        out[idx] = "$n • $s ($i)"
+                    } else {
+                        out[idx] = "$n • $s"
+                    }
+                }
+            }
+        }
+        return out
     }
 
 

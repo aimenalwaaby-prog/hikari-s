@@ -176,6 +176,11 @@ class CatalogViewModel(
 
     private var page = 1
     private var loadJob: kotlinx.coroutines.Job? = null
+    // Sparse pages are not the end: some catalogs answer an empty page in the
+    // middle of a long list (rotated trays, sparse skips). Up to 3 consecutive
+    // empty pages are stepped over before the list is declared done, so
+    // scrolling keeps loading instead of stopping at the first gap.
+    private var emptyStreak = 0
 
     /** True on an IPTV channel shelf: it gets cinema cards and its own
      *  in-catalog search (see [IptvProvider.searchInCatalog]) — manga keeps
@@ -225,6 +230,7 @@ class CatalogViewModel(
         _query.value = q
         loadJob?.cancel()
         page = 1
+        emptyStreak = 0
         _items.value = emptyList()
         _done.value = false
         _reason.value = null
@@ -321,6 +327,16 @@ class CatalogViewModel(
                 fresh
             }
             if (translated.isEmpty()) {
+                // A sparse middle page is stepped over (up to 3 in a row) — only
+                // a run of empty pages ends the list, so scrolling never stops
+                // at the first gap in a long catalogue.
+                if (page > 1 && emptyStreak < 3) {
+                    emptyStreak++
+                    page++
+                    _loading.value = false
+                    loadNext()
+                    return@launch
+                }
                 // The catalogue behind this page is gone from the install (or was
                 // never one — a tracker shelf opens through this same page), yet
                 // Home's row just showed its titles: serve the disk copy of that
@@ -344,6 +360,7 @@ class CatalogViewModel(
                 _done.value = true
             } else {
                 _reason.value = null
+                emptyStreak = 0
                 val seen = _items.value.map { it.uniqueId }.toMutableSet()
                 val merged = _items.value + translated.filter { seen.add(it.uniqueId) }
                 _items.value = merged
@@ -426,6 +443,7 @@ class CatalogViewModel(
 
     fun refresh() {
         page = 1
+        emptyStreak = 0
         trackerAll = null
         _items.value = emptyList()
         _done.value = false

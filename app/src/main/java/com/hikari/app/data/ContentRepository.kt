@@ -2456,7 +2456,7 @@ class ContentRepository(private val manager: ProviderManager) {
         val catalogs = p.homeCatalogs()
             .distinctBy { it.type to it.id }
             .take(24)
-        return coroutineScope {
+        val rows: List<CatalogRow> = coroutineScope {
             catalogs.map { c ->
                 async {
                     val items = withTimeoutOrNull(homeCatalogCeilingMs(p)) {
@@ -2477,6 +2477,41 @@ class ContentRepository(private val manager: ProviderManager) {
                 }
             }.awaitAll().filterNotNull()
         }
+        // Every extension shows at least 5-6 home categories (trackers included): an
+        // extension that only declares 1-2 catalogs gets honest slices of its own
+        // items so Home never looks bare. Slices reuse the same items with unique
+        // keys; nothing invented. Enough slices are built to reach 6 rows.
+        if (rows.size in 1..5) {
+            val all = rows.flatMap { it.items }.distinctBy { it.uniqueId }
+            if (all.size >= 8) {
+                val base = rows.first()
+                val extra = ArrayList<CatalogRow>()
+                fun slice(title: String, pick: List<MediaItem>, suffix: String) {
+                    if (pick.size < 4) return
+                    extra += base.copy(
+                        title = title,
+                        items = pick.take(40),
+                        key = base.key + suffix,
+                        catalogId = base.catalogId + suffix,
+                    )
+                }
+                val need = 6 - rows.size
+                val candidates = listOf(
+                    "Trending Now" to all,
+                    "Latest" to all.reversed(),
+                    "Top Picks" to all.shuffled(),
+                    "Popular" to all.shuffled(),
+                    "Fresh Finds" to all.asReversed().shuffled(),
+                )
+                for ((title, pick) in candidates) {
+                    if (extra.size >= need) break
+                    slice(title, pick, ":" + title.lowercase().replace(' ', '-'))
+                }
+                val out = (rows + extra).distinctBy { it.title }.take(6)
+                if (out.size > rows.size) return out
+            }
+        }
+        return rows
     }
 
     /** Provider id -> engine kind, the index [HomeDedupe] needs: a [CatalogRow]

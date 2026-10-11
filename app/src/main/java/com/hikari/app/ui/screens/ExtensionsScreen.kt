@@ -7771,7 +7771,7 @@ private fun RepoCard(
                 vertical = if (com.hikari.app.tv.TvMode.current()) 8.dp else 6.dp
             )
     ) {
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .focusGroup()
@@ -7784,8 +7784,13 @@ private fun RepoCard(
                     vertical = if (com.hikari.app.tv.TvMode.current()) 14.dp else 8.dp
                 )
                 .tvPress(previewPass = false, onClick = onClick),
-            verticalAlignment = Alignment.CenterVertically
         ) {
+            // Name row on top: icon + name + count get the full width, like the
+            // extension rows below them. Actions live in their own row beneath.
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             Box(
                 Modifier
                     .size(if (com.hikari.app.tv.TvMode.current()) 52.dp else 40.dp)
@@ -7796,11 +7801,14 @@ private fun RepoCard(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Filled.FolderOpen,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(if (com.hikari.app.tv.TvMode.current()) 28.dp else 22.dp)
+                // Letter avatar: the repo's own mark, so folders read like the
+                // reference (Phisher's avatar) instead of identical folders.
+                Text(
+                    repo.name.trim().firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "•",
+                    style = if (com.hikari.app.tv.TvMode.current()) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
                 )
             }
             Spacer(Modifier.width(12.dp))
@@ -7867,7 +7875,14 @@ private fun RepoCard(
                     )
                 }
             }
-            Spacer(Modifier.width(4.dp))
+            }
+            Spacer(Modifier.height(4.dp))
+            // Copy / Refresh / Remove below the name, like the extension rows.
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
             // Copy / Refresh / Remove. Compact (40dp) and icon-only: the
             // default 48dp targets plus the kind chip on the name line used
             // to squeeze the repo's own name to 2–3 characters on a phone.
@@ -7936,12 +7951,50 @@ private fun RepoCard(
                     modifier = Modifier.size(if (com.hikari.app.tv.TvMode.current()) 28.dp else 22.dp),
                 )
             }
+            }
         }
     }
 }
 
-private fun isDartOnlyPlugin(p: Cs3RepoPlugin): Boolean {
-    val u = p.url
+/**
+ * Country+language flag for an extension row, read from the repo listing's own
+ * name+description ("Movies and Series upto 4K", "Hindi", "English", …): the
+ * user knows at a glance which language an extension carries. Null when the
+ * listing names none — never guessed.
+ */
+private fun langFlagOf(p: Cs3RepoPlugin): String? {
+    val hay = (p.name + " " + p.description).lowercase()
+    fun has(vararg words: String) = words.any { w ->
+        Regex("(^|[^a-z])" + Regex.escape(w) + "([^a-z]|$)").containsMatchIn(hay)
+    }
+    return when {
+        has("hindi", "hindi-audio", "bollywood") -> "🇮🇳 Hindi"
+        has("tamil") -> "🇮🇳 Tamil"
+        has("telugu") -> "🇮🇳 Telugu"
+        has("malayalam") -> "🇮🇳 Malayalam"
+        has("kannada") -> "🇮🇳 Kannada"
+        has("bengali", "bangla") -> "🇮🇳 Bengali"
+        has("marathi", "punjabi", "gujarati", "desi") -> "🇮🇳 Desi"
+        has("english", "hollywood") -> "🇬🇧 English"
+        has("spanish", "espanol", "español", "latino") -> "🇪🇸 Spanish"
+        has("french", "francais", "français") -> "🇫🇷 French"
+        has("german", "deutsch") -> "🇩🇪 German"
+        has("italian") -> "🇮🇹 Italian"
+        has("portuguese", "brasileiro") -> "🇧🇷 Portuguese"
+        has("russian") -> "🇷🇺 Russian"
+        has("turkish") -> "🇹🇷 Turkish"
+        has("arabic") -> "🇸🇦 Arabic"
+        has("japanese", "anime") -> "🇯🇵 Japanese"
+        has("korean", "kdrama", "k-drama") -> "🇰🇷 Korean"
+        has("chinese", "donghua", "cdrama", "c-drama") -> "🇨🇳 Chinese"
+        has("indonesian", "indo") -> "🇮🇩 Indonesian"
+        has("vietnamese") -> "🇻🇳 Vietnamese"
+        has("thai") -> "🇹🇭 Thai"
+        else -> null
+    }
+}
+
+private fun isDartOnlyPlugin(p: Cs3RepoPlugin): Boolean {    val u = p.url
     // A runnable JS URL always wins — index metadata is often wrong.
     if (u.endsWith(".js", true) || u.contains("/javascript/", true)) return false
     if (u.contains("/dart/", true)) return true
@@ -8036,6 +8089,7 @@ private fun PluginRow(
                 overflow = TextOverflow.Ellipsis
             )
             val meta = listOfNotNull(
+                langFlagOf(p),
                 repoName.ifBlank { null },
                 p.description.ifBlank { null },
                 p.authors.joinToString(", ").ifBlank { null },

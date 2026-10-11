@@ -85,7 +85,8 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
             if (host.isBlank()) return false
             return host.contains("fastream") || host.contains("streamwish") ||
                 host.contains("wish") || host.contains("vidhide") ||
-                host.contains("filemoon") || host.contains("streamtape")
+                host.contains("filemoon") || host.contains("streamtape") ||
+                host.contains("hsxcon") || host.contains("hsx")
         }
 
         /**
@@ -1184,6 +1185,19 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                     // instead before declaring none.
                     if (pluginDone && (sawPluginSource || (fallbackDone && movieblastDone))) break
                     val now = System.currentTimeMillis()
+                    // Universal fast-first: a meta provider (CineStream class) fans out
+                    // internally for ~50s while the reference app shows the first mirrors
+                    // in seconds (it renders each callback as it lands; we used to wait
+                    // for the whole fan-out). Once the first plugin server is in hand
+                    // and 3s have passed, hand it over now; the background sweep keeps
+                    // filling the rest.
+                    if (sawPluginSource && merged.isNotEmpty() && now - started >= 3_000) {
+                        com.hikari.app.data.Logs.log(
+                            "Provider",
+                            a.name + ": early handover with " + merged.size + " server(s) after " + ((now - started) / 1000) + "s (rest fill in background)",
+                        )
+                        break
+                    }
                     if (now > deadline) break
                     kotlinx.coroutines.delay(80)
                 }
@@ -1319,9 +1333,16 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
             "filemoon", "mixdrop", "voe.", "vidplay", "mp4upload", "upstream",
             "streamlare", "vidmoly", "rabbitstream", "megacloud", "vidcloud",
             "filelions", "streamhub", "streamruby", "streamvid", "lulustream",
-            "wish", "vidhide",
+            "wish", "vidhide", "hsxcon", "hsx",
         )
         if (hot.none { host.contains(it) }) {
+            // Signed expiring links (auth_key/expire/signature/token) are hotlink-checked
+            // even on unknown hosts: without a Referer they 403 (the Castle class).
+            val q = url.substringAfter('?', "").lowercase()
+            val signed = q.contains("auth_key") || q.contains("expire") || q.contains("signature") || q.contains("token")
+            if (signed && !headers.keys.any { it.equals("Referer", true) }) {
+                headers.putIfAbsent("Referer", "https://" + apexOf(host))
+            }
             headers.putIfAbsent("User-Agent", com.hikari.app.net.Http.UA)
             return
         }

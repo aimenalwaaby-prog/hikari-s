@@ -181,7 +181,8 @@ object NetworkStream {
      *  the resolver works off the link's OWN host rather than a fixed one. */
     private val BOX_HOSTS = listOf(
         "terabox", "1024tera", "4funbox", "momerybox", "tibibox",
-        "nepnepbox", "telebox", "mirrobox", "shibabox",
+        "nepnepbox", "telebox", "mirrobox", "shibabox", "teraboxapp",
+        "freeterabox", "terashare", "tbx",
     )
 
     private val MDISK_HOSTS = listOf("mdisk.", "mdisk.me", "disk.mdisk", "diskwala")
@@ -553,6 +554,8 @@ private class BReader(val b: ByteArray) {
      */
     private fun boxShareKey(url: String): String? {
         val direct = Regex("""/s/([A-Za-z0-9_-]{5,})""").find(url)?.groupValues?.get(1)
+            ?: Regex("""/sharing/([A-Za-z0-9_-]{5,})""").find(url)?.groupValues?.get(1)
+            ?: Regex("""/share/([A-Za-z0-9_-]{5,})""").find(url)?.groupValues?.get(1)
         if (!direct.isNullOrBlank()) return direct
         val param = Regex("""[?&]surl=([A-Za-z0-9_-]{5,})""").find(url)?.groupValues?.get(1)
             ?: return null
@@ -670,6 +673,21 @@ private class BReader(val b: ByteArray) {
             }
             sig = boxSignOf(retryHome) ?: sig
             list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey, sig, ids, pageUrl = url)
+            // Family-wide fallback (bounded, 2 extra hosts): some mirrors refuse
+            // the list call with errno 105 while the canonical backend answers
+            // the same key. Same credentials, same key — never per-mirror code.
+            if (list == null) {
+                val retryToken = jsTokenOf(retryHome)
+                val fallbacks = listOf("https://www.terabox.com", "https://terabox.com")
+                    .filter { it != origin }
+                for (fb in fallbacks) {
+                    list = boxList(fb, key, retryToken, retryJar, sekey, sig, ids, pageUrl = url)
+                    if (list != null) {
+                        Logs.log("NetStream", "terabox: list answered via fallback $fb for $origin")
+                        break
+                    }
+                }
+            }
         }
         val entries = list ?: return emptyList()
         // The share's metadata call is not needed for the dlinks, but it is what
@@ -710,30 +728,44 @@ private class BReader(val b: ByteArray) {
     /**
      * The share's own ids inside a shorturlinfo answer — what the service's
      * own web client sends on the list call (`shareid` + `uk`), instead of
-     * the short key. Read defensively (top level, first `shorturlinfo`
-     * entry, `data` object; `uk` or `share_uk`, `shareid` or `share_id`):
+     * the short key. Read defensively by scanning the whole answer
+     * recursively (top level, `shorturlinfo` entries, `data`/`records`, any
+     * casing: `shareid`/`share_id`/`shareId`, `uk`/`share_uk`/`shareUk`):
      * mirrors that refuse an unsigned call with errno 105 get the exact
      * credential shape the web client uses. Null when the metadata carries
      * neither (the short key stays the only identifier, as before).
      */
     private fun boxShareIdsOf(tokens: String): Pair<String, String>? {
         val root = runCatching { JSONObject(tokens) }.getOrNull() ?: return null
-        val candidates = listOfNotNull(
-            root,
-            root.optJSONArray("shorturlinfo")?.optJSONObject(0),
-            root.optJSONObject("data"),
-        )
-        for (o in candidates) {
-            val shareid = o.optString("shareid").takeIf { it.isNotBlank() }
-                ?: o.opt("shareid")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
-                ?: o.optString("share_id").takeIf { it.isNotBlank() }
-                ?: continue
-            val uk = o.optString("uk").takeIf { it.isNotBlank() }
-                ?: o.opt("uk")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
-                ?: o.optString("share_uk").takeIf { it.isNotBlank() }
-                ?: o.opt("share_uk")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
-                ?: continue
-            return shareid to uk
+        var shareid: String? = null
+        var uk: String? = null
+        fun str(o: JSONObject, vararg keys: String): String? {
+            for (k in keys) {
+                o.optString(k).takeIf { it.isNotBlank() && it != "null" }?.let { return it }
+                o.opt(k)?.toString()?.takeIf { it.isNotBlank() && it != "null" }?.let { return it }
+            }
+            return null
+        }
+        val queue = ArrayDeque<JSONObject>()
+        queue.add(root)
+        val seen = HashSet<Int>()
+        while (queue.isNotEmpty()) {
+            val o = queue.removeFirst()
+            if (!seen.add(System.identityHashCode(o))) continue
+            if (shareid == null) shareid = str(o, "shareid", "share_id", "shareId")
+            if (uk == null) uk = str(o, "uk", "share_uk", "shareUk", "share_uk_str")
+            if (shareid != null && uk != null) return shareid to uk
+            val keys = o.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                when (val v = runCatching { o.get(k) }.getOrNull()) {
+                    is JSONObject -> queue.add(v)
+                    is org.json.JSONArray -> for (i in 0 until v.length()) {
+                        (runCatching { v.optJSONObject(i) }.getOrNull())?.let { queue.add(it) }
+                    }
+                    else -> {}
+                }
+            }
         }
         return null
     }
@@ -748,12 +780,16 @@ private class BReader(val b: ByteArray) {
      *  unsigned exactly as before. */
     private fun boxSignOf(html: String?): Pair<String, Long>? {
         if (html.isNullOrBlank()) return null
-        val sign = Regex(""""sign"\s*:\s*"([A-Za-z0-9+/=_-]{16,})"""").find(html)?.groupValues?.get(1)
+        val sign = Regex(""""sign"\s*[:=]\s*"([A-Za-z0-9+/=_-]{16,})"""").find(html)?.groupValues?.get(1)
+            ?: Regex("""['"]sign['"]\s*[:=]\s*['"]([^'"]{16,})['"]""").find(html)?.groupValues?.get(1)
             ?: Regex("""yunData\.sign\s*=\s*['"]([^'"]+)['"]""").find(html)?.groupValues?.get(1)
+            ?: Regex("""\bsign\s*[:=]\s*['"]([A-Za-z0-9+/=_-]{16,})['"]""").find(html)?.groupValues?.get(1)
             ?: Regex("""[?&]sign=([A-Za-z0-9+/=_-]{16,})""").find(html)?.groupValues?.get(1)
             ?: return null
-        val rawTs = Regex(""""timestamp"\s*:\s*"?(\d{10,13})"?""").find(html)?.groupValues?.get(1)
+        val rawTs = Regex(""""timestamp"\s*[:=]\s*"?(\d{10,13})"?""").find(html)?.groupValues?.get(1)
+            ?: Regex("""['"]timestamp['"]\s*[:=]\s*['"]?(\d{10,13})""").find(html)?.groupValues?.get(1)
             ?: Regex("""yunData\.timestamp\s*=\s*['"]?(\d{10,13})""").find(html)?.groupValues?.get(1)
+            ?: Regex("""\btimestamp\s*[:=]\s*['"]?(\d{10,13})""").find(html)?.groupValues?.get(1)
             ?: Regex("""[?&]timestamp=(\d{10,13})""").find(html)?.groupValues?.get(1)
             ?: return null
         val ts = (if (rawTs.length > 10) rawTs.substring(0, 10) else rawTs).toLongOrNull()

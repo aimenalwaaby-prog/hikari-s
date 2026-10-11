@@ -7089,14 +7089,15 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
         },
-        badge = when {
-            source.url.startsWith("hikari-td:") -> "Telegram"
-            source.local -> "Offline"
-            source.torrentStream || source.isTorrent -> "Torrent"
-            source.isM3u8 -> "HLS"
-            source.isMpd -> "DASH"
-            else -> null
-        },
+        badge = ServerMeta.sizeOf(source.name, source.details)
+            ?: when {
+                source.url.startsWith("hikari-td:") -> "Telegram"
+                source.local -> "Offline"
+                source.torrentStream || source.isTorrent -> "Torrent"
+                source.isM3u8 -> "HLS"
+                source.isMpd -> "DASH"
+                else -> null
+            },
         // Only mark a row as current once playback has actually been committed
         // to a server — see [playbackCommitted].
         selected = playbackCommitted && index == currentIndex,
@@ -7512,15 +7513,26 @@ class PlayerActivity : ComponentActivity() {
         fun rebuildChips() {
             val names = listOf("All") + sections().map { it.first }
             val sig = names.joinToString("\u0000")
-            if (sig == builtChips && chip == builtChipSelection) return
+            // Counts first: the strip rebuilds when servers land (counts change)
+            // as well as when sections appear — but never for nothing, so the
+            // strip's scroll offset survives live ticks that change nothing.
+            val chipCounts = runCatching { sections().toMap().mapValues { it.value.size } }
+                .getOrDefault(emptyMap())
+            val totalCount = chipCounts.values.sum()
+            if (sig == builtChips && chip + "|" + totalCount == builtChipSelection) return
             builtChips = sig
-            builtChipSelection = chip
+            builtChipSelection = chip + "|" + totalCount
             chipRow.removeAllViews()
+            // Provider chips carry their server counts, like the reference
+            // Sources screen ("All 74", "HdHub 23"): the counts come from the
+            // same sections the list below renders, so they always agree.
             names.forEach { name ->
+                val count = if (name == "All") totalCount else (chipCounts[name] ?: 0)
+                val pillLabel = if (count > 0) "$name  $count" else name
                 // The pill carries its own measured LayoutParams (see chipPill),
                 // so it is added bare — it can neither collapse nor be squeezed.
                 chipRow.addView(
-                    chipPill(if (name == "All") "All" else name, name == chip) {
+                    chipPill(pillLabel, name == chip) {
                         chip = name
                         rebuildChips()
                         rebuildList()
@@ -7646,7 +7658,7 @@ class PlayerActivity : ComponentActivity() {
         }
         val hintView = presentGlass(
             dialog,
-            if (forDownload) I18n.t("Download from") else "Select server",
+            if (forDownload) I18n.t("Download from") else "Sources",
             list,
             700f,
             hint = baseHint,
@@ -7655,10 +7667,11 @@ class PlayerActivity : ComponentActivity() {
             // The server chooser is a live, unknown-length list. Keep it tall
             // enough to show several servers immediately instead of fitting to
             // the first two rows, while remaining relative to the current window.
-            // This chooser is intentionally wide on both phone and TV:
+            // The server list is a full-page Sources screen (like the reference):
             // servers are a full-width result list, not a narrow side sheet.
-            fillFractionX = 0.90f,
-            fillFractionY = 0.72f,
+            // Full-window on both phone and TV so the list reads as its own page.
+            fillFractionX = 1.0f,
+            fillFractionY = 0.98f,
         )
         if (hintView != null) {
             // The hint doubles as the live status of the OTHER extensions: which

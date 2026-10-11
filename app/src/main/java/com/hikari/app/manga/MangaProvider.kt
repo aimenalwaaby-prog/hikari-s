@@ -512,10 +512,24 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         val src = source() ?: return@gate fail(missingReason(), emptyList())
         val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
         try {
-            val pageList = src.getPageList(ch(chapter.id))
+            // Mihon parity: a stale chapter entry (site moved the pages, session
+            // rotated) fails getPageList with "Refresh Chapter List". Refresh the
+            // chapter list once through the same combined call the chapter screen
+            // uses (works for old and Kei sources alike) and retry on the fresh
+            // entry before reporting failure.
+            var pageList = runCatching { src.getPageList(ch(chapter.id)) }.getOrNull()
+            if (pageList == null) {
+                runCatching {
+                    val fresh = updateOf(src, item, details = false, chapters = true).chapters
+                    val match = fresh.firstOrNull { it.url == chapter.id }
+                        ?: fresh.firstOrNull { it.name == chapter.name && !chapter.name.isNullOrBlank() }
+                    if (match != null) pageList = src.getPageList(match)
+                }
+            }
+            val pages = pageList ?: return@gate fail("pages failed: Refresh Chapter List", emptyList())
             val headers = sourceHeaders(src)
-            lastOutcome[config.id] = "✓ ${pageList.size} page(s)"
-            pageList.mapIndexed { i, page ->
+            lastOutcome[config.id] = "✓ ${pages.size} page(s)"
+            pages.mapIndexed { i, page ->
                 val url = pageUrl(src, page)
                 if (url.isNotBlank()) page.imageUrl = url
                 StreamSource(
