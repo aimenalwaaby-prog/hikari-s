@@ -2737,8 +2737,9 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             }
             val name = niceRepoName(repo.url, root.optString("name"))
             val description = PromoGuard.cleanText(root.optString("description"))
-            val meta = if (name != repo.name || description != repo.description)
-                repo.copy(name = name, description = description)
+            val icon = root.optString("iconUrl").trim()
+            val meta = if (name != repo.name || description != repo.description || (icon.isNotBlank() && icon != repo.iconUrl))
+                repo.copy(name = name, description = description, iconUrl = icon.ifBlank { repo.iconUrl })
             else null
             return out.values.toList() to meta
         }
@@ -2790,8 +2791,9 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             }
             val name = niceRepoName(repo.url, root.optString("name"))
             val description = PromoGuard.cleanText(root.optString("description"))
-            val meta = if (name != repo.name || description != repo.description)
-                repo.copy(name = name, description = description)
+            val icon = root.optString("iconUrl").trim()
+            val meta = if (name != repo.name || description != repo.description || (icon.isNotBlank() && icon != repo.iconUrl))
+                repo.copy(name = name, description = description, iconUrl = icon.ifBlank { repo.iconUrl })
             else null
             return sky.values.toList() to meta
         }
@@ -2817,8 +2819,9 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val name = niceRepoName(repo.url, root.optString("name"))
         val description = PromoGuard.cleanText(root.optString("description"))
-        val meta = if (name != repo.name || description != repo.description)
-            repo.copy(name = name, description = description)
+        val icon = root.optString("iconUrl").trim()
+        val meta = if (name != repo.name || description != repo.description || (icon.isNotBlank() && icon != repo.iconUrl))
+            repo.copy(name = name, description = description, iconUrl = icon.ifBlank { repo.iconUrl })
         else null
         return out.values.toList() to meta
     }
@@ -7801,15 +7804,24 @@ private fun RepoCard(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                // Letter avatar: the repo's own mark, so folders read like the
-                // reference (Phisher's avatar) instead of identical folders.
-                Text(
-                    repo.name.trim().firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "•",
-                    style = if (com.hikari.app.tv.TvMode.current()) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
+                // The repo's real icon (its repo.json iconUrl, else the GitHub
+                // owner's avatar like the reference app) — the letter is only
+                // the last resort, so folders stop reading as C/C/P/A/A/C.
+                val avatar = remember(repo.url, repo.iconUrl) { repoAvatarUrl(repo) }
+                if (avatar != null) {
+                    ExtensionIcon(
+                        url = avatar,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Text(
+                        repo.name.trim().firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "•",
+                        style = if (com.hikari.app.tv.TvMode.current()) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                    )
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -7954,6 +7966,24 @@ private fun RepoCard(
             }
         }
     }
+}
+
+/**
+ * A repo folder's real icon: the repo file's own `iconUrl` first (CloudStream
+ * repo.json carries one — the Phisher avatar and friends), else the GitHub
+ * owner's avatar derived from the URL, like the reference app. Null when
+ * neither exists — the caller falls back to the letter avatar.
+ */
+private fun repoAvatarUrl(repo: Cs3Repo): String? {
+    repo.iconUrl.trim().takeIf { it.isNotBlank() }?.let { return it }
+    val u = repo.url.trim()
+    val owner = Regex("""github\.com/([^/]+)/""").find(u)?.groupValues?.get(1)
+        ?: Regex("""raw\.githubusercontent\.com/([^/]+)/""").find(u)?.groupValues?.get(1)
+        ?: Regex("""cdn\.jsdelivr\.net/gh/([^/]+)/""").find(u)?.groupValues?.get(1)
+        ?: Regex("""gitlab\.com/([^/]+)/""").find(u)?.groupValues?.get(1)
+        ?: return null
+    if (owner.isBlank() || owner.equals("raw", ignoreCase = true)) return null
+    return if ("gitlab" in u) "https://gitlab.com/$owner.png" else "https://github.com/$owner.png"
 }
 
 /**

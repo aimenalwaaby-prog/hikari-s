@@ -353,56 +353,72 @@ fun TvSelectProviderDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
+        // Dark glass box with tight chrome: the header is one compact block so
+        // the provider grid owns the dialog (the "R on the next line + big
+        // blank header" report).
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color(0xFF15181F),
+        tonalElevation = 0.dp,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(tr("Select Provider"), fontWeight = FontWeight.Bold)
+            Column(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        tr("Choose a dedicated provider or search across all installed plugins"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tr("Select Provider"),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
-                }
-                Spacer(Modifier.width(10.dp))
-                val allSelected = selection.isEmpty()
-                Surface(
-                    onClick = onPickAll,
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll),
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Spacer(Modifier.width(8.dp))
+                    val allSelected = selection.isEmpty()
+                    Surface(
+                        onClick = onPickAll,
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll),
                     ) {
-                        Icon(
-                            Icons.Filled.Language,
-                            contentDescription = null,
-                            tint = if (allSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            tr("All Plugins (Global)"),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (allSelected) {
-                            Spacer(Modifier.width(4.dp))
+                        Row(
+                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Icon(
-                                Icons.Filled.Check,
+                                Icons.Filled.Language,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = if (allSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                tr("All Plugins (Global)"),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (allSelected) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
                         }
                     }
                 }
+                Text(
+                    tr("Choose a dedicated provider or search across all installed plugins"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         },
         text = {
@@ -449,7 +465,7 @@ fun TvSelectProviderDialog(
                     contentPadding = PaddingValues(vertical = 2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 320.dp),
+                        .heightIn(max = 360.dp),
                 ) {
                     items(shown, key = { "tv-sel-" + it.config.id }) { p ->
                         val id = p.config.id

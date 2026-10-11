@@ -128,6 +128,22 @@ object ServerMeta {
             ?.uppercase()?.replace("\\s+".toRegex(), " ")
     }
 
+    /** Small fact chips for a server card ("1080p", "HDR", "HEVC", "WEB-DL",
+     *  "Hindi", "MKV") — the same parse [enrichedDetails] uses, but as a
+     *  de-duplicated list so each fact renders its own badge. Never invented:
+     *  only what name/details/url already state. */
+    fun chipsOf(name: String, details: String, url: String = ""): List<String> {
+        val joint = "$name $details"
+        val out = ArrayList<String>(6)
+        qualityOf(joint)?.let { out += it }
+        hdrOf(joint)?.let { out += it }
+        codecOf(joint)?.let { out += it }
+        releaseOf(joint)?.let { out += it }
+        audioOf(joint)?.let { out += it }
+        if (url.isNotBlank()) containerOf(url)?.let { out += it }
+        return out.distinct()
+    }
+
     /** True when the row advertises more than one audio language inside one stream. */
     fun isMultiAudio(name: String, details: String): Boolean {
         val joint = "$name $details".lowercase()

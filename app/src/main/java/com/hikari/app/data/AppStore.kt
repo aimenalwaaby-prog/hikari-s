@@ -729,6 +729,14 @@ class AppStore(private val ctx: Context) {
         val TV_POSTER_SCALE = intPreferencesKey("tvPosterScale")
         val TV_DETAIL_BIG = booleanPreferencesKey("tvDetailBig")
         val TV_DETAIL_BIG_CHOSEN = booleanPreferencesKey("tvDetailBigChosen")
+        /** TV detail blur-merge art (Settings → TV & Remote): fit image above,
+         *  blurred merge below. Off by default (a static full-bleed blur is
+         *  one more decode a weak box pays on every open). */
+        val TV_BLUR_DETAIL = booleanPreferencesKey("tvBlurDetail")
+        /** TV's own episode layout (-1 = Auto = cinema grid; set the first time
+         *  the TV header button cycles, so a phone-side List choice can never
+         *  drag the TV back to rows). */
+        val TV_EPISODE_VIEW_MODE = intPreferencesKey("tvEpisodeViewMode")
         /** The PERFORMANCE BOOSTER (Settings → Performance): one switch that
          *  drops the heaviest work Hikari does on a slow device — the blurred
          *  poster halo, the animated poster/loading treatments, and the width of
@@ -837,6 +845,8 @@ class AppStore(private val ctx: Context) {
             K.PLAYER_UI_DEFAULTS_SEEDED.name,
             K.TV_POSTER_SCALE.name,
             K.TV_DETAIL_BIG.name,
+            K.TV_BLUR_DETAIL.name,
+            K.TV_EPISODE_VIEW_MODE.name,
             K.UI_SCALE_ENABLED.name,
             K.UI_SCALE_PERCENT.name,
             K.FULLSCREEN_OFF.name,
@@ -2172,6 +2182,25 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun setTvDetailBigChosen(chosen: Boolean) {
         write("TV_DETAIL_BIG_CHOSEN") { it[K.TV_DETAIL_BIG_CHOSEN] = chosen }
+    }
+
+    fun tvBlurDetailFlow(): Flow<Boolean> =
+        store.data.map { it[K.TV_BLUR_DETAIL] ?: false }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun tvBlurDetail(): Boolean = tvBlurDetailFlow().first()
+
+    suspend fun setTvBlurDetail(on: Boolean) {
+        write("TV_BLUR_DETAIL") { it[K.TV_BLUR_DETAIL] = on }
+    }
+
+    /** -1 = Auto (cinema grid); 0/1/2 = the header button's choice on TV. */
+    fun tvEpisodeViewModeFlow(): Flow<Int> =
+        store.data.map { (it[K.TV_EPISODE_VIEW_MODE] ?: -1).coerceIn(-1, 2) }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun tvEpisodeViewMode(): Int = tvEpisodeViewModeFlow().first()
+
+    suspend fun setTvEpisodeViewMode(mode: Int) {
+        write("TV_EPISODE_VIEW_MODE") { it[K.TV_EPISODE_VIEW_MODE] = mode.coerceIn(-1, 2) }
     }
 
     // ---- The floating bottom bar: which tab buttons the user keeps ----
@@ -4240,6 +4269,7 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
         else existing.copy(
             name = existing.name.ifBlank { r.name },
             description = r.description.ifBlank { existing.description },
+            iconUrl = r.iconUrl.ifBlank { existing.iconUrl },
             url = if (SourceUrls.isMirror(existing.url)) r.url else existing.url,
         )
         saveRepos(repos().filter { repoId(it.url) != key } + merged)
@@ -4853,6 +4883,7 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
                     .put("name", r.name)
                     .put("description", r.description)
                     .put("kind", r.kind.name)
+                    .put("icon", r.iconUrl)
             )
         }
         return arr.toString()
@@ -4870,6 +4901,7 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
                     description = o.optString("description"),
                     kind = runCatching { RepoKind.valueOf(o.optString("kind", "CS3")) }
                         .getOrDefault(RepoKind.CS3),
+                    iconUrl = o.optString("icon").ifBlank { o.optString("iconUrl") },
                 )
             }.filter { it.url.isNotBlank() }
                 .let { dedupeRepos(it) }

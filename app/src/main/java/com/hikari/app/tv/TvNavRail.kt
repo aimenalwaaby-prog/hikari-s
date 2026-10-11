@@ -190,7 +190,8 @@ fun TvNavRail(
                 "HIKARI",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
+                letterSpacing = 1.sp,
+                maxLines = 1,
                 color = primary,
                 modifier = Modifier.padding(start = 20.dp),
             )

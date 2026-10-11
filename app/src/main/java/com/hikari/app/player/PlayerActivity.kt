@@ -5399,10 +5399,17 @@ class PlayerActivity : ComponentActivity() {
          *  "Provider (Repo) · Plugin" was being cut off mid-word. The capsule
          *  grows with the label rather than the text being ellipsised. */
         val labelMaxLines: Int = 1,
+        /** Small red provider line above a server card ("HdHub · Add-on"), like
+         *  the reference Sources screen. Null for plain menu rows. */
+        val topLabel: String? = null,
+        /** Fact chips under a server card ("1080p", "HEVC", "3.82 GB" is the
+         *  badge instead) — see [com.hikari.app.data.ServerMeta.chipsOf]. */
+        val chips: List<String> = emptyList(),
     ) {
         /** The same row with a different selection state. */
         fun withSelected(value: Boolean): GlassOption = GlassOption(
-            label, sub, badge, iconRes, chevron, value, marker, labelMaxLines
+            label, sub, badge, iconRes, chevron, value, marker, labelMaxLines,
+            topLabel, chips
         )
     }
 
@@ -5641,7 +5648,184 @@ class PlayerActivity : ComponentActivity() {
         }
         return out.toString()
     }
+
+    /** One fact chip on a server card ("1080p", "HEVC", "Hindi"). */
+    private fun serverChip(text: String): TextView {
+        val density = resources.displayMetrics.density
+        return TextView(this).apply {
+            this.text = text
+            dpText(8f)
+            includeFontPadding = false
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFFC9D2E0.toInt())
+            gravity = Gravity.CENTER
+            setPadding(
+                (7 * density).toInt(), (3 * density).toInt(),
+                (7 * density).toInt(), (3 * density).toInt()
+            )
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 6f * density
+                setColor(0x22FFFFFF)
+                setStroke((1 * density).toInt().coerceAtLeast(1), 0x30FFFFFF)
+            }
+        }
+    }
+
+    /** The file-size badge on a server card ("3.82 GB") — solid red like the
+     *  reference Sources screen. */
+    private fun serverSizeBadge(text: String): TextView {
+        val density = resources.displayMetrics.density
+        return TextView(this).apply {
+            this.text = text
+            dpText(9f)
+            includeFontPadding = false
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.CENTER
+            setPadding(
+                (8 * density).toInt(), (3 * density).toInt(),
+                (8 * density).toInt(), (3 * density).toInt()
+            )
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8f * density
+                setColor(0xFFE5484D.toInt())
+            }
+        }
+    }
+
+    /**
+     * One server result as a rectangular full-width card, one-to-one with the
+     * reference Sources screen: small red provider line + red size badge on
+     * top, bold title, filename block, then fact chips. [onClick] null draws
+     * it static. No radio marker — the card itself is the target; the active
+     * server keeps its check mark.
+     */
+    private fun serverCard(option: GlassOption, onClick: (() -> Unit)?): View {
+        val density = resources.displayMetrics.density
+        val cardShape = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(
+                if (option.selected) withAlpha(accentMidColor, 0.22f) else 0x201A2430,
+                if (option.selected) withAlpha(accentEndColor, 0.16f) else 0x14141D28
+            )
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 14f * density
+            setStroke(
+                ((if (option.selected) 1.6f else 1.0f) * density).roundToInt().coerceAtLeast(1),
+                if (option.selected) withAlpha(accentMidColor, 0.95f) else 0x38FFFFFF
+            )
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = onClick != null
+            isFocusable = onClick != null
+            if (onClick != null && playerTvRemote()) {
+                isFocusableInTouchMode = true
+                if (foreground == null) foreground = tvFocusRing()
+            }
+            setPadding(
+                (12 * density).toInt(), (10 * density).toInt(),
+                (12 * density).toInt(), (10 * density).toInt()
+            )
+            background = if (onClick == null) cardShape
+            else RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), cardShape, null)
+        }
+        // Top line: provider in red on the left, size badge on the right.
+        if (!option.topLabel.isNullOrBlank() || !option.badge.isNullOrBlank()) {
+            card.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                if (!option.topLabel.isNullOrBlank()) {
+                    addView(TextView(this@PlayerActivity).apply {
+                        text = option.topLabel
+                        dpText(9.5f)
+                        includeFontPadding = false
+                        setTypeface(typeface, Typeface.BOLD)
+                        setTextColor(0xFFFF6B6B.toInt())
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                } else {
+                    addView(View(this@PlayerActivity), LinearLayout.LayoutParams(0, 1, 1f))
+                }
+                if (!option.badge.isNullOrBlank()) {
+                    addView(serverSizeBadge(option.badge!!), LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { marginStart = (8 * density).toInt() })
+                }
+                if (option.selected) addView(checkMark())
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = (4 * density).toInt() })
+        }
+        // Title: the choice being made, up to two lines.
+        card.addView(TextView(this).apply {
+            text = option.label
+            dpText(13f)
+            includeFontPadding = false
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(if (option.selected) 0xFFFFFFFF.toInt() else 0xFFDCE3EE.toInt())
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        // Filename / details block.
+        option.sub?.takeIf { it.isNotBlank() }?.let { sub ->
+            card.addView(TextView(this).apply {
+                text = breakableRowText(sub)
+                dpText(10f)
+                includeFontPadding = false
+                setTextColor(0xFF98A3B5.toInt())
+                maxLines = 3
+                ellipsize = TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (3 * density).toInt() })
+        }
+        // Fact chips, greedily wrapped into rows by estimated width.
+        val chips = option.chips.take(6)
+        if (chips.isNotEmpty()) {
+            val rows = ArrayList<LinearLayout>()
+            var cur = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            var used = 0
+            val maxW = 300
+            for (c in chips) {
+                // ~7dp per char + padding; a new row when the estimate overflows.
+                val w = c.length * 7 + 18
+                if (used > 0 && used + w > maxW) {
+                    rows += cur
+                    cur = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                    }
+                    used = 0
+                }
+                cur.addView(serverChip(c), LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    if (used > 0) marginStart = (6 * density).toInt()
+                })
+                used += w
+            }
+            rows += cur
+            for ((ri, r) in rows.withIndex()) {
+                card.addView(r, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = ((if (ri == 0) 6 else 4) * density).toInt() })
+            }
+        }
+        if (onClick != null) card.setOnClickListener { onClick() }
+        return card
+    }
     private fun glassRow(option: GlassOption, onClick: (() -> Unit)?): View {
+        // Server results are rectangular full-width cards like the reference
+        // Sources screen — never stadium pills, on phone and TV alike.
+        if (option.labelMaxLines >= 3) return serverCard(option, onClick)
         val density = resources.displayMetrics.density
         // Rows are capsules: the radius is deliberately larger than half the
         // row height, so the shape is clamped to a stadium and every row reads
@@ -5802,7 +5986,8 @@ class PlayerActivity : ComponentActivity() {
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = if (PlayerSkins.normalize(skin) == PlayerSkins.TV && playerTvRemote()) {
+                bottomMargin = if (option.labelMaxLines >= 3 ||
+                    (PlayerSkins.normalize(skin) == PlayerSkins.TV && playerTvRemote())) {
                     (6 * density).toInt()
                 } else {
                     (3 * density).toInt()
@@ -7066,7 +7251,8 @@ class PlayerActivity : ComponentActivity() {
         return "$name ($ordinal)"
     }
 
-    /** One server's row — the same capsule the flat picker used. */
+    /** One server's card — the reference Sources layout: provider line, title,
+     *  filename, fact chips and the size badge. */
     private fun serverOption(source: PlayerSource, index: Int): GlassOption = GlassOption(
         label = serverLabel(source),
         sub = when {
@@ -7105,6 +7291,8 @@ class PlayerActivity : ComponentActivity() {
         // what the user is choosing between, so the row's capsule fits TWO lines
         // of it instead of cutting the name off — the box grows with the name.
         labelMaxLines = 3,
+        topLabel = source.providerName.trim().ifBlank { null },
+        chips = ServerMeta.chipsOf(source.name, source.details, source.url),
     )
 
     /**

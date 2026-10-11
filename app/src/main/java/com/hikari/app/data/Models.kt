@@ -112,6 +112,9 @@ data class Cs3Repo(
     val name: String,
     val description: String = "",
     val kind: RepoKind = RepoKind.CS3,
+    /** The repo file's own `iconUrl` (CloudStream repo.json carries one — the
+     *  Phisher avatar and friends). Blank until a refresh reads it. */
+    val iconUrl: String = "",
 )
 
 /** A single installable plugin entry from a CloudStream repository. */

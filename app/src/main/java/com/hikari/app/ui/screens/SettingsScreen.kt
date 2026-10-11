@@ -3231,6 +3231,8 @@ private fun TvDetailStyleCard(app: HikariApp) {
     val scope = rememberCoroutineScope()
     val flow = remember { app.store.tvDetailBigFlow() }
     val on by flow.collectAsState(initial = com.hikari.app.tv.TvMode.current())
+    val blurFlow = remember { app.store.tvBlurDetailFlow() }
+    val blurOn by blurFlow.collectAsState(initial = false)
 
     SettingsSection(
         id = "tv.detailStyle",
@@ -3249,6 +3251,14 @@ private fun TvDetailStyleCard(app: HikariApp) {
                         app.store.setTvDetailBigChosen(true)
                     }
                 }
+            },
+        )
+        SettingsToggle(
+            label = tr("Blur-merge detail art"),
+            supporting = tr("Fit image on top, its blurred copy merging below — no cropped background"),
+            checked = blurOn,
+            onCheckedChange = { value ->
+                scope.launch { runCatching { app.store.setTvBlurDetail(value) } }
             },
         )
     }

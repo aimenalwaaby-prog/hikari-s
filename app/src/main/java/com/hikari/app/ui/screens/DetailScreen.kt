@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,6 +67,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material3.Button
@@ -1624,7 +1627,7 @@ private object AutoResumeGuard {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DetailScreen(
     nav: NavHostController,
@@ -1727,6 +1730,11 @@ fun DetailScreen(
     val isTvLayout = com.hikari.app.tv.TvMode.current()
     val tvDetailBigFlow = remember { detailApp.store.tvDetailBigFlow() }
     val tvDetailBig by tvDetailBigFlow.collectAsState(initial = isTvLayout)
+    // Blur-merge detail art (Settings → TV & Remote, off by default): the fit
+    // image on top, its blurred copy filling and merging below — no cropped
+    // full-bleed background.
+    val tvBlurFlow = remember { detailApp.store.tvBlurDetailFlow() }
+    val tvBlurDetail by tvBlurFlow.collectAsState(initial = false)
     val tvEpisodeSizeFlow = remember { detailApp.store.tvEpisodeSizeFlow() }
     val tvEpisodeSize by tvEpisodeSizeFlow.collectAsState(initial = 100)
     val tvEpisodeScale = (tvEpisodeSize / 100f).coerceIn(0.8f, 1.6f)
@@ -1807,9 +1815,19 @@ fun DetailScreen(
     // and writes back, so the choice sticks across titles.
     val episodeViewPrefFlow = remember { detailApp.store.episodeViewModeFlow() }
     val episodeViewPref by episodeViewPrefFlow.collectAsState(initial = -1)
+    // TV keeps its OWN layout (-1 = Auto = cinema grid): a List choice made on
+    // the phone (or in Settings) must never drag the television back to rows.
+    // The first cycle on TV writes the TV pref, so a later change sticks.
+    val tvEpPrefFlow = remember { detailApp.store.tvEpisodeViewModeFlow() }
+    val tvEpPref by tvEpPrefFlow.collectAsState(initial = -1)
     var episodeViewMode by rememberSaveable(isTvLayout) { mutableStateOf(if (isTvLayout) 1 else 0) }
-    LaunchedEffect(episodeViewPref, isTvLayout) {
-        val mapped = if (episodeViewPref < 0) (if (isTvLayout) 1 else 0) else episodeViewPref
+    LaunchedEffect(episodeViewPref, tvEpPref, isTvLayout) {
+        val mapped = if (isTvLayout) {
+            if (tvEpPref >= 0) tvEpPref
+            else if (episodeViewPref < 0) 1 else episodeViewPref
+        } else {
+            if (episodeViewPref < 0) 0 else episodeViewPref
+        }
         if (episodeViewMode != mapped) episodeViewMode = mapped
     }
     val episodePosterStyle = episodeViewMode != 0
@@ -1822,7 +1840,12 @@ fun DetailScreen(
     fun cycleEpisodeView() {
         val next = (episodeViewMode + 1) % 3
         episodeViewMode = next
-        scope.launch { runCatching { detailApp.store.setEpisodeViewMode(next) } }
+        scope.launch {
+            runCatching {
+                if (isTvLayout) detailApp.store.setTvEpisodeViewMode(next)
+                else detailApp.store.setEpisodeViewMode(next)
+            }
+        }
     }
 
     // Related/Similar cells. Tapping a cell opens the title directly instead of
@@ -3555,7 +3578,11 @@ fun DetailScreen(
                                 onClick = { openDlChoice() }
                             )
                         ) {
-                            Icon(painter = painterResource(R.drawable.ic_download), contentDescription = tr("Download"))
+                            // Material glyph, not the drawable: the drawable's
+                            // own white fill ignored the button's content color
+                            // and vanished on some TV themes (the "button with
+                            // no icon" report).
+                            Icon(Icons.Filled.Download, contentDescription = tr("Download"))
                         }
                         // Save, mirroring the phone row's library toggle below:
                         // the reference TV layout puts Play + Save side by
@@ -3924,13 +3951,15 @@ fun DetailScreen(
                     // sit below the hero in the scroll.
                     val tvCert = extras?.details?.certification?.trim()?.takeIf { it.isNotEmpty() }
                     if (showDetailRating && (ratings.isNotEmpty() || !tvCert.isNullOrBlank())) {
-                        Row(
+                        // Wraps instead of scrolling: every badge stays on
+                        // screen with no horizontal swipe (the cut-off "P…"
+                        // badge report).
+                        FlowRow(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(top = 8.dp)
-                                .horizontalScroll(rememberScrollState()),
+                                .padding(top = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             ratings.forEach { r -> RatingBadge(r) { ratingInfo = r } }
                             if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
@@ -3940,9 +3969,21 @@ fun DetailScreen(
                             com.hikari.app.tv.TvCertChip(tvCert)
                         }
                     }
-                    if (!displayOverview.isNullOrBlank()) Text(displayOverview, style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.84f), maxLines = if (episodePosterStyle) 4 else 2, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                    if (!displayOverview.isNullOrBlank()) {
+                        // Full text on tap: collapsed two lines by default, the
+                        // whole overview when opened — never a horizontal
+                        // scroll to read the end (same report as the badges).
+                        var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
+                        Text(
+                            displayOverview!! + if (!tvOverviewFull && displayOverview.length > 140) "  [more]" else "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.84f),
+                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else if (episodePosterStyle) 4 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                .clickable { tvOverviewFull = !tvOverviewFull },
+                        )
+                    }
                 }
             }
         } else {
@@ -4006,19 +4047,39 @@ fun DetailScreen(
     Box(Modifier.fillMaxSize()) {
         if (isTvLayout) {
             Box(Modifier.fillMaxSize()) {
-                // tvHeroImage.second is true only for genuinely wide art: a
-                // portrait poster gets the cinematic blurred-fill treatment
-                // instead of a letterboxed strip with black bars down both
-                // sides (the reported TV detail header).
-                HeroArtwork(
-                    model = tvHeroImage.first,
-                    wide = tvHeroImage.second,
-                    modifier = Modifier.fillMaxSize(),
-                    // A poster-only title has no wide art: the zoomed fill
-                    // copy is anchored to the TOP so the title art and faces
-                    // stay in frame instead of a forehead/hair strip.
-                    fillAlignment = Alignment.TopCenter,
-                )
+                if (tvBlurDetail) {
+                    // Blur-merge art (opt-in): the blurred copy fills the frame
+                    // and the fit image sits on top of it, merging downward —
+                    // no cropped full-bleed background image.
+                    AsyncImage(
+                        model = tvHeroImage.first,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().blur(28.dp),
+                    )
+                    AsyncImage(
+                        model = tvHeroImage.first,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxWidth()
+                            .fillMaxHeight(0.62f)
+                            .align(Alignment.TopCenter),
+                    )
+                } else {
+                    // tvHeroImage.second is true only for genuinely wide art: a
+                    // portrait poster gets the cinematic blurred-fill treatment
+                    // instead of a letterboxed strip with black bars down both
+                    // sides (the reported TV detail header).
+                    HeroArtwork(
+                        model = tvHeroImage.first,
+                        wide = tvHeroImage.second,
+                        modifier = Modifier.fillMaxSize(),
+                        // A poster-only title has no wide art: the zoomed fill
+                        // copy is anchored to the TOP so the title art and faces
+                        // stay in frame instead of a forehead/hair strip.
+                        fillAlignment = Alignment.TopCenter,
+                    )
+                }
                 Box(
                     Modifier.fillMaxSize().background(
                         Brush.verticalGradient(

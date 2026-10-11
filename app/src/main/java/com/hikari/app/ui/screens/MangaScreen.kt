@@ -88,6 +88,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The Manga tab.
@@ -176,10 +177,16 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
         // Every engine at once — each one is a separate site and they answer in
         // parallel; the app's own gate keeps a big install from flooding the
         // network (see ProviderGate). One engine throwing must not empty the
-        // whole result list, so each call is caught on its own.
+        // whole result list, so each call is caught on its own. Each call is
+        // also bounded: one hung site used to hold the whole await forever, so
+        // a genre tap sat on "Asking your engines…" and never showed anything.
         val found = coroutineScope {
             targets.map { p ->
-                async { runCatching { p.search(typed, 1) }.getOrDefault(emptyList()) }
+                async {
+                    withTimeoutOrNull(25_000L) {
+                        runCatching { p.search(typed, 1) }.getOrDefault(emptyList())
+                    } ?: emptyList()
+                }
             }.awaitAll().flatten()
         }
         results = found.distinctBy { it.uniqueId }
