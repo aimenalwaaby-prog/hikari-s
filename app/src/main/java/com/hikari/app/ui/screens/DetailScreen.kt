@@ -6397,26 +6397,22 @@ private fun TvCompanyRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         companies.distinctBy { (if (it.isNetwork) "n" else "c") + "|" + it.id }.forEach { c ->
+            // Logo only, no name text: the tile already falls back to the
+            // company's initials when no logo art exists, so the row never
+            // shows an empty box — and never a redundant wordmark beside one.
             Row(
                 Modifier
                     .clip(RoundedCornerShape(50))
                     .background(Color.White.copy(alpha = 0.12f))
                     .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(50))
                     .clickable { onClick(c) }
-                    .padding(start = 5.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+                    .padding(start = 5.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CompanyLogoTile(
                     logoUrl = c.logoUrl,
                     name = c.name,
                     modifier = Modifier.height(26.dp).aspectRatio(2.4f),
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    c.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White,
-                    maxLines = 1,
                 )
             }
         }

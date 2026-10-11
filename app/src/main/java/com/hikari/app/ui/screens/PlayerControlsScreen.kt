@@ -103,6 +103,9 @@ fun PlayerControlsPage(app: HikariApp, onBack: () -> Unit) {
     val slideSeekOn by slideSeekFlow.collectAsState(initial = true)
     val pinchZoomFlow = remember { app.store.playerPinchZoomFlow() }
     val pinchZoomOn by pinchZoomFlow.collectAsState(initial = false)
+    // Video decoder choice (AppStore.playerDecoderModeFlow, Best by default).
+    val decoderModeFlow = remember { app.store.playerDecoderModeFlow() }
+    val decoderMode by decoderModeFlow.collectAsState(initial = "auto")
 
     LaunchedEffect(json) { layout = PlayerControlsConfig.decode(json) }
 
@@ -283,6 +286,49 @@ fun PlayerControlsPage(app: HikariApp, onBack: () -> Unit) {
                                 }
                             },
                         )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Column {
+                        Text(
+                            tr("Video decoder"),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        if (!LocalHideHelp.current) {
+                        Text(
+                            tr("Best uses hardware first and fixes itself when the picture stutters. Hardware only forbids software decoding; Software only prefers it. If a forced choice lags, the player offers to shift back to Best."),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        for (mode in listOf("auto", "hw", "sw")) {
+                            val label = when (mode) {
+                                "hw" -> tr("Hardware only")
+                                "sw" -> tr("Software only")
+                                else -> tr("Best (auto)")
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        scope.launch {
+                                            runCatching { app.store.setPlayerDecoderMode(mode) }
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
+                            ) {
+                                Text(
+                                    if (decoderMode == mode) "✓ " else "○ ",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                            }
+                        }
                     }
                 }
             }

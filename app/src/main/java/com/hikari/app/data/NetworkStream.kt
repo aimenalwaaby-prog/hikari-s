@@ -573,7 +573,10 @@ private class BReader(val b: ByteArray) {
      *     are the share page's own signature (Baidu-family request signing —
      *     a list call without them is refused with errno 105, which is the
      *     whole failure class; public shares carry no `sekey` at all, so the
-     *     old "missing sekey" theory of 105 was wrong).
+     *     old "missing sekey" theory of 105 was wrong). The call also carries
+     *     the share's own `shareid`+`uk` from the metadata answer — the web
+     *     client's own identifiers — because some mirrors refuse a call the
+     *     short key alone names.
      *
      * Everything is asked of the link's OWN host: the box service lives on a
      * dozen mirror domains (terabox.com, 1024tera.com, 4funbox.com, telebox.link
@@ -625,19 +628,21 @@ private class BReader(val b: ByteArray) {
         val tokensErrno = runCatching { JSONObject(tokens).optInt("errno", -1) }.getOrDefault(-1)
         var sekey = boxSekeyOf(tokens)
         var sig = boxSignOf(shareHtml)
+        var ids = boxShareIdsOf(tokens)
         Logs.log(
             "NetStream",
             "terabox: shorturlinfo errno=$tokensErrno token=" +
                 (if (token.isNotBlank()) "yes" else "none") +
                 " sekey=" + (if (!sekey.isNullOrBlank()) "yes" else "none") +
-                " sign=" + (if (sig != null) "yes" else "none"),
+                " sign=" + (if (sig != null) "yes" else "none") +
+                " ids=" + (if (ids != null) "yes" else "none"),
         )
         if (boxShareLocked(tokens)) {
             Logs.log("NetStream", "terabox: share needs a password/extraction code for $origin")
             return emptyList()
         }
 
-        var list = boxList(origin, key, token, jar, sekey, sig, pageUrl = url)
+        var list = boxList(origin, key, token, jar, sekey, sig, ids, pageUrl = url)
         if (list == null) {
             // A fresh page read (new cookies + token) is what a "verify" answer
             // asks for; one retry is enough for a challenge that is really just
@@ -661,9 +666,10 @@ private class BReader(val b: ByteArray) {
                 runCatching { JSONObject(retryTokens).optInt("errno", -1) }.getOrDefault(-1) == 0
             ) {
                 sekey = boxSekeyOf(retryTokens) ?: sekey
+                ids = boxShareIdsOf(retryTokens) ?: ids
             }
             sig = boxSignOf(retryHome) ?: sig
-            list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey, sig, pageUrl = url)
+            list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey, sig, ids, pageUrl = url)
         }
         val entries = list ?: return emptyList()
         // The share's metadata call is not needed for the dlinks, but it is what
@@ -692,13 +698,43 @@ private class BReader(val b: ByteArray) {
     /** The share's `sekey` inside a shorturlinfo answer — the list call's
      *  password for THAT share. Top level first, then the first
      *  `shorturlinfo` entry, then a `data` object; null when absent. */
-    private fun boxSekeyOf(tokens: String): String? {
-        val root = runCatching { JSONObject(tokens) }.getOrNull() ?: return null
+    private fun boxSekeyOf(tokens: String): String? {        val root = runCatching { JSONObject(tokens) }.getOrNull() ?: return null
         root.optString("sekey").takeIf { it.isNotBlank() }?.let { return it }
         root.optJSONArray("shorturlinfo")?.optJSONObject(0)
             ?.optString("sekey")?.takeIf { it.isNotBlank() }?.let { return it }
         root.optJSONObject("data")?.optString("sekey")
             ?.takeIf { it.isNotBlank() }?.let { return it }
+        return null
+    }
+
+    /**
+     * The share's own ids inside a shorturlinfo answer — what the service's
+     * own web client sends on the list call (`shareid` + `uk`), instead of
+     * the short key. Read defensively (top level, first `shorturlinfo`
+     * entry, `data` object; `uk` or `share_uk`, `shareid` or `share_id`):
+     * mirrors that refuse an unsigned call with errno 105 get the exact
+     * credential shape the web client uses. Null when the metadata carries
+     * neither (the short key stays the only identifier, as before).
+     */
+    private fun boxShareIdsOf(tokens: String): Pair<String, String>? {
+        val root = runCatching { JSONObject(tokens) }.getOrNull() ?: return null
+        val candidates = listOfNotNull(
+            root,
+            root.optJSONArray("shorturlinfo")?.optJSONObject(0),
+            root.optJSONObject("data"),
+        )
+        for (o in candidates) {
+            val shareid = o.optString("shareid").takeIf { it.isNotBlank() }
+                ?: o.opt("shareid")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+                ?: o.optString("share_id").takeIf { it.isNotBlank() }
+                ?: continue
+            val uk = o.optString("uk").takeIf { it.isNotBlank() }
+                ?: o.opt("uk")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+                ?: o.optString("share_uk").takeIf { it.isNotBlank() }
+                ?: o.opt("share_uk")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+                ?: continue
+            return shareid to uk
+        }
         return null
     }
 
@@ -752,9 +788,10 @@ private class BReader(val b: ByteArray) {
         jar: MutableList<String>,
         sekey: String?,
         sig: Pair<String, Long>?,
+        ids: Pair<String, String>?,
         pageUrl: String,
     ): List<JSONObject>? {
-        val root = boxListPage(origin, key, jsToken, jar, sekey, sig, pageUrl, dir = null) ?: return null
+        val root = boxListPage(origin, key, jsToken, jar, sekey, sig, ids, pageUrl, dir = null) ?: return null
         val out = ArrayList<JSONObject>(root)
         // A share of a season is a folder of episodes: one level down, and at
         // most a few folders, keeps a huge share from turning into a hundred
@@ -766,7 +803,7 @@ private class BReader(val b: ByteArray) {
             val dir = e.optString("path").trim()
             if (dir.isBlank()) continue
             folders++
-            out += boxListPage(origin, key, jsToken, jar, sekey, sig, pageUrl, dir = dir).orEmpty()
+            out += boxListPage(origin, key, jsToken, jar, sekey, sig, ids, pageUrl, dir = dir).orEmpty()
         }
         return out
     }
@@ -778,6 +815,7 @@ private class BReader(val b: ByteArray) {
         jar: MutableList<String>,
         sekey: String?,
         sig: Pair<String, Long>?,
+        ids: Pair<String, String>?,
         pageUrl: String,
         dir: String?,
     ): List<JSONObject>? {
@@ -791,6 +829,11 @@ private class BReader(val b: ByteArray) {
             // The page's own signature — the web client's calls always carry
             // it, and the endpoint refuses unsigned calls with errno 105.
             if (sig != null) append("&sign=").append(sig.first).append("&timestamp=").append(sig.second)
+            // The web client's own identifiers for the share (from the
+            // shorturlinfo answer): some mirrors refuse the call when only
+            // the short key names it. The short key stays too — mirrors that
+            // adapted their backend around it keep working.
+            if (ids != null) append("&shareid=").append(ids.first).append("&uk=").append(ids.second)
             append("&shorturl=").append(key)
             append("&by=name&order=asc&num=20000&page=1")
             if (dir.isNullOrBlank()) {

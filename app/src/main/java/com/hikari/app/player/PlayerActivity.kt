@@ -332,6 +332,20 @@ class PlayerActivity : ComponentActivity() {
     private var hwOnlyAttemptUrl: String? = null
 
     /**
+     * The user's decoder choice ("auto" = Best, "hw" = hardware only, "sw" =
+     * software first — see AppStore.DecoderModes). Best by default; Settings
+     * and the gear menu below both write it, and the player build below reads
+     * it, so a forced choice is honored from the first frame.
+     */
+    private var decoderMode: String = "auto"
+
+    /** The shift-to-Best prompt was already answered for the current source. */
+    private var decoderShiftPromptShown: Boolean = false
+
+    /** True while the current build must forbid software decoders outright. */
+    private fun decoderForbidsSoftware(): Boolean = decoderMode == "hw" || hwOnlyDecode
+
+    /**
      * Sustained frame loss that triggers the software-decode escape: 240
      * dropped frames is ~8–10s of visible stutter. The unknown-decoder bar is
      * higher (the FFmpeg extension does not always report a name): only sheer
@@ -362,6 +376,12 @@ class PlayerActivity : ComponentActivity() {
      * When hardware genuinely cannot do the codec, the rebuild errors exactly
      * like any failed server and the normal failover walks on to the next one
      * — never a black screen that sits there.
+     *
+     * With an explicit decoder choice (hardware/software only) there is no
+     * silent escape — overriding the user's pick behind their back is what the
+     * setting exists to prevent. Instead sustained stutter earns ONE prompt
+     * per server offering the shift back to Best (see
+     * [maybePromptDecoderShift]): Shift rebuilds on Best, No keeps the pick.
      */
     private fun maybeEscapeSoftwareDecode() {
         if (hwOnlyDecode) return
@@ -372,8 +392,14 @@ class PlayerActivity : ComponentActivity() {
         val software = isSoftwareDecoderName(name)
         val limit = if (software) SOFT_DECODE_DROP_LIMIT
         else if (name == null) UNKNOWN_DECODER_DROP_LIMIT
+        else if (decoderMode == "hw") SOFT_DECODE_DROP_LIMIT
         else return
         if (dropCount < limit) return
+        if (decoderMode != "auto") {
+            maybePromptDecoderShift(name, software)
+            return
+        }
+        if (!software && name != null) return
         val src = sources.getOrNull(currentIndex) ?: return
         // Torrents resolve through their own engine — a direct rebuild would
         // hand ExoPlayer a magnet it cannot play.
@@ -416,6 +442,106 @@ class PlayerActivity : ComponentActivity() {
         } finally {
             silentEffectsRebuild = false
         }
+    }
+
+    /**
+     * One prompt per server when an EXPLICIT decoder choice stutters: "this
+     * is lagging on <decoder> — shift to Best?" Shift writes Best and
+     * rebuilds on it (re-arming the automatic escape for the new mode); No
+     * keeps the user's pick and never asks again for this server. Runs on the
+     * UI thread — the drop watcher fires off it.
+     */
+    private fun maybePromptDecoderShift(decoderName: String?, software: Boolean) {
+        if (decoderShiftPromptShown) return
+        if (isFinishing || isDestroyed) return
+        decoderShiftPromptShown = true
+        val drops = dropCount
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            val modeLabel = com.hikari.app.data.AppStore.DecoderModes.label(decoderMode)
+            val decoderLabel = decoderName ?: I18n.t("unknown decoder")
+            showGlassMenu(
+                I18n.t("Video is lagging"),
+                listOf(
+                    GlassOption(
+                        I18n.t("Shift to Best (auto)"),
+                        I18n.t("Fix the stutter"),
+                        iconRes = R.drawable.ic_settings, marker = RowMarker.ICON,
+                    ),
+                    GlassOption(
+                        I18n.t("Keep ") + modeLabel,
+                        I18n.t("Stay on my choice"),
+                        iconRes = R.drawable.ic_settings, marker = RowMarker.ICON,
+                    ),
+                ),
+                message = I18n.t("Falling behind") + " ($drops " +
+                    I18n.t("dropped frames") + ") " + I18n.t("on") + " " +
+                    decoderLabel + " " + I18n.t("with") + " " + modeLabel + ".",
+                iconRes = R.drawable.ic_settings,
+            ) { which ->
+                if (which == 0) {
+                    decoderMode = "auto"
+                    hwOnlyDecode = false
+                    hwOnlyAttemptUrl = null
+                    lifecycleScope.launch {
+                        runCatching {
+                            (applicationContext as HikariApp).store.setPlayerDecoderMode("auto")
+                        }
+                    }
+                    com.hikari.app.data.Logs.log(
+                        "Player",
+                        "decoder stutter accepted ($drops dropped on $decoderLabel) — shifted to Best (auto)",
+                    )
+                    silentDecoderRebuild()
+                } else {
+                    com.hikari.app.data.Logs.log(
+                        "Player",
+                        "decoder stutter kept ($drops dropped on $decoderLabel) — staying on $modeLabel per user",
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Silent player rebuild that honors the CURRENT [decoderMode] (same
+     * source, position kept, no cover) — what a gear-menu decoder change and
+     * the shift-to-Best prompt both use. Unlike [rebuildPlayerHwOnly] it does
+     * not force hardware-only: the build below reads the mode itself.
+     */
+    private fun silentDecoderRebuild() {
+        val p = player ?: return
+        if (currentIndex !in sources.indices) return
+        val position = p.currentPosition
+        if (position > 2_000L) {
+            startPositionMs = position
+            seekPending = true
+        }
+        silentEffectsRebuild = true
+        try {
+            playDirectInner(currentIndex)
+        } finally {
+            silentEffectsRebuild = false
+        }
+    }
+
+    /** Applies a gear-menu decoder pick now (silent rebuild) and remembers it. */
+    private fun applyDecoderMode(mode: String) {
+        val clean = com.hikari.app.data.AppStore.DecoderModes.normalize(mode)
+        decoderMode = clean
+        if (clean == "sw") {
+            // An explicit software pick must never be silently overridden by
+            // a stale hardware-only escape armed earlier this session.
+            hwOnlyDecode = false
+        }
+        decoderShiftPromptShown = false
+        lifecycleScope.launch {
+            runCatching {
+                (applicationContext as HikariApp).store.setPlayerDecoderMode(clean)
+            }
+        }
+        com.hikari.app.data.Logs.log("Player", "decoder mode → $clean (silent rebuild)")
+        silentDecoderRebuild()
     }
 
 
@@ -1752,6 +1878,16 @@ class PlayerActivity : ComponentActivity() {
                             iconRes = R.drawable.ic_codec, marker = RowMarker.ICON,
                             selected = codecOverlay != null,
                         ),
+                        // Which decoders may do the work (same choice as
+                        // Settings → Player → Player controls). Best is
+                        // hardware-first with a self-fix; the forced modes
+                        // apply from the next rebuild and prompt on stutter.
+                        GlassOption(
+                            I18n.t("Decoder"),
+                            com.hikari.app.data.AppStore.DecoderModes.label(decoderMode),
+                            iconRes = R.drawable.ic_codec, marker = RowMarker.ICON,
+                            chevron = true,
+                        ),
                     ) + if (externalPlayerRow) {
                         // Hand-off to VLC & co: the last row, so the existing
                         // rows keep their indices whether it shows or not.
@@ -1804,7 +1940,8 @@ class PlayerActivity : ComponentActivity() {
                             openOptions()
                         }
                         7 -> showCodecOverlay()
-                        8 -> openExternalPlayer()
+                        8 -> showDecoderDialog { openOptions() }
+                        9 -> openExternalPlayer()
                     }
                 }
             }
@@ -1968,6 +2105,15 @@ class PlayerActivity : ComponentActivity() {
             pinchZoomEnabled = runCatching {
                 (applicationContext as HikariApp).store.playerPinchZoom()
             }.getOrDefault(false)
+        }
+        // Video decoder choice (Settings → Player → Player controls, and the
+        // gear menu below). Best (auto) until the answer lands.
+        lifecycleScope.launch {
+            decoderMode = runCatching {
+                com.hikari.app.data.AppStore.DecoderModes.normalize(
+                    (applicationContext as HikariApp).store.playerDecoderMode()
+                )
+            }.getOrDefault("auto")
         }
         // The volume booster (Settings → Player). Read like the preferences
         // above; if the player already exists by the time the answer lands, the
@@ -2427,7 +2573,26 @@ class PlayerActivity : ComponentActivity() {
                 }
                 val waitTimeout = if (awaitLive) launch {
                     delay(LIVE_WAIT_TIMEOUT_MS)
-                    if (sources.isEmpty()) {
+                    if (sources.isEmpty() && !liveSearchDone) {
+                        // The old behaviour failed here at 30s even when the
+                        // title's own extension had not answered yet — the
+                        // "it found 248 servers 22 seconds after the failure"
+                        // class. A verdict is only real once the origin has
+                        // settled (or the search itself says it is done, which
+                        // fails fast through its own paths below): until then
+                        // keep waiting, with one bounded extension, and say so
+                        // on the cover instead of failing.
+                        if (!originSettled) {
+                            StreamsLive.setStatus(liveId, "Still searching for servers…")
+                            com.hikari.app.data.Logs.log(
+                                "Player",
+                                "no server yet after ${LIVE_WAIT_TIMEOUT_MS / 1000}s but the origin " +
+                                    "has not answered — waiting on (cap ${(LIVE_WAIT_TIMEOUT_MS + LIVE_WAIT_EXTENSION_MS) / 1000}s)",
+                            )
+                            delay(LIVE_WAIT_EXTENSION_MS)
+                        }
+                    }
+                    if (sources.isEmpty() && !liveSearchDone) {
                         // Give up on the search: close a still-empty chooser
                         // first so the error isn't buried behind it.
                         runCatching { serverChooserDialog?.dismiss() }
@@ -2625,8 +2790,11 @@ class PlayerActivity : ComponentActivity() {
                     // that signal ever goes missing (its search coroutine is
                     // cancelled — the exact case that used to leave this cover
                     // spinning for the full safety timeout), the text alone is
-                    // enough to fail here in the same second, WITH the reason.
-                    if (awaitLive && !liveSearchDone && sources.isEmpty() &&
+                    // enough to fail here in the same second, WITH the reason —
+                    // but only once the origin itself has settled. A sweep
+                    // verdict written while the title's own extension is still
+                    // working is not an answer (see the wait extension above).
+                    if (awaitLive && !liveSearchDone && originSettled && sources.isEmpty() &&
                         s != null && isNoResultVerdict(s)
                     ) {
                         liveSearchDone = true
@@ -2891,6 +3059,38 @@ class PlayerActivity : ComponentActivity() {
                     (applicationContext as HikariApp).store.setPlayerHoldSpeed(holdFastSpeed)
                 }
             }
+            onDone?.invoke()
+        }
+    }
+
+    /**
+     * Gear-menu decoder pick (same three choices as Settings → Player →
+     * Player controls). Applies at once with a silent rebuild at the same
+     * position — a decoder change needs a new renderers factory, which only
+     * exists at player build time.
+     */
+    private fun showDecoderDialog(onDone: (() -> Unit)? = null) {
+        val modes = listOf("auto", "hw", "sw")
+        val options = modes.map { mode ->
+            GlassOption(
+                label = com.hikari.app.data.AppStore.DecoderModes.label(mode),
+                sub = when (mode) {
+                    "hw" -> I18n.t("Never decode on CPU")
+                    "sw" -> I18n.t("Prefer CPU decoding")
+                    else -> I18n.t("Hardware first, fixes itself on stutter")
+                },
+                iconRes = R.drawable.ic_codec,
+                marker = RowMarker.ICON,
+                selected = decoderMode == mode,
+            )
+        }
+        showGlassMenu(
+            I18n.t("Decoder"),
+            options,
+            hint = I18n.t("Applies at once. A forced choice that stutters offers to shift back to Best."),
+            iconRes = R.drawable.ic_codec,
+        ) { which ->
+            applyDecoderMode(modes.getOrNull(which) ?: "auto")
             onDone?.invoke()
         }
     }
@@ -10512,6 +10712,10 @@ class PlayerActivity : ComponentActivity() {
         noVideoPolls = 0
         // A new source restarts the drop tally (see [dropWatcher]).
         dropCount = 0
+        // ...and earns its own shift-to-Best prompt booking (see
+        // [maybePromptDecoderShift]): a No on the last server must not mute
+        // the next one.
+        decoderShiftPromptShown = false
         // ...and its decoder is unknown until the new renderer reports it, and
         // a different URL earns a fresh software-decode escape attempt (see
         // [maybeEscapeSoftwareDecode]) — the same URL keeps the armed flag so
@@ -10634,10 +10838,13 @@ class PlayerActivity : ComponentActivity() {
                 // forbidden outright, so the same rendition decodes on hardware
                 // instead of stuttering on CPU.
                 BoostRenderersFactory(this, boostProcessor)
-                    .setEnableDecoderFallback(!hwOnlyDecode)
+                    .setEnableDecoderFallback(!decoderForbidsSoftware())
                     .setExtensionRendererMode(
-                        if (hwOnlyDecode) DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
-                        else DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON,
+                        when {
+                            decoderForbidsSoftware() -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+                            decoderMode == "sw" -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                            else -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                        },
                     )
             )
             .setMediaSourceFactory(mediaSourceFactory)
@@ -14469,6 +14676,15 @@ class PlayerActivity : ComponentActivity() {
          *  normally signals completion ([StreamsLive.markDone]) long before
          *  this; the timeout only covers the search never reporting back. */
         private const val LIVE_WAIT_TIMEOUT_MS = 30_000L
+
+        /**
+         * One bounded wait extension past [LIVE_WAIT_TIMEOUT_MS] when the
+         * title's own extension has still not answered (see the timeout
+         * above): 150s total covers a full slow-origin budget with margin,
+         * while a settled origin or a finished search still fails fast
+         * through their own paths.
+         */
+        private const val LIVE_WAIT_EXTENSION_MS = 120_000L
 
         /**
          * How long a server may SIT on the list with playback not committed

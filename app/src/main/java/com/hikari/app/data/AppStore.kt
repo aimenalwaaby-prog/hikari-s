@@ -368,6 +368,8 @@ class AppStore(private val ctx: Context) {
          *  a pinch scales the picture 1x–4x about its center; the zoom resets
          *  whenever the server changes. */
         val PLAYER_PINCH_ZOOM = booleanPreferencesKey("playerPinchZoom")
+
+        val PLAYER_DECODER_MODE = stringPreferencesKey("playerDecoderMode")
         /** Speed used while the viewer keeps a finger down on the video. */
         val PLAYER_HOLD_SPEED = intPreferencesKey("playerHoldSpeed")
         /** Show player pills as icons without their text labels. */
@@ -3460,6 +3462,37 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun setPlayerPinchZoom(on: Boolean) {
         write("PLAYER_PINCH_ZOOM") { it[K.PLAYER_PINCH_ZOOM] = on }
+    }
+
+    /**
+     * Which decoders the player may use: "auto" (Best — hardware first with
+     * software fallback, plus the automatic software-escape), "hw"
+     * (hardware only) or "sw" (software first). "auto" by default; the
+     * player reads it when it opens, Settings and the player's own options
+     * menu both write it.
+     */
+    fun playerDecoderModeFlow(): Flow<String> =
+        store.data.map { DecoderModes.normalize(it[K.PLAYER_DECODER_MODE]) }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun playerDecoderMode(): String = playerDecoderModeFlow().first()
+
+    suspend fun setPlayerDecoderMode(mode: String) {
+        val clean = DecoderModes.normalize(mode)
+        write("PLAYER_DECODER_MODE") { it[K.PLAYER_DECODER_MODE] = clean }
+    }
+
+    object DecoderModes {
+        /** The only decoder modes the player understands; anything else is Best. */
+        fun normalize(mode: String?): String = when (mode) {
+            "hw", "sw" -> mode
+            else -> "auto"
+        }
+
+        fun label(mode: String): String = when (normalize(mode)) {
+            "hw" -> "Hardware only"
+            "sw" -> "Software only"
+            else -> "Best (auto)"
+        }
     }
 
     /** Playback speed used by the press-and-hold fast-play gesture (2.00x–4.00x). */
