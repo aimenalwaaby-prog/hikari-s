@@ -200,8 +200,10 @@ object TvUi {
     const val MAX_OVERSCAN_DP = 96
 
     /** The navigation rail's width, which is also the left inset every page
-     *  keeps clear of it (see [com.hikari.app.ui.navigation.AppRoot]). */
-    val RAIL_WIDTH = 96.dp
+     *  keeps clear of it (see [com.hikari.app.ui.navigation.AppRoot]). Slim
+     *  like the reference client's icon rail — the focused tab still expands
+     *  into its labelled pill over the content. */
+    val RAIL_WIDTH = 84.dp
 
     /** One tab's touch/D-pad target on the rail. */
     val RAIL_ITEM_WIDTH = 96.dp

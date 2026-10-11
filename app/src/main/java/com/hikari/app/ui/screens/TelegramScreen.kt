@@ -1570,6 +1570,9 @@ private fun TelegramChatVideos(
     // for, which is what disables the button — this is the cursor TDLib's own
     // answer handed back, not a guess at the last row on screen.
     var cursor by remember(chatId) { mutableStateOf(0L) }
+    // The channel totals ("216 photos · 3783 videos"), read once beside the
+    // first page — two limit-1 index reads, no messages fetched.
+    var counts by remember(chatId) { mutableStateOf<Pair<Int?, Int?>?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(chatId) {
@@ -1578,6 +1581,7 @@ private fun TelegramChatVideos(
         cursor = page.nextCursor
         reachedEnd = !page.more
         videos = page.videos
+        counts = withContext(Dispatchers.IO) { runCatching { Td.chatMediaCounts(chatId) }.getOrNull() }
     }
 
     /**
@@ -1663,9 +1667,19 @@ private fun TelegramChatVideos(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    tr("Telegram"),
+                    // The official clients print the channel totals over the
+                    // media ("216 photos · 3783 videos") — these are the same
+                    // server-side totals, not the size of the loaded page.
+                    counts?.let { (photos, vide) ->
+                        listOfNotNull(
+                            photos?.let { "$it " + tr("photos") },
+                            vide?.let { "$it " + tr("videos") },
+                        ).joinToString(" · ").takeIf { it.isNotBlank() }
+                    } ?: tr("Telegram"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             IconButton(onClick = {
@@ -2425,6 +2439,8 @@ private fun TelegramChannelVideos(
     // The account path, when there is one.
     var tdVideos by remember(channel) { mutableStateOf<List<Td.ChatVideo>?>(null) }
     var tdChatId by remember(channel) { mutableStateOf<Long?>(null) }
+    // Server-side totals for the account path ("216 photos · 3783 videos").
+    var counts by remember(channel) { mutableStateOf<Pair<Int?, Int?>?>(null) }
     var tdMore by remember(channel) { mutableStateOf(false) }
     var tdCursor by remember(channel) { mutableStateOf(0L) }
     val scope = rememberCoroutineScope()
@@ -2492,6 +2508,9 @@ private fun TelegramChannelVideos(
             }
             if (chat != null) {
                 tdChatId = chat.first
+                counts = withContext(Dispatchers.IO) {
+                    runCatching { Td.chatMediaCounts(chat.first) }.getOrNull()
+                }
                 val walk = withContext(Dispatchers.IO) {
                     walkChatVideos(chat.first, 0L, TD_FIRST_WALK, TD_PAGE)
                 }
@@ -2556,9 +2575,18 @@ private fun TelegramChannelVideos(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    channel,
+                    counts?.let { (photos, vide) ->
+                        listOfNotNull(
+                            photos?.let { "$it " + tr("photos") },
+                            vide?.let { "$it " + tr("videos") },
+                        ).joinToString(" · ").takeIf { it.isNotBlank() }
+                    } ?: tdVideos?.let { (it.size.toString() + " " + tr("videos")) }
+                    ?: videos?.let { (it.size.toString() + " " + tr("videos")) }
+                    ?: channel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

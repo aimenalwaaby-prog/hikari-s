@@ -95,11 +95,14 @@ fun PlayerControlsPage(app: HikariApp, onBack: () -> Unit) {
     val listState = rememberLazyListState()
 
     // Brightness/volume swipes (AppStore.playerSwipesFlow, ON by default),
-    // plus slide-to-seek (AppStore.playerSlideSeekFlow, ON by default).
+    // plus slide-to-seek (AppStore.playerSlideSeekFlow, ON by default),
+    // plus pinch-to-zoom (AppStore.playerPinchZoomFlow, OFF by default).
     val swipesFlow = remember { app.store.playerSwipesFlow() }
     val swipesOn by swipesFlow.collectAsState(initial = true)
     val slideSeekFlow = remember { app.store.playerSlideSeekFlow() }
     val slideSeekOn by slideSeekFlow.collectAsState(initial = true)
+    val pinchZoomFlow = remember { app.store.playerPinchZoomFlow() }
+    val pinchZoomOn by pinchZoomFlow.collectAsState(initial = false)
 
     LaunchedEffect(json) { layout = PlayerControlsConfig.decode(json) }
 
@@ -246,6 +249,37 @@ fun PlayerControlsPage(app: HikariApp, onBack: () -> Unit) {
                             modifier = Modifier.tvToggle(slideSeekOn) { on ->
                                 scope.launch {
                                     runCatching { app.store.setPlayerSlideSeek(on) }
+                                }
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                tr("Pinch to zoom"),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            if (!LocalHideHelp.current) {
+                            Text(
+                                tr("Pinch with two fingers on the video to zoom the picture, up to 4x. Off means pinches do nothing. The zoom resets when the server changes."),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Switch(
+                            checked = pinchZoomOn,
+                            onCheckedChange = { on ->
+                                scope.launch {
+                                    runCatching { app.store.setPlayerPinchZoom(on) }
+                                }
+                            },
+                            // See [Modifier.tvToggle].
+                            modifier = Modifier.tvToggle(pinchZoomOn) { on ->
+                                scope.launch {
+                                    runCatching { app.store.setPlayerPinchZoom(on) }
                                 }
                             },
                         )

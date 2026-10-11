@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -94,6 +95,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -1787,6 +1789,14 @@ fun DetailScreen(
      * beside the episode count, and remembered across a rotation.
      */
     var epsNewestFirst by rememberSaveable { mutableStateOf(false) }
+    /**
+     * Anti-spoiler for the episode lists, the reference TV client's toggle:
+     * while on, episodes with no finished watch entry draw a blurred thumb
+     * and "Hidden to avoid spoilers" instead of their overview. Finished
+     * episodes (the Continue Watching shelf's own finished condition) always
+     * show — the point is hiding what has not been seen, never what has.
+     */
+    var antiSpoiler by rememberSaveable { mutableStateOf(false) }
     // Episode presentation can be switched without leaving the detail page.
     // List mode keeps the compact existing rows; poster mode uses the episode
     // artwork like the TV reference layout.
@@ -3269,6 +3279,13 @@ fun DetailScreen(
     val markLater = watchLaterCat != null && savedCategories.contains(watchLaterCat.id)
     val markAnything = markWatched || markWatching || markLater
 
+    /** Whether an episode counts as seen for the anti-spoiler toggle — the
+     *  same finished condition the Continue Watching shelf uses. */
+    fun isEpSeen(ep: Episode): Boolean =
+        historyForTitle.firstOrNull { it.episodeId == ep.id }?.let {
+            it.durationMs > 0L && it.positionMs >= it.durationMs - 10_000L
+        } == true
+
     /** Records one mark as a history entry. `position`/`duration` are what the
      *  shelf reads, so "watched" is written as a FINISHED entry (the title's own
      *  runtime when TMDB knows it, otherwise an equal pair that simply reads as
@@ -3489,6 +3506,12 @@ fun DetailScreen(
                     ) {
                         Button(
                             onClick = { tryPlay(detailBtnEp) },
+                            // The reference look: a solid white pill with a
+                            // dark label, readable from the sofa at a glance.
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black,
+                            ),
                             modifier = Modifier
                                 .focusRequester(playFocus)
                                 .tvPress(
@@ -3659,6 +3682,41 @@ fun DetailScreen(
                                     )
                                 }
                             }
+                            // Season actions, the reference TV client's header:
+                            // "Mark Season Watched" (the mark sheet's all-episodes
+                            // entry) and the Anti-spoiler toggle beside it.
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (detailIsSeries) {
+                                    TextButton(
+                                        onClick = { markSheet = true },
+                                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp),
+                                        modifier = Modifier.tvPress(previewPass = true, onClick = { markSheet = true })
+                                    ) {
+                                        Text(
+                                            if (markAllWatched) tr("Season watched ✓") else tr("Mark Season Watched"),
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                                TextButton(
+                                    onClick = { antiSpoiler = !antiSpoiler },
+                                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp),
+                                    modifier = Modifier.tvPress(previewPass = true, onClick = { antiSpoiler = !antiSpoiler })
+                                ) {
+                                    Text(
+                                        (if (antiSpoiler) "✓ " else "") + tr("Anti-spoiler"),
+                                        color = if (antiSpoiler) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.9f),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
                             Row(
                                 Modifier.fillMaxWidth().padding(bottom = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -3746,6 +3804,7 @@ fun DetailScreen(
                                             modifier = Modifier.width((150f * tvEpisodeScale).dp),
                                             sizeScale = tvEpisodeScale,
                                             glass = episodeGlass,
+                                            hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                         )
                                     }
                                 }
@@ -3769,6 +3828,7 @@ fun DetailScreen(
                                             modifier = Modifier.width((300f * tvEpisodeScale).dp),
                                             sizeScale = tvEpisodeScale,
                                             glass = episodeGlass,
+                                            hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                         )
                                     }
                                 }
@@ -3781,6 +3841,7 @@ fun DetailScreen(
                                         onDownload = { tryDownload(ep) },
                                         sizeScale = tvEpisodeScale,
                                         glass = episodeGlass,
+                                        hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                     )
                                 }
                             }
@@ -4156,6 +4217,7 @@ fun DetailScreen(
                                                 onDownload = { tryDownload(ep) },
                                                 modifier = Modifier.width((160f * tvEpisodeScale).dp),
                                                 sizeScale = tvEpisodeScale,
+                                                hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                             )
                                         }
                                     }
@@ -4470,7 +4532,7 @@ fun DetailScreen(
                     item {
                         DetailsBlock(
                             d = det,
-                            ratings = if (showDetailRating && !isTvLayout) ratings else emptyList(),
+                            ratings = if (showDetailRating) ratings else emptyList(),
                             // Even with the strip hidden the block's own rows
                             // (year, certification, director) still render, so
                             // the callback stays wired for when it comes back.
@@ -4481,8 +4543,10 @@ fun DetailScreen(
                 // Production companies / networks — one tap opens everything
                 // that studio or network made (a TMDB entity grid; see the
                 // TmdbSourceType.COMPANY/NETWORK queries). It sits ABOVE the cast
-                // row, the order the reference client uses.
-                if (!isTvLayout) extras?.companies?.takeIf { it.isNotEmpty() }?.let { companies ->
+                // row, the order the reference client uses. Television gets it
+                // too — the reference TV layout's studio plates live on this
+                // page, and the row is skipped when the lookup found nothing.
+                extras?.companies?.takeIf { it.isNotEmpty() }?.let { companies ->
                     item {
                         ProductionRow(companies) { c ->
                             val spec = TmdbSpec(
@@ -4777,6 +4841,7 @@ fun DetailScreen(
                                             .padding(horizontal = 16.dp, vertical = 6.dp),
                                         sizeScale = tvEpisodeScale,
                                         glass = episodeGlass,
+                                        hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                     )
                                 }
                             }
@@ -4798,6 +4863,7 @@ fun DetailScreen(
                                                 modifier = Modifier.weight(1f),
                                                 sizeScale = tvEpisodeScale,
                                                 glass = episodeGlass,
+                                                hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                             )
                                         }
                                         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -4814,6 +4880,7 @@ fun DetailScreen(
                                         onDownload = { tryDownload(ep) },
                                         sizeScale = tvEpisodeScale,
                                         glass = episodeGlass,
+                                        hideSpoilers = antiSpoiler && !isEpSeen(ep),
                                     )
                                 }
                             }
@@ -7481,6 +7548,8 @@ private fun EpisodePosterCard(
     sizeScale: Float = 1f,
     /** Frosted-glass card variant (Settings → App Layout → Episode UI). */
     glass: Boolean = false,
+    /** Anti-spoiler: blur the still and mask the title/overview. */
+    hideSpoilers: Boolean = false,
 ) {
     val s = sizeScale.coerceIn(0.8f, 1.6f)
     val tokens = rememberGlassTokens()
@@ -7511,7 +7580,8 @@ private fun EpisodePosterCard(
                 AsyncImage(
                     model = thumb,
                     contentDescription = tr("Episode %s").replace("%s", ep.number.toString()),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize()
+                        .then(if (hideSpoilers) Modifier.blur(16.dp) else Modifier),
                     contentScale = ContentScale.Crop
                 )
             }
@@ -7575,7 +7645,8 @@ private fun EpisodePosterCard(
             }
         }
         Text(
-            ep.name?.ifBlank { tr("Episode %s").replace("%s", ep.number.toString()) }
+            if (hideSpoilers) tr("Episode %s").replace("%s", ep.number.toString())
+            else ep.name?.ifBlank { tr("Episode %s").replace("%s", ep.number.toString()) }
                 ?: tr("Episode %s").replace("%s", ep.number.toString()),
             style = MaterialTheme.typography.labelMedium.copy(
                 fontSize = (MaterialTheme.typography.labelMedium.fontSize.value * s).sp
@@ -7588,9 +7659,9 @@ private fun EpisodePosterCard(
         // episode told the user nothing about itself. Gated by the same
         // Settings → TV switch as the list rows.
         val showDescription = HikariApp.instance.store.episodeDescriptionFlow().collectAsState(initial = true).value
-        if (showDescription && !ep.overview.isNullOrBlank()) {
+        if (showDescription && (!ep.overview.isNullOrBlank() || hideSpoilers)) {
             Text(
-                ep.overview!!.trim(),
+                if (hideSpoilers) tr("Hidden to avoid spoilers") else ep.overview!!.trim(),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = (MaterialTheme.typography.labelSmall.fontSize.value * s).sp
                 ),
@@ -7658,6 +7729,8 @@ private fun EpisodeBigCard(
     sizeScale: Float = 1f,
     /** Frosted-glass card variant (Settings → App Layout → Episode UI). */
     glass: Boolean = false,
+    /** Anti-spoiler: blur the still and mask the title/overview. */
+    hideSpoilers: Boolean = false,
 ) {
     val s = sizeScale.coerceIn(0.8f, 1.6f)
     val unaired = isEpisodeUnaired(ep.released)
@@ -7689,7 +7762,8 @@ private fun EpisodeBigCard(
                 AsyncImage(
                     model = thumb,
                     contentDescription = tr("Episode %s").replace("%s", ep.number.toString()),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize()
+                        .then(if (hideSpoilers) Modifier.blur(20.dp) else Modifier),
                     contentScale = ContentScale.Crop
                 )
             }
@@ -7760,7 +7834,8 @@ private fun EpisodeBigCard(
             }
         }
         Text(
-            ep.name?.ifBlank { tr("Episode %s").replace("%s", ep.number.toString()) }
+            if (hideSpoilers) tr("Episode %s").replace("%s", ep.number.toString())
+            else ep.name?.ifBlank { tr("Episode %s").replace("%s", ep.number.toString()) }
                 ?: tr("Episode %s").replace("%s", ep.number.toString()),
             style = MaterialTheme.typography.titleSmall.copy(
                 fontSize = (MaterialTheme.typography.titleSmall.fontSize.value * s).sp
@@ -7770,9 +7845,9 @@ private fun EpisodeBigCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = (4f * s).dp, top = (8f * s).dp, end = (4f * s).dp)
         )
-        if (!ep.overview.isNullOrBlank()) {
+        if (!ep.overview.isNullOrBlank() || hideSpoilers) {
             Text(
-                ep.overview!!.trim(),
+                if (hideSpoilers) tr("Hidden to avoid spoilers") else ep.overview!!.trim(),
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = (MaterialTheme.typography.bodySmall.fontSize.value * s).sp
                 ),
@@ -7834,6 +7909,8 @@ private fun EpisodeRow(
     /** Frosted-glass card variant (Settings → App Layout → Episode UI): the
      *  CloudStream-style rounded translucent card instead of the flat row. */
     glass: Boolean = false,
+    /** Anti-spoiler: blur the thumb and mask the title/overview. */
+    hideSpoilers: Boolean = false,
 ) {
     val s = sizeScale.coerceIn(0.8f, 1.6f)
     val tokens = rememberGlassTokens()
@@ -7862,7 +7939,8 @@ private fun EpisodeRow(
                 contentDescription = null,
                 modifier = Modifier
                     .size((56f * s).dp)
-                    .clip(RoundedCornerShape(8.dp)),
+                    .clip(RoundedCornerShape(8.dp))
+                    .then(if (hideSpoilers) Modifier.blur(10.dp) else Modifier),
                 contentScale = ContentScale.Crop
             )
         } else {
@@ -7884,7 +7962,8 @@ private fun EpisodeRow(
         Column(Modifier.weight(1f)) {
             Text(
                 ep.number.toString() + ". " + (
-                    ep.name?.ifBlank { tr("Episode %s").replace("%s", ep.number.toString()) }
+                    if (hideSpoilers) tr("Episode %s").replace("%s", ep.number.toString())
+                    else ep.name?.ifBlank { tr("Episode %s").replace("%s", ep.number.toString()) }
                         ?: tr("Episode %s").replace("%s", ep.number.toString())
                     ),
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -7932,9 +8011,9 @@ private fun EpisodeRow(
                 )
             }
             val showDescription = HikariApp.instance.store.episodeDescriptionFlow().collectAsState(initial = true).value
-            if (showDescription && !ep.overview.isNullOrBlank()) {
+            if (showDescription && (!ep.overview.isNullOrBlank() || hideSpoilers)) {
                 Text(
-                    ep.overview!!.trim(),
+                    if (hideSpoilers) tr("Hidden to avoid spoilers") else ep.overview!!.trim(),
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = (MaterialTheme.typography.bodySmall.fontSize.value * s).sp
                     ),

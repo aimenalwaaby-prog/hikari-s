@@ -33,6 +33,7 @@ import android.text.TextUtils
 import android.util.Rational
 import android.util.TypedValue
 import android.view.GestureDetector
+import android.view.ScaleGestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -1313,6 +1314,42 @@ class PlayerActivity : ComponentActivity() {
         }).apply { setIsLongpressEnabled(false) }
     }
 
+    /**
+     * Two-finger pinch-to-zoom (Settings → Player → Player controls →
+     * Gestures, OFF until switched on). Scales the video surface 1x–4x about
+     * its center — the surface only, never the controls — and resets on every
+     * server change (see [playSource]).
+     */
+    private var pinchZoomEnabled = false
+    private var videoZoom = 1f
+    private val pinchDetector: ScaleGestureDetector by lazy {
+        ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                if (!pinchZoomEnabled || controlsLocked) return false
+                videoZoom = (videoZoom * detector.scaleFactor).coerceIn(1f, 4f)
+                applyVideoZoom()
+                // A pinch is not a tap: the lift must not toggle the controls.
+                suppressNextTap = true
+                return true
+            }
+        })
+    }
+
+    private fun applyVideoZoom() {
+        val frame = exoView("exo_content_frame") ?: return
+        frame.pivotX = frame.width / 2f
+        frame.pivotY = frame.height / 2f
+        frame.scaleX = videoZoom
+        frame.scaleY = videoZoom
+    }
+
+    private fun resetVideoZoom() {
+        videoZoom = 1f
+        runCatching {
+            exoView("exo_content_frame")?.let { it.scaleX = 1f; it.scaleY = 1f }
+        }
+    }
+
     private var seekFeedback: View? = null
     private var seekIcon: TextView? = null
     private var seekText: TextView? = null
@@ -1887,6 +1924,13 @@ class PlayerActivity : ComponentActivity() {
                 (applicationContext as HikariApp).store.playerSlideSeek()
             }.getOrDefault(true)
         }
+        // Pinch-to-zoom on the video surface. Its own switch, OFF until the
+        // answer lands — see [playerPinchZoomFlow].
+        lifecycleScope.launch {
+            pinchZoomEnabled = runCatching {
+                (applicationContext as HikariApp).store.playerPinchZoom()
+            }.getOrDefault(false)
+        }
         // The volume booster (Settings → Player). Read like the preferences
         // above; if the player already exists by the time the answer lands, the
         // gain goes on immediately, otherwise the player is built with it.
@@ -1964,6 +2008,7 @@ class PlayerActivity : ComponentActivity() {
             // toggle never fires). Touches on the controller's own buttons /
             // seekbar go to those children first and never reach us.
             gestureDetector.onTouchEvent(event)
+            pinchDetector.onTouchEvent(event)
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     holdingFast = false
@@ -9840,6 +9885,8 @@ class PlayerActivity : ComponentActivity() {
         // A new video server ends any cross-server audio pairing: the sound
         // belonged to the previous picture (see [startDualAudio]).
         stopDualAudio()
+        // ...and resets the pinch zoom: the new picture starts unzoomed.
+        resetVideoZoom()
         // ...and abandons a torrent resolve for the previous server with it.
         torrentJob?.cancel()
         torrentJob = null

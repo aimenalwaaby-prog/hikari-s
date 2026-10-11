@@ -567,10 +567,13 @@ private class BReader(val b: ByteArray) {
      *  1. the host's home page, for `jsToken` (an anti-bot token the API refuses
      *     requests without) and for the cookies it sets;
      *  2. `/api/shorturlinfo?shorturl=<key>&root=1` — the share's metadata,
-     *     including its `sekey`;
-     *  3. `/share/list?…&shorturl=<key>&root=1&sekey=<sekey>` — its entries,
-     *     `dlink` per file (a list call without the share's own `sekey` is
-     *     refused with errno 105 — that refusal is the whole failure class).
+     *     including its `sekey` for password-gated shares;
+     *  3. `/share/list?…&shorturl=<key>&root=1&sekey=<sekey>&sign=<sign>&
+     *     timestamp=<ts>` — its entries, `dlink` per file. `sign`+`timestamp`
+     *     are the share page's own signature (Baidu-family request signing —
+     *     a list call without them is refused with errno 105, which is the
+     *     whole failure class; public shares carry no `sekey` at all, so the
+     *     old "missing sekey" theory of 105 was wrong).
      *
      * Everything is asked of the link's OWN host: the box service lives on a
      * dozen mirror domains (terabox.com, 1024tera.com, 4funbox.com, telebox.link
@@ -621,18 +624,20 @@ private class BReader(val b: ByteArray) {
         }
         val tokensErrno = runCatching { JSONObject(tokens).optInt("errno", -1) }.getOrDefault(-1)
         var sekey = boxSekeyOf(tokens)
+        var sig = boxSignOf(shareHtml)
         Logs.log(
             "NetStream",
             "terabox: shorturlinfo errno=$tokensErrno token=" +
                 (if (token.isNotBlank()) "yes" else "none") +
-                " sekey=" + (if (!sekey.isNullOrBlank()) "yes" else "none"),
+                " sekey=" + (if (!sekey.isNullOrBlank()) "yes" else "none") +
+                " sign=" + (if (sig != null) "yes" else "none"),
         )
         if (boxShareLocked(tokens)) {
             Logs.log("NetStream", "terabox: share needs a password/extraction code for $origin")
             return emptyList()
         }
 
-        var list = boxList(origin, key, token, jar, sekey, pageUrl = url)
+        var list = boxList(origin, key, token, jar, sekey, sig, pageUrl = url)
         if (list == null) {
             // A fresh page read (new cookies + token) is what a "verify" answer
             // asks for; one retry is enough for a challenge that is really just
@@ -657,7 +662,8 @@ private class BReader(val b: ByteArray) {
             ) {
                 sekey = boxSekeyOf(retryTokens) ?: sekey
             }
-            list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey, pageUrl = url)
+            sig = boxSignOf(retryHome) ?: sig
+            list = boxList(origin, key, jsTokenOf(retryHome), retryJar, sekey, sig, pageUrl = url)
         }
         val entries = list ?: return emptyList()
         // The share's metadata call is not needed for the dlinks, but it is what
@@ -692,6 +698,23 @@ private class BReader(val b: ByteArray) {
         return null
     }
 
+    /** The share page's own `sign`+`timestamp` (Baidu-family request signing —
+     *  the list call's real credential; see the [terabox] flow). Read from the
+     *  page's embedded data (`"sign":"…"`, `"timestamp":…` — the `yunData`
+     *  fields the web client's own calls carry). Null when the page is
+     *  bot-walled or carries neither, in which case the list call goes out
+     *  unsigned exactly as before. */
+    private fun boxSignOf(html: String?): Pair<String, Long>? {
+        if (html.isNullOrBlank()) return null
+        val sign = Regex(""""sign"\s*:\s*"([0-9a-fA-F]{20,})"""").find(html)?.groupValues?.get(1)
+            ?: Regex("""[?&]sign=([0-9a-fA-F]{20,})""").find(html)?.groupValues?.get(1)
+            ?: return null
+        val ts = Regex(""""timestamp"\s*:\s*(\d{10})""").find(html)?.groupValues?.get(1)?.toLongOrNull()
+            ?: Regex("""[?&]timestamp=(\d{10})""").find(html)?.groupValues?.get(1)?.toLongOrNull()
+            ?: return null
+        return sign to ts
+    }
+
     /** True when the share's own metadata says it needs a password or
      *  extraction code (narrow on purpose — unknown shapes stay resolvable). */
     private fun boxShareLocked(tokens: String): Boolean {
@@ -718,9 +741,10 @@ private class BReader(val b: ByteArray) {
         jsToken: String,
         jar: MutableList<String>,
         sekey: String?,
+        sig: Pair<String, Long>?,
         pageUrl: String,
     ): List<JSONObject>? {
-        val root = boxListPage(origin, key, jsToken, jar, sekey, pageUrl, dir = null) ?: return null
+        val root = boxListPage(origin, key, jsToken, jar, sekey, sig, pageUrl, dir = null) ?: return null
         val out = ArrayList<JSONObject>(root)
         // A share of a season is a folder of episodes: one level down, and at
         // most a few folders, keeps a huge share from turning into a hundred
@@ -732,7 +756,7 @@ private class BReader(val b: ByteArray) {
             val dir = e.optString("path").trim()
             if (dir.isBlank()) continue
             folders++
-            out += boxListPage(origin, key, jsToken, jar, sekey, pageUrl, dir = dir).orEmpty()
+            out += boxListPage(origin, key, jsToken, jar, sekey, sig, pageUrl, dir = dir).orEmpty()
         }
         return out
     }
@@ -743,6 +767,7 @@ private class BReader(val b: ByteArray) {
         jsToken: String,
         jar: MutableList<String>,
         sekey: String?,
+        sig: Pair<String, Long>?,
         pageUrl: String,
         dir: String?,
     ): List<JSONObject>? {
@@ -750,6 +775,9 @@ private class BReader(val b: ByteArray) {
             append("$origin/share/list?$BOX_APP_QUERY")
             if (jsToken.isNotBlank()) append("&jsToken=").append(jsToken)
             if (!sekey.isNullOrBlank()) append("&sekey=").append(URLEncoder.encode(sekey, "UTF-8"))
+            // The page's own signature — the web client's calls always carry
+            // it, and the endpoint refuses unsigned calls with errno 105.
+            if (sig != null) append("&sign=").append(sig.first).append("&timestamp=").append(sig.second)
             append("&shorturl=").append(key)
             append("&by=name&order=asc&num=20000&page=1")
             if (dir.isNullOrBlank()) {

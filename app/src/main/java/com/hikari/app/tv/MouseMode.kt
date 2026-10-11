@@ -45,6 +45,27 @@ object MouseMode {
     yFrac = (yFrac + dy).coerceIn(0.05f, 0.95f)
   }
 
+  /**
+   * Presses whatever is under the cursor: a synthetic DOWN+UP at the cursor's
+   * position, dispatched to the view, the same technique WebViewActivity's own
+   * cursor uses. This is what makes OK in mouse mode click the circled target
+   * instead of whatever the (invisible, unmoved) focus happens to sit on.
+   */
+  fun clickAt(view: android.view.View) {
+    val w = view.width
+    val h = view.height
+    if (w <= 0 || h <= 0) return
+    val x = (xFrac * w).coerceIn(0f, w.toFloat())
+    val y = (yFrac * h).coerceIn(0f, h.toFloat())
+    val now = android.os.SystemClock.uptimeMillis()
+    val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
+    val up = android.view.MotionEvent.obtain(now, now + 80, android.view.MotionEvent.ACTION_UP, x, y, 0)
+    runCatching { view.dispatchTouchEvent(down) }
+    runCatching { view.dispatchTouchEvent(up) }
+    down.recycle()
+    up.recycle()
+  }
+
   const val STEP = 0.035f
 }
 

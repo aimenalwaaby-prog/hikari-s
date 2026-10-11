@@ -1176,6 +1176,31 @@ object Td {
         chatVideosPage(chatId, before, limit).videos
 
     /**
+     * Total photos + videos in a chat — the "216 photos · 3783 videos" line
+     * the official clients print over a channel's media. Two limit-1 index
+     * reads (the server answers the total without sending messages), so this
+     * costs nothing beside the calls themselves. Nulls when TDLib refuses.
+     */
+    suspend fun chatMediaCounts(chatId: Long): Pair<Int?, Int?> {
+        fun total(filter: TdApi.SearchMessagesFilter): Int? {
+            val found = query(
+                TdApi.SearchChatMessages(
+                    chatId,
+                    null,
+                    "",
+                    null,
+                    0,
+                    0,
+                    1,
+                    filter,
+                ),
+            ) as? TdApi.FoundChatMessages
+            return found?.totalCount
+        }
+        return total(TdApi.SearchMessagesFilterPhoto()) to total(TdApi.SearchMessagesFilterVideo())
+    }
+
+    /**
      * The video a Telegram message LINK points at, resolved through the
      * signed-in account.
      *

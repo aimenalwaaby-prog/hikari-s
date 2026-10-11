@@ -62,8 +62,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -440,8 +439,20 @@ object Routes {
     /** Navigate the bottom bar reliably. A real back-stack pop is tried first,
      *  so tapping a tab from a scoped/query route always lands on that tab
      *  (the save/restore-tab navigate used to silently no-op after arrival at
-     *  the scoped search destination). Falls back to a normal tab switch. */
+     *  the scoped search destination). Falls back to a normal tab switch.
+     *
+     *  Rapid duplicates are dropped: a held or double-tapped OK used to fire a
+     *  tab switch twice (open a repo, then the same press's echo lands on the
+     *  rail's Home and the user is bounced straight back), and a second switch
+     *  within half a second of the first is never intentional — a deliberate
+     *  re-tap simply waits out the window. */
+    private var lastTabNavAt = 0L
+    private var lastTabNavRoute: String? = null
     fun navigateTab(nav: NavHostController, route: String) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (route == lastTabNavRoute && now - lastTabNavAt < 500L) return
+        lastTabNavRoute = route
+        lastTabNavAt = now
         val popped = runCatching {
             nav.popBackStack(route, /* inclusive = */ false, /* saveState = */ true)
         }.getOrDefault(false)
@@ -1054,21 +1065,53 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
     // and the arrows sat dead. The root Box is every key's ancestor, so its
     // preview sees the D-pad first. KeyDown only — holds repeat as KeyDown on
     // these boxes and answering KeyUp too double-stepped the cursor.
-    val mouseFocus = LocalFocusManager.current
+    //
+    // Mouse mode OWNS the arrows while it is on: they move ONLY the cursor,
+    // never the focus (moving both was the reported "mouse button does nothing
+    // — the dpad still works normally": every press walked the focus while the
+    // circle drifted somewhere else, and OK activated the focused row, not the
+    // cursor). OK synthesizes a real tap at the cursor position, the way
+    // WebViewActivity's own cursor does, so whatever is under the circle is
+    // what gets pressed.
+    val mouseView = LocalView.current
     val mouseDrive = Modifier.onPreviewKeyEvent { event ->
         if (!com.hikari.app.tv.MouseMode.enabled) return@onPreviewKeyEvent false
         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
         val step = com.hikari.app.tv.MouseMode.STEP
         when (event.key) {
-            Key.DirectionUp -> { com.hikari.app.tv.MouseMode.move(0f, -step); mouseFocus.moveFocus(FocusDirection.Up); true }
-            Key.DirectionDown -> { com.hikari.app.tv.MouseMode.move(0f, step); mouseFocus.moveFocus(FocusDirection.Down); true }
-            Key.DirectionLeft -> { com.hikari.app.tv.MouseMode.move(-step, 0f); mouseFocus.moveFocus(FocusDirection.Left); true }
-            Key.DirectionRight -> { com.hikari.app.tv.MouseMode.move(step, 0f); mouseFocus.moveFocus(FocusDirection.Right); true }
+            Key.DirectionUp -> { com.hikari.app.tv.MouseMode.move(0f, -step); true }
+            Key.DirectionDown -> { com.hikari.app.tv.MouseMode.move(0f, step); true }
+            Key.DirectionLeft -> { com.hikari.app.tv.MouseMode.move(-step, 0f); true }
+            Key.DirectionRight -> { com.hikari.app.tv.MouseMode.move(step, 0f); true }
+            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                if (event.nativeKeyEvent.repeatCount != 0) return@onPreviewKeyEvent true
+                com.hikari.app.tv.MouseMode.clickAt(mouseView)
+                true
+            }
             else -> false
         }
     }
 
-    Box(Modifier.fillMaxSize().nestedScroll(barScroll).padding(tvEdge).then(mouseDrive)) {
+    // Held-OK auto-repeat guard, television only: a held select key re-fires
+    // Down, and every per-control handler in the app (tvPress, tvToggle, the
+    // hero stepper) already swallows repeats — but a PLAIN clickable does not,
+    // so after any navigation the repeats landed on whatever the new screen
+    // had focused (its back button, the Home rail) and one tap walked the user
+    // two screens deep ("repo opens then I am back on Home"). Consuming repeats
+    // here, root-first, fixes the whole class in one place, remotes and
+    // keyboards alike. Mouse mode never reaches this (mouseDrive above owns
+    // the keys first while it is on).
+    val tvRepeatGuard = Modifier.onPreviewKeyEvent { event ->
+        if (!TvMode.isTv) return@onPreviewKeyEvent false
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        if (event.nativeKeyEvent.repeatCount == 0) return@onPreviewKeyEvent false
+        when (event.key) {
+            Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> true
+            else -> false
+        }
+    }
+
+    Box(Modifier.fillMaxSize().nestedScroll(barScroll).padding(tvEdge).then(mouseDrive).then(tvRepeatGuard)) {
         // The page backdrop, drawn here rather than by the Scaffold so the
         // translucent cards have something to be glass OVER (the Scaffold below
         // is transparent for exactly that reason).

@@ -363,6 +363,11 @@ class AppStore(private val ctx: Context) {
          *  a sideways drag does nothing — the surface only plays — while the
          *  up/down brightness & volume swipes keep their own switch. */
         val PLAYER_SLIDE_SEEK = booleanPreferencesKey("playerSlideSeek")
+        /** Two-finger pinch-to-zoom on the player's video surface (OFF by
+         *  default; Settings → Player → Player controls → Gestures). On means
+         *  a pinch scales the picture 1x–4x about its center; the zoom resets
+         *  whenever the server changes. */
+        val PLAYER_PINCH_ZOOM = booleanPreferencesKey("playerPinchZoom")
         /** Speed used while the viewer keeps a finger down on the video. */
         val PLAYER_HOLD_SPEED = intPreferencesKey("playerHoldSpeed")
         /** Show player pills as icons without their text labels. */
@@ -3440,6 +3445,21 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun setPlayerSlideSeek(on: Boolean) {
         write("PLAYER_SLIDE_SEEK") { it[K.PLAYER_SLIDE_SEEK] = on }
+    }
+
+    /**
+     * Whether a two-finger pinch on the video surface zooms the picture (see
+     * [PLAYER_PINCH_ZOOM]). OFF by default — opt-in in Settings → Player →
+     * Player controls → Gestures. The player reads it when it opens, like the
+     * rest of its own preferences.
+     */
+    fun playerPinchZoomFlow(): Flow<Boolean> =
+        store.data.map { it[K.PLAYER_PINCH_ZOOM] ?: false }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun playerPinchZoom(): Boolean = playerPinchZoomFlow().first()
+
+    suspend fun setPlayerPinchZoom(on: Boolean) {
+        write("PLAYER_PINCH_ZOOM") { it[K.PLAYER_PINCH_ZOOM] = on }
     }
 
     /** Playback speed used by the press-and-hold fast-play gesture (2.00x–4.00x). */

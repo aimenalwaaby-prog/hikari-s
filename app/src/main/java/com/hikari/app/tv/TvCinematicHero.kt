@@ -18,9 +18,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -69,7 +69,7 @@ import com.hikari.app.ui.components.PosterImage
 fun TvCinematicHero(
     items: List<MediaItem>,
     onOpen: (MediaItem) -> Unit,
-modifier: Modifier = Modifier,
+    modifier: Modifier = Modifier,
     scale: Float = 1f,
     /** Ids (see [MediaItem.uniqueId]) the user has bookmarked — the hero's
      *  bookmark button reads them. Null toggle hides the button. */
@@ -78,14 +78,18 @@ modifier: Modifier = Modifier,
 ) {
     if (items.isEmpty()) return
     var index by remember(items) { mutableIntStateOf(0) }
-val item = items[index.coerceIn(items.indices)]
+    val item = items[index.coerceIn(items.indices)]
     // The overview's [more] expansion resets per title, like the index does.
     var overviewExpanded by remember(item) { mutableStateOf(false) }
     val art = remember(item) { Artwork.heroModel(item) }
     val scheme = MaterialTheme.colorScheme
     val bg = scheme.background
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        val h = (((maxHeight * 0.52f).value * scale.coerceIn(0.5f, 1.5f)).coerceIn(160f, 720f)).dp
+        // A television banner, not a cinema screen: about a third of the
+        // viewport (capped well below fullscreen) so shelves stay visible
+        // under it, the way the reference client's home looks. The user's own
+        // hero-size setting still scales it from here.
+        val h = (((maxHeight * 0.36f).value * scale.coerceIn(0.5f, 1.5f)).coerceIn(140f, 460f)).dp
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -175,7 +179,7 @@ val item = items[index.coerceIn(items.indices)]
                     overflow = TextOverflow.Ellipsis,
                     lineHeight = 40.sp,
                 )
-if (item.overview?.isNotBlank() == true) {
+                if (item.overview?.isNotBlank() == true) {
                     Spacer(Modifier.height(6.dp))
                     Text(
                         item.overview,
@@ -197,11 +201,17 @@ if (item.overview?.isNotBlank() == true) {
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // The reference look: a solid white pill with a dark label,
+                    // not the theme accent — the hero's primary action reads at
+                    // a glance across the room.
                     Button(
                         onClick = { onOpen(item) },
                         colors = ButtonDefaults.buttonColors(
-containerColor = Color.White,
+                            containerColor = Color.White,
                             contentColor = Color.Black,
                         ),
                         shape = RoundedCornerShape(24.dp),
@@ -210,7 +220,7 @@ containerColor = Color.White,
                         Spacer(Modifier.width(6.dp))
                         Text(tr("Play"), fontWeight = FontWeight.Bold)
                     }
-if (onToggleBookmark != null) {
+                    if (onToggleBookmark != null) {
                         val saved = item.uniqueId in bookmarkedIds
                         OutlinedButton(
                             onClick = { onToggleBookmark(item) },

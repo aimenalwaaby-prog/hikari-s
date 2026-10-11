@@ -200,6 +200,12 @@ fun Modifier.tvPress(
         // first activation focused (see the KDoc above). Consumed, never fired.
         if (!tvEnabled) return false
         if (onHold == null) {
+            // A fast double-tap (or one press seen twice across a
+            // clickable+tvPress pair) fires only once: the second Down inside
+            // 350ms is consumed, never run.
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - state.lastTap < 350L) return true
+            state.lastTap = now
             onClick()
             return true
         }
@@ -261,6 +267,7 @@ private class HoldState {
     var down = false
     var held = false
     var job: kotlinx.coroutines.Job? = null
+    var lastTap = 0L
 }
 
 /**

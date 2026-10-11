@@ -2,6 +2,7 @@ package com.hikari.app.tv
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusRestorer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -198,7 +199,11 @@ fun TvNavRail(
                 state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    // The rail remembers its own tab: coming back from the
+                    // content re-lands on the tab the user left, instead of
+                    // resetting to the top (Home) every time.
+                    .focusRestorer(),
                 horizontalAlignment = Alignment.Start,
                 // Centred while the tabs fit (the padding takes the place of the
                 // arrangement, so an overflowing strip still starts at row 1);
