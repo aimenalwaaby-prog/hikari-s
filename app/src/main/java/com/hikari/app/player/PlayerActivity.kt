@@ -6684,7 +6684,7 @@ class PlayerActivity : ComponentActivity() {
             lastWinW = now.x
             lastWinH = now.y
             val w = if (tvSheet) {
-                (now.x * (if (fillFractionX > 0f) fillFractionX else if (sideTvPanel) 0.62f else 0.70f).coerceIn(0.50f, if (edgeToEdge) 1f else 0.94f)).toInt().coerceAtMost(now.x - 2 * halo - (if (edgeToEdge) 0 else (18 * density).toInt())
+                (now.x * (if (fillFractionX > 0f) fillFractionX else if (sideTvPanel) 0.62f else 0.70f).coerceIn(0.50f, if (edgeToEdge) 1f else 0.94f)).toInt().coerceAtMost(now.x - 2 * halo - (if (edgeToEdge) 0 else (18 * density).toInt()))
             } else {
                 panelWidthFor(now)
             }
