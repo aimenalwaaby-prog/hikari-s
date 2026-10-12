@@ -98,6 +98,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -2259,6 +2260,13 @@ fun DetailScreen(
         // provider search continues in parallel. The player already has failover,
         // so a stale remembered URL is simply skipped when it cannot prepare.
         app.appScope.launch {
+            // "This extension only" is a demand for a FRESH search of that
+            // extension: warming the new session with the last successful URL
+            // (saved by an earlier "My selected servers" play under the same
+            // key) made the player start on the old server instead of the
+            // extension's own results. Skip the warm start for a narrowed
+            // search; the unscoped path below keeps it.
+            if (narrowTo != null) return@launch
             runCatching {
                 val warmType = (vm.meta.value ?: m)?.type?.name ?: type.name
                 val warmKey = "${livePid}|$warmType|${mediaId}|${ep?.id.orEmpty()}"
@@ -4048,18 +4056,58 @@ fun DetailScreen(
         if (isTvLayout) {
             Box(Modifier.fillMaxSize()) {
                 if (tvBlurDetail) {
-                    // Full-bleed detail art (opt-in): the art fills the frame
-                    // edge to edge, portrait/square/wide alike, exactly like
-                    // the reference detail backdrop — no fit strip with
-                    // blurred bars down both sides. Top-anchored so faces and
-                    // title art stay in frame on tall art.
+                    // "Full bleed and blur detail" (opt-in), the reference
+                    // client's header: the blurred art sits under the WHOLE
+                    // page, and the sharp art lives ONLY in the header box
+                    // above the content. Scrolled-to sections (cast, details,
+                    // episodes) move over blur, never over a second sharp
+                    // copy of the image. Top-anchored so faces and title art
+                    // stay in frame on tall art.
                     AsyncImage(
                         model = tvHeroImage.first,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .blur(28.dp, BlurredEdgeTreatment.Unbounded),
                     )
+                    // Readability dim over the blur; the shared gradients
+                    // below add the cinematic falloff on top of this.
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Color.Black.copy(alpha = 0.45f)
+                        )
+                    )
+                    // Sharp art, confined to the header the hero measured
+                    // (headerPx): it melts into the blur through the bottom
+                    // fade instead of ending in a seam.
+                    val headerDp = with(density) { headerPx.toDp() }
+                    if (headerPx > 0) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(headerDp)
+                        ) {
+                            AsyncImage(
+                                model = tvHeroImage.first,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                alignment = Alignment.TopCenter,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            Box(
+                                Modifier.fillMaxSize().background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color.Transparent,
+                                            Color.Black.copy(alpha = 0.55f),
+                                        )
+                                    )
+                                )
+                            )
+                        }
+                    }
                 } else {
                     // tvHeroImage.second is true only for genuinely wide art: a
                     // portrait poster gets the cinematic blurred-fill treatment

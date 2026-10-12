@@ -66,10 +66,44 @@ object ProviderFlags {
         else -> null
     }
 
+    /** (match words, ISO code, language label), highest priority first. */
+    private val flagTable: List<Triple<List<String>, String, String>> = listOf(
+        Triple(listOf("hindi", "hindi-audio", "bollywood"), "IN", "Hindi"),
+        Triple(listOf("tamil"), "IN", "Tamil"),
+        Triple(listOf("telugu"), "IN", "Telugu"),
+        Triple(listOf("malayalam"), "IN", "Malayalam"),
+        Triple(listOf("kannada"), "IN", "Kannada"),
+        Triple(listOf("bengali"), "IN", "Bengali"),
+        Triple(listOf("marathi", "punjabi", "gujarati", "desi"), "IN", "Desi"),
+        Triple(listOf("english", "hollywood"), "GB", "English"),
+        Triple(listOf("spanish", "espanol", "español", "latino"), "ES", "Spanish"),
+        Triple(listOf("french", "francais", "français"), "FR", "French"),
+        Triple(listOf("german", "deutsch"), "DE", "German"),
+        Triple(listOf("italian"), "IT", "Italian"),
+        Triple(listOf("portuguese", "brasileiro"), "BR", "Portuguese"),
+        Triple(listOf("russian"), "RU", "Russian"),
+        Triple(listOf("turkish"), "TR", "Turkish"),
+        Triple(listOf("arabic"), "SA", "Arabic"),
+        Triple(listOf("japanese", "anime"), "JP", "Japanese"),
+        Triple(listOf("korean", "kdrama", "k-drama"), "KR", "Korean"),
+        Triple(listOf("chinese", "donghua", "cdrama", "c-drama"), "CN", "Chinese"),
+        Triple(listOf("indonesian", "indo"), "ID", "Indonesian"),
+        Triple(listOf("vietnamese"), "VN", "Vietnamese"),
+        Triple(listOf("thai"), "TH", "Thai"),
+    )
+
     /**
      * (ISO code, language label) for the given texts, or null when nothing
      * names a country. Bangladesh is checked before the Indian languages:
      * "Bangla" is Bangladesh's own word while "Bengali" alone stays Indian.
+     *
+     * Two passes: whole-word matches first ("Hindi" in "Hindi Audio"), then
+     * substring matches for longer tokens ("donghua" inside "DonghuaStream",
+     * "anime" inside "AllAnime" — the word-boundary pass misses names that
+     * glue the token to the rest). Short tokens stay word-only so "in" or
+     * "bd" can never match inside an unrelated word. Anything that names no
+     * country still gets NO flag — matched from real tokens only, never
+     * guessed.
      */
     fun pairOf(vararg texts: String?): Pair<String, String>? {
         val hay = texts.filterNotNull().joinToString(" ").lowercase()
@@ -84,31 +118,13 @@ object ProviderFlags {
         if (has(hay, "bangladesh", "bangla", "dhaka") ||
             Regex("""bd([^a-z]|$)""").containsMatchIn(hay)
         ) return "BD" to "Bangla"
-        return when {
-            has(hay, "hindi", "hindi-audio", "bollywood") -> "IN" to "Hindi"
-            has(hay, "tamil") -> "IN" to "Tamil"
-            has(hay, "telugu") -> "IN" to "Telugu"
-            has(hay, "malayalam") -> "IN" to "Malayalam"
-            has(hay, "kannada") -> "IN" to "Kannada"
-            has(hay, "bengali") -> "IN" to "Bengali"
-            has(hay, "marathi", "punjabi", "gujarati", "desi") -> "IN" to "Desi"
-            has(hay, "english", "hollywood") -> "GB" to "English"
-            has(hay, "spanish", "espanol", "español", "latino") -> "ES" to "Spanish"
-            has(hay, "french", "francais", "français") -> "FR" to "French"
-            has(hay, "german", "deutsch") -> "DE" to "German"
-            has(hay, "italian") -> "IT" to "Italian"
-            has(hay, "portuguese", "brasileiro") -> "BR" to "Portuguese"
-            has(hay, "russian") -> "RU" to "Russian"
-            has(hay, "turkish") -> "TR" to "Turkish"
-            has(hay, "arabic") -> "SA" to "Arabic"
-            has(hay, "japanese", "anime") -> "JP" to "Japanese"
-            has(hay, "korean", "kdrama", "k-drama") -> "KR" to "Korean"
-            has(hay, "chinese", "donghua", "cdrama", "c-drama") -> "CN" to "Chinese"
-            has(hay, "indonesian", "indo") -> "ID" to "Indonesian"
-            has(hay, "vietnamese") -> "VN" to "Vietnamese"
-            has(hay, "thai") -> "TH" to "Thai"
-            else -> null
+        for ((words, code, label) in flagTable) {
+            if (words.any { has(hay, it) }) return code to label
         }
+        for ((words, code, label) in flagTable) {
+            if (words.any { it.length >= 4 && it in hay }) return code to label
+        }
+        return null
     }
 
     /** ISO country code for the given texts, or null when none is named. */

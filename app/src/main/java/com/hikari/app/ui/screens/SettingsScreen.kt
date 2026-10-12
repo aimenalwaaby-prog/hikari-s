@@ -3254,8 +3254,8 @@ private fun TvDetailStyleCard(app: HikariApp) {
             },
         )
         SettingsToggle(
-            label = tr("Full-bleed detail art"),
-            supporting = tr("Art fills the full screen — no side bars on tall images"),
+            label = tr("Full bleed and blur detail"),
+            supporting = tr("Header art stays sharp like the reference client; everything scrolled to sits over its blurred background"),
             checked = blurOn,
             onCheckedChange = { value ->
                 scope.launch { runCatching { app.store.setTvBlurDetail(value) } }

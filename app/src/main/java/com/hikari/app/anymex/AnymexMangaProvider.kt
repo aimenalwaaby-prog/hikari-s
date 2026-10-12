@@ -317,14 +317,24 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             val mod = module() ?: return@withContext null
             val raw = AnymexRuntime.detail(mod, config.id, item.id) ?: return@withContext null
             val d = firstObject(raw) ?: return@withContext null
+            // Modules disagree on where the chapters live: most answer a
+            // top-level "chapters"/"episodes" array, but some nest it (per
+            // volume, under "list"/"data", or beside a "titles" array that
+            // only names the volumes). The recursive scan takes the first
+            // non-empty array whose items look like chapters (objects with a
+            // link) instead of reporting "no chapters" over an answer that
+            // has them. Bounded (depth + node cap) so a huge detail blob
+            // cannot hang the chapter load.
             val arr = d.optJSONArray("chapters") ?: d.optJSONArray("episodes")
+                ?: findChapterArray(d)
                 ?: return@withContext null
             val out = ArrayList<Episode>()
             for (i in 0 until minOf(arr.length(), MAX_CHAPTERS)) {
                 val o = arr.optJSONObject(i) ?: continue
                 val url = o.optString("url").ifBlank { o.optString("link") }.trim()
                 if (url.isBlank()) continue
-                val name = o.optString("name").trim().ifBlank { null }
+                val name = o.optString("name").ifBlank { o.optString("title") }
+                    .trim().ifBlank { null }
                 out += Episode(number = i + 1, id = url, name = name)
             }
             out
@@ -347,6 +357,49 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         )
         lastOutcome[config.id] = "✓ ${episodes.size} chapters"
         episodes
+    }
+
+    /**
+     * First non-empty array in [root] whose items look like chapters
+     * (objects carrying a url/link), at any nesting depth. Breadth-first so
+     * the shallowest candidate wins; bounded so a pathological blob cannot
+     * hang the load. Null when nothing chapter-shaped exists.
+     */
+    private fun findChapterArray(root: JSONObject): JSONArray? {
+        val queue = ArrayDeque<Pair<Any, Int>>()
+        queue += root to 0
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 400) {
+            val (node, depth) = queue.removeFirst()
+            seen++
+            if (node is JSONArray) {
+                if (node.length() > 0 && isChapterArray(node)) return node
+                if (depth < 3) {
+                    for (i in 0 until node.length()) {
+                        when (val e = node.opt(i)) {
+                            is JSONObject, is JSONArray -> queue += e to depth + 1
+                        }
+                    }
+                }
+            } else if (node is JSONObject && depth < 3) {
+                val keys = node.keys()
+                while (keys.hasNext()) {
+                    when (val v = node.opt(keys.next())) {
+                        is JSONObject, is JSONArray -> queue += v to depth + 1
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    /** True when [arr] holds at least one object with a chapter link. */
+    private fun isChapterArray(arr: JSONArray): Boolean {
+        for (i in 0 until minOf(arr.length(), 8)) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("url").isNotBlank() || o.optString("link").isNotBlank()) return true
+        }
+        return false
     }
 
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =

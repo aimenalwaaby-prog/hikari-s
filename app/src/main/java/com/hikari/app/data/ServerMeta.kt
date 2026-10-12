@@ -177,6 +177,16 @@ object ServerMeta {
         "HEVC" -> R.drawable.badge_hevc
         "BLU-RAY" -> R.drawable.badge_bluray
         "DTS" -> R.drawable.badge_dts
+        "DD+" -> R.drawable.badge_ddplus
+        "TRUEHD" -> R.drawable.badge_truehd
+        "1080P" -> R.drawable.badge_1080
+        "720P" -> R.drawable.badge_720
+        "480P" -> R.drawable.badge_480
+        "360P" -> R.drawable.badge_360
+        "HD" -> R.drawable.badge_hd
+        "HLS" -> R.drawable.badge_hls
+        "MP4" -> R.drawable.badge_mp4
+        "MKV" -> R.drawable.badge_mkv
         else -> 0
     }
 }

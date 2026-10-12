@@ -2245,10 +2245,14 @@ internal fun ProviderPickerSheet(
                                 working = if (ticked) working - ids.toSet()
                                 else (working + ids).distinct()
                             } else {
-                                // A plain pick still means the ONE source the row
-                                // stands for (the extension's first), exactly as
-                                // tapping that source's own row always did.
-                                onPick(key)
+                                // A cross-engine row's tap OPENS it: the row
+                                // stands for two extensions with one name, so
+                                // picking the first sight unseen would be a
+                                // guess. The expanded members name their
+                                // engine each, and picking one of those is
+                                // the actual choice.
+                                if (pack.cross && !open) expanded = expanded + key
+                                else onPick(key)
                             }
                         },
                     )
@@ -2260,10 +2264,10 @@ internal fun ProviderPickerSheet(
                                 Spacer(Modifier.width(18.dp))
                                 Box(Modifier.weight(1f)) {
                                     PickerRow(
-                                        label = pack.memberLabel(i),
+                                        label = if (pack.cross) pack.memberEngine(i).ifBlank { pack.memberLabel(i) } else pack.memberLabel(i),
                                         isSelected = if (multi) mticked else selection.contains(mkey),
                                         multi = multi,
-                                        flagCode = ProviderFlags.codeOf(pack.memberLabel(i)),
+                                        flagCode = ProviderFlags.codeOf(member.config.name, pack.memberLabel(i)),
                                         pinned = pinOrder.containsKey(mkey),
                                         onTogglePin = {
                                             scope.launch { app.store.togglePinnedProvider(mkey) }

@@ -223,12 +223,30 @@ fun MangaDetailScreen(
                 }
             }
         }
-        val list = MangaStore.chaptersFor(key).orEmpty()
+        var list = MangaStore.chaptersFor(key).orEmpty()
+        if (list.isEmpty()) {
+            // One fresh retry on a re-resolved entry before reporting empty:
+            // a stale cached meta (or a first-load miss) used to end here
+            // with "0 chapters" while the engine had them.
+            runCatching {
+                val retryMeta = withContext(Dispatchers.IO) {
+                    runCatching { provider.getMeta(base) }.getOrDefault(base)
+                }
+                meta = retryMeta
+                withContext(Dispatchers.IO) { runCatching { provider.getEpisodes(retryMeta) } }
+            }
+            list = MangaStore.chaptersFor(key).orEmpty()
+        }
         chapters = list
         if (list.isEmpty()) {
-            error = MangaProvider.lastOutcome[providerId]
+            // A CATALOG outcome ("✓ 24 titles (js)") is about the listing,
+            // not the chapters — showing it under "Chapters" is what put
+            // "24 titles (js)" where the chapter list belongs. Only a
+            // chapter-shaped outcome is shown; otherwise the honest generic.
+            val outcome = MangaProvider.lastOutcome[providerId]
                 ?: com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[providerId]
-                ?: I18n.t("This engine returned no chapters. Pull refresh to try again.")
+            error = if (outcome != null && outcome.contains("chapter", ignoreCase = true)) outcome
+            else I18n.t("This engine returned no chapters. Pull refresh to try again.")
         }
         loading = false
     }

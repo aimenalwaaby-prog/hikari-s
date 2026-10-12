@@ -29,6 +29,14 @@
 - Sources sheet hardening: explicit layout on open and every live append (no more blank-until-touched), guarded rebuild, fallback sections so the list always renders
 - Real flag images in every provider chooser (Home picker, TV Select Provider, extension rows, collection packs/members): the country's actual flag over the network with the emoji flag as offline fallback — never a broken tile, never guessed; Bangladesh split from Indian languages (Bangla/BD/Dhaka/BDIX → 🇧🇩), well-known names flagged by name, anything naming no country shows none
 - Server rows draw real codec-badge logos (4K Ultra HD, Dolby Vision, Dolby Atmos, HEVC/x265, Blu-ray, DTS) from bundled artwork, with Atmos/DD+/TrueHD/DTS detection on the name/details/url — text pills remain for facts with no logo
+- TV detail follows the reference client when "Full bleed and blur detail" is on (Settings → TV & Remote): the sharp art lives only in the header while everything scrolled to (cast, details, episodes) moves over its blurred background — no more whole-page sharp image behind the cast list; the toggle genuinely changes the screen now
+- Sources sheet no longer stacks "Searching…" cards or freezes on big searches: the placeholder is a singleton, and the hierarchy listener paints through the same 750ms coalescer as the live watcher instead of a full rebuild per landed row — servers appear instantly as found
+- Image badges for every server fact (1080p/720p/480p/360p/HD, HLS/MP4/MKV, DD+/TrueHD) in the same pill language as the UHD/Dolby set — text pills remain only for facts with no artwork
+- "This extension only" searches that extension fresh: the warm-start from the last successful URL is skipped for a narrowed search (it used to replay the "My selected servers" pick instead of the extension's own results)
+- Next-episode switch is bounded and honest: the origin fast path gives up after 45s into the full pass instead of hanging on "Loading episode" forever, and the episode line only advances when the new episode's servers are adopted (no more "Ep 3" label over the previous episode)
+- Provider flags reach every row: substring matching ("donghua" in "DonghuaStream", "anime" in "AllAnime") behind the whole-word pass, short tokens staying word-only — still matched from real tokens, never guessed
+- Same extension from two engines folds into one row ("AllAnime" once, "Nuvio · Anymex" beneath): tapping it opens the engines to pick from (single tap picks one engine's copy, hold multi-selects as before)
+- Manga chapters no longer show "24 titles (js)": nested chapter arrays are found by shape, empty lists get one fresh re-resolved retry, and the catalog outcome is never shown as the chapter error again
 
 ### Added
 - File size badge API on ServerMeta (sizeOf) feeding the Sources screen rows

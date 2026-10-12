@@ -32,6 +32,10 @@ class ProviderPack(
     /** What tells each member apart, one entry per member in [members] order
      *  ("Bengali", "Source 1", …). Blank when the member IS the whole name. */
     val details: List<String>,
+    /** True when the members are the SAME extension published by different
+     *  engines ("AllAnime" on Nuvio and on Anymex): the row is drawn once and
+     *  each member's engine is what tells them apart (see [memberEngine]). */
+    val cross: Boolean = false,
 ) {
     /** The provider a collapsed row acts as: the extension's first source. */
     val primary: ContentProvider get() = members[0]
@@ -64,6 +68,11 @@ class ProviderPack(
         // add to it.
         return com.hikari.app.i18n.I18n.t("Default")
     }
+
+    /** The engine that published one member ("Nuvio", "CloudStream", …) — the
+     *  distinguishing line of a cross-engine row's expanded members. */
+    fun memberEngine(index: Int): String =
+        members.getOrNull(index)?.config?.type?.groupLabel.orEmpty()
 }
 
 object ProviderPacks {
@@ -131,7 +140,61 @@ object ProviderPacks {
             }
             out += ProviderPack(members, label, members.map { detailOf(it.config.name, label) })
         }
+        return foldCrossEngine(out)
+    }
+
+    /**
+     * The SAME extension installed from two engines ("AllAnime" on Nuvio and
+     * on Anymex, "AllMovieLand" on CloudStream and on Hikari) reads as a
+     * duplicated list. Fold same-named single rows into one cross-engine row
+     * whose members are the engines: the row is drawn once with the engines
+     * underneath ("Nuvio · Anymex"), and expanding it offers each engine's
+     * copy for picking. Matching is on the normalized name only — nothing is
+     * guessed, and anything without a twin keeps its own row exactly as
+     * before.
+     */
+    private fun foldCrossEngine(packs: List<ProviderPack>): List<ProviderPack> {
+        val singles = packs.filter { !it.isPack }
+        if (singles.size < 2) return packs
+        val byName = LinkedHashMap<String, MutableList<ProviderPack>>()
+        for (p in singles) {
+            val norm = normName(p.label)
+            if (norm.length < 4) continue
+            byName.getOrPut(norm) { ArrayList() } += p
+        }
+        val twins = byName.values.filter { group ->
+            group.size > 1 && group.map { it.primary.config.id }.distinct().size > 1
+        }.toSet()
+        if (twins.isEmpty()) return packs
+        val twinOf = HashMap<ProviderPack, List<ProviderPack>>()
+        for (group in twins) for (p in group) twinOf[p] = group
+        val out = ArrayList<ProviderPack>(packs.size)
+        val emitted = HashSet<List<ProviderPack>>()
+        for (p in packs) {
+            val group = twinOf[p] ?: run { out += p; continue }
+            if (!emitted.add(group)) continue
+            val members = group.flatMap { it.members }
+            val label = commonLabel(members.map { it.config.name })
+                .takeIf { it.length >= 2 } ?: group[0].label
+            val engines = members.map { it.config.type.groupLabel }.distinct()
+            val details = if (engines.size > 1) {
+                members.map { it.config.type.groupLabel }
+            } else {
+                members.map { detailOf(it.config.name, label) }
+            }
+            out += ProviderPack(members, label, details, cross = true)
+        }
         return out
+    }
+
+    /** Names reduced to their essence for twin detection: case, spacing,
+     *  parentheticals ("(Phisher)") and a trailing "provider" carry no
+     *  identity ("AllMovieLandProvider (Phisher)" IS "AllMovieLand"). */
+    private fun normName(name: String): String {
+        var s = name.lowercase()
+        s = s.replace(Regex("""\(.*?\)"""), "")
+        s = s.replace(Regex("""provider\s*$"""), "")
+        return s.replace(Regex("""[^a-z0-9]"""), "")
     }
 
     /** What every member's name has in common, with the separator trimmed off. */

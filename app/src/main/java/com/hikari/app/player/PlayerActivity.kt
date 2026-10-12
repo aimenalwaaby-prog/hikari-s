@@ -6900,8 +6900,11 @@ class PlayerActivity : ComponentActivity() {
      *  the previous episode's live session, adopts the new episode's history key
      *  and starts on the first server.
      *
-     *  The pick applies IMMEDIATELY (top bar, subtitles, stats all follow it
-     *  while the servers are still being searched), and every switch takes a
+     *  The pick's identity applies immediately, but the visible episode line
+     *  only advances when the new episode's servers are actually adopted:
+     *  advancing it up front showed the next number over the PREVIOUS episode
+     *  whenever the new search was still running or got cancelled. Every
+     *  switch takes a
      *  generation: a slow search for an earlier pick that lands after a later
      *  pick is dropped instead of hijacking playback back to the wrong episode.
      *  An autoplay advance plays directly; a manual pick follows the user's
@@ -6912,7 +6915,6 @@ class PlayerActivity : ComponentActivity() {
         val repo = contentRepo
         val gen = ++episodeSwitchGen
         liveEpisode = ep
-        applyLiveEpisode(ep)
         autoplayRunning = fromAutoplay
         var cancelled = false
         var settled = false
@@ -6943,7 +6945,12 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             // FAST: the title's own extension resolves its own episode ids in
             // seconds; the full cross-extension pass is what takes a minute.
-            val fast = runCatching { repo.originStreams(item, ep) }.getOrDefault(emptyList())
+            // Bounded: an origin that never answers used to hold this launch
+            // forever on "Loading episode". Past the bound the search falls
+            // through to the full pass (with the box up) instead of hanging.
+            val fast = withTimeoutOrNull(45_000L) {
+                runCatching { repo.originStreams(item, ep) }.getOrDefault(emptyList())
+            }.orEmpty()
             if (gen != episodeSwitchGen || cancelled) {
                 dismissDialog()
                 if (gen == episodeSwitchGen) autoplayRunning = false
@@ -7560,8 +7567,19 @@ class PlayerActivity : ComponentActivity() {
         // selection those rows were drawn with.
         var builtSig = ArrayList<String>()
         var builtSelected = -1
+        // The "Searching…" placeholder is a singleton view, not a per-paint
+        // one (see the empty branch below).
+        var stateRowView: View? = null
 
         fun rebuildList() {
+            // Poison rows (or a session the chooser has not adopted yet) keep
+            // `rendered` at 0 across many paints, and every paint used to
+            // append ANOTHER "Searching…" card — the six-deep stack that grew
+            // the sheet and froze the app on big searches. Drop any stale
+            // placeholder here; the empty branch below re-adds at most one,
+            // and a non-empty list leaves none behind.
+            stateRowView?.let { runCatching { list.removeView(it) } }
+            stateRowView = null
             // sections() walks provider metadata; a poison entry degrades to
             // one flat section instead of a thrown rebuild (the watcher
             // swallows throws, which used to freeze an empty box over servers
@@ -7726,6 +7744,7 @@ class PlayerActivity : ComponentActivity() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ))
+                stateRowView = stateRow
             }
             builtSig = sig
             builtSelected = currentIndex
@@ -7825,7 +7844,7 @@ class PlayerActivity : ComponentActivity() {
         // the last servers still land.
         var lastChooserPaintMs = 0L
         var chooserTrailingQueued = false
-        val watcher: () -> Unit = {
+        val requestPaint: () -> Unit = {
             val now = android.os.SystemClock.uptimeMillis()
             if (now - lastChooserPaintMs < 750) {
                 if (!chooserTrailingQueued) {
@@ -7841,6 +7860,7 @@ class PlayerActivity : ComponentActivity() {
                 paintChooser()
             }
         }
+        val watcher: () -> Unit = { requestPaint() }
         sourcesWatchers.add(watcher)
         var hintTicker: Job? = null
         dialog.setOnDismissListener {
@@ -7935,14 +7955,11 @@ class PlayerActivity : ComponentActivity() {
                     child.tvFocusableTree()
                     (child as? ViewGroup)?.let { wireTvFocus(it) }
                 }
-                list.post {
-                    if (!dialog.isShowing) return@post
-                    syncFromSession()
-                    rebuildChips()
-                    rebuildList()
-                    list.requestLayout()
-                    (list.parent as? View)?.requestLayout()
-                }
+                // Through the same 750ms coalescer as the watcher: a burst of
+                // landing servers used to run the full sync+rebuild+layout
+                // pass once PER ADDED ROW from here, which is the O(n²) storm
+                // that froze the sheet on big titles.
+                list.post { requestPaint() }
             }
             override fun onChildViewRemoved(parent: View, child: View) {}
         })
