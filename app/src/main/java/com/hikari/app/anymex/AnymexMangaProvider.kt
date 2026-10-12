@@ -559,12 +559,18 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             val mod = module() ?: return@withContext emptyList()
             val raw = AnymexRuntime.pages(mod, config.id, chUrl) ?: return@withContext emptyList()
             val arr = pageArray(raw) ?: return@withContext emptyList()
+            val seenAnymex = HashSet<String>()
             val out = ArrayList<StreamSource>()
             for (i in 0 until arr.length()) {
                 when (val e = arr.opt(i)) {
                     is JSONObject -> {
                         val u = e.optString("url").ifBlank { e.optString("imageUrl") }.trim()
-                        if (u.isBlank()) continue
+                        // Blank entries and the chapter URL itself are not
+                        // pages (the fallback leaves the chapter behind as the
+                        // image); repeats of one cover would paint every
+                        // chapter with the same image, so they are dropped and
+                        // de-duplicated here, keeping story order.
+                        if (u.isBlank() || u == chUrl || !seenAnymex.add(u)) continue
                         // Hotlink-guarded CDNs refuse a page with no Referer even
                         // when no Cloudflare wall exists — the module often names
                         // none, so the chapter itself stands in.
@@ -573,7 +579,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                             h["Referer"] = chUrl
                         }
                         out += StreamSource(
-                            name = "Page ${i + 1}",
+                            name = "Page ${out.size + 1}",
                             url = u,
                             headers = h,
                             pageUrl = chUrl,
@@ -582,17 +588,30 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                             providerName = config.name,
                         )
                     }
-                    is String -> if (e.isNotBlank()) out += StreamSource(
-                        name = "Page ${i + 1}",
-                        url = e.trim(),
-                        headers = mapOf("Referer" to chUrl),
-                        pageUrl = chUrl,
-                        provider = "Anymex",
-                        providerId = config.id,
-                        providerName = config.name,
-                    )
+                    is String -> {
+                        val u = e.trim()
+                        if (u.isBlank() || u == chUrl || !seenAnymex.add(u)) continue
+                        out += StreamSource(
+                            name = "Page ${out.size + 1}",
+                            url = u,
+                            headers = mapOf("Referer" to chUrl),
+                            pageUrl = chUrl,
+                            provider = "Anymex",
+                            providerId = config.id,
+                            providerName = config.name,
+                        )
+                    }
                     else -> {}
                 }
+            }
+            // A module answering the series covers for every chapter (the same
+            // small set, matching the detail poster) is a walls/covers answer,
+            // not pages — serving it paints identical "pages" in every chapter.
+            // Report it honestly instead, like a locked Webtoons episode.
+            val poster = item.posterUrl?.trim().orEmpty()
+            if (out.isNotEmpty() && poster.isNotBlank() && out.all { it.url == poster }) {
+                lastOutcome[config.id] = "✗ chapter locked or pages-walled"
+                return@withContext emptyList()
             }
             lastOutcome[config.id] = "✓ ${out.size} pages"
             out
@@ -872,6 +891,39 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         val o = runCatching { JSONObject(t) }.getOrNull() ?: return null
         o.optJSONArray("pages")?.let { return it }
         o.optJSONArray("list")?.let { return it }
+        // Modules disagree on where the pages live ({data:{pages}}, {images},
+        // {urls}, …): scan bounded for the first page-shaped array instead of
+        // reporting no pages over an answer that has them. Object items must
+        // carry a page link; bare-string arrays only count under a page-ish
+        // key, so a genres/tags array is never mistaken for pages.
+        val pageKeys = setOf("pages", "list", "data", "images", "imgs", "urls", "sources", "files")
+        val queue = ArrayDeque<JSONObject>()
+        queue += o
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 25) {
+            val node = queue.removeFirst()
+            seen++
+            val keys = node.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                when (val v = node.opt(k)) {
+                    is JSONArray -> {
+                        if (v.length() == 0) continue
+                        when (val first = v.opt(0)) {
+                            is JSONObject ->
+                                if (first.optString("url").isNotBlank() ||
+                                    first.optString("imageUrl").isNotBlank()
+                                ) return v
+                            is String ->
+                                if (k.lowercase() in pageKeys) return v
+                            else -> {}
+                        }
+                    }
+                    is JSONObject -> queue += v
+                    else -> {}
+                }
+            }
+        }
         return null
     }
 

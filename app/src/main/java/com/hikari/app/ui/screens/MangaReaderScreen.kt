@@ -287,7 +287,8 @@ fun MangaReaderScreen(
         val idx = chapters.indexOfFirst { it.url == url }
         val ep = Episode(number = idx + 1, id = url, name = null, season = 1)
         val out = runCatching { p.getStreams(item, ep) }.getOrNull().orEmpty()
-            .filter { it.url.isNotBlank() }
+            .filter { it.url.isNotBlank() && it.url != url }
+            .distinctBy { it.url }
         // Every page is downloaded through the extension's OWN source (see
         // [HikariPageSource]): `getImage(page)` is what carries the extension's
         // imageRequest headers and its own interceptors, which is the whole

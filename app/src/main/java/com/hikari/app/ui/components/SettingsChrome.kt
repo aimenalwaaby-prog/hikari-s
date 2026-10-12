@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,6 +26,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -142,6 +145,103 @@ fun badgeColorFor(key: String): androidx.compose.ui.graphics.Color {
     )
     val idx = (key.hashCode() and Int.MAX_VALUE) % palette.size
     return androidx.compose.ui.graphics.Color(palette[idx].toInt())
+}
+
+/**
+ * One brand tile for a settings row: a rounded square with its own gradient
+ * and its own mark, in the language of the reference Sources screen's engine
+ * tiles (TMDB's dark-cyan block, MDBList's blue M) — drawn originally for
+ * this app, never copied artwork. Every option row gets one (folders,
+ * sections, card headings), so no row is left on the old flat random-disc
+ * badge. [key] is the folder key, section id or heading title; [icon] is the
+ * fallback glyph for rows with no bespoke letters.
+ */
+@Composable
+fun SettingsBrandBadge(key: String, icon: ImageVector, size: Dp = 46.dp) {
+    val spec = brandSpecFor(key)
+    Box(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.27f))
+            .background(Brush.linearGradient(listOf(spec.top, spec.bottom)))
+            .border(1.dp, Color.White.copy(alpha = 0.26f), RoundedCornerShape(size * 0.27f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (spec.letters != null) {
+            Text(
+                spec.letters,
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                fontSize = (size.value * (if (spec.letters.length > 1) 0.21f else 0.44f)).sp,
+                letterSpacing = (size.value * 0.01f).sp,
+                maxLines = 1,
+            )
+        } else {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.5f),
+            )
+        }
+    }
+}
+
+private data class BrandSpec(
+    val top: Color,
+    val bottom: Color,
+    val letters: String? = null,
+)
+
+/** Fixed tile per row: the same key always draws the same tile. */
+fun brandSpecFor(key: String): BrandSpec {
+    val k = key.lowercase()
+    // Brand-inspired tiles (original lettering, brand colours).
+    if ("tmdb" in k) return BrandSpec(Color(0xFF0D253F), Color(0xFF01B4E4), "TMDB")
+    if ("mdb" in k) return BrandSpec(Color(0xFF1E40AF), Color(0xFF3B82F6), "M")
+    if ("anime" in k) return BrandSpec(Color(0xFF6D28D9), Color(0xFFA855F7))
+    // Families with a fixed colour each.
+    if (k.startsWith("appearance")) return BrandSpec(Color(0xFFB45309), Color(0xFFF59E0B))
+    if (k.startsWith("layout.poster") || k == "layout.poster") return BrandSpec(Color(0xFF0F766E), Color(0xFF14B8A6))
+    if ("taskbar" in k || "nav" in k) return BrandSpec(Color(0xFF15803D), Color(0xFF22C55E))
+    if ("episode" in k) return BrandSpec(Color(0xFFB91C1C), Color(0xFFEF4444))
+    if (k.startsWith("player") || "external" in k || "volume" in k || "subtitle" in k || "loading" in k || "tv player" in k || "enhance" in k || "playback" in k || "server" in k) {
+        return BrandSpec(Color(0xFFC2410C), Color(0xFFF97316))
+    }
+    if (k.startsWith("tv") || "remote" in k || "overscan" in k) return BrandSpec(Color(0xFF4338CA), Color(0xFF6366F1))
+    if (k.startsWith("network") || "dns" in k || "slow" in k) return BrandSpec(Color(0xFF0369A1), Color(0xFF0EA5E9))
+    if (k.startsWith("privacy") || "webview" in k || "user-agent" in k || "ad-block" in k) {
+        return BrandSpec(Color(0xFF047857), Color(0xFF10B981))
+    }
+    if ("userscript" in k) return BrandSpec(Color(0xFF4D7C0F), Color(0xFF84CC16))
+    if ("rating" in k || "score" in k) return BrandSpec(Color(0xFF7C2D12), Color(0xFFF59E0B))
+    if ("banner" in k || "showcase" in k || "header" in k || "featured" in k) {
+        return BrandSpec(Color(0xFF9A3412), Color(0xFFFB7185))
+    }
+    if ("poster" in k) return BrandSpec(Color(0xFF0E7490), Color(0xFF06B6D4))
+    if ("ui-scale" in k || "font" in k || k == "appearance.font") return BrandSpec(Color(0xFF1D4ED8), Color(0xFF60A5FA))
+    if ("icon" in k) return BrandSpec(Color(0xFF0F766E), Color(0xFF2DD4BF))
+    if ("accent" in k || "colour" in k || "color" in k || "theme" in k) return BrandSpec(Color(0xFFA21CAF), Color(0xFFEC4899))
+    if ("download" in k) return BrandSpec(Color(0xFF0F766E), Color(0xFF10B981))
+    if ("tracker" in k || "sync" in k) return BrandSpec(Color(0xFF5B21B6), Color(0xFF8B5CF6))
+    if ("catalog" in k || "collection" in k) return BrandSpec(Color(0xFF92400E), Color(0xFFF59E0B))
+    if ("backup" in k || "restore" in k) return BrandSpec(Color(0xFF155E75), Color(0xFF0891B2))
+    if ("log" in k || "diagnostic" in k) return BrandSpec(Color(0xFF334155), Color(0xFF64748B))
+    if ("about" in k || "update" in k) return BrandSpec(Color(0xFF1E3A8A), Color(0xFF3B82F6))
+    if ("clear" in k || "delete" in k) return BrandSpec(Color(0xFF7F1D1D), Color(0xFFDC2626))
+    if ("content" in k || "filter" in k || "privacy" in k || "adult" in k) return BrandSpec(Color(0xFF831843), Color(0xFFEC4899))
+    // Deterministic fallback: fixed gradient pairs, never random per launch.
+    val pairs = listOf(
+        BrandSpec(Color(0xFF9A3412), Color(0xFFF97316)),
+        BrandSpec(Color(0xFF166534), Color(0xFF22C55E)),
+        BrandSpec(Color(0xFF0C4A6E), Color(0xFF0EA5E9)),
+        BrandSpec(Color(0xFF5B21B6), Color(0xFFA855F7)),
+        BrandSpec(Color(0xFF9D174D), Color(0xFFEC4899)),
+        BrandSpec(Color(0xFF713F12), Color(0xFFEAB308)),
+        BrandSpec(Color(0xFF134E4A), Color(0xFF14B8A6)),
+        BrandSpec(Color(0xFF7F1D1D), Color(0xFFE5484D)),
+    )
+    return pairs[(key.hashCode() and Int.MAX_VALUE) % pairs.size]
 }
 
 /**

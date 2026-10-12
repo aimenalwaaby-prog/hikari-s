@@ -7650,6 +7650,7 @@ class PlayerActivity : ComponentActivity() {
             // list — an aborted rebuild used to leave an empty box with no
             // spinner and no rows, while the cover kept counting found servers.
             var rendered = 0
+            var firstRowError: String? = null
             visible.forEach { (name, memberIdx) ->
                 if (chip == "All") {
                     val isNew = pos >= keep
@@ -7715,10 +7716,19 @@ class PlayerActivity : ComponentActivity() {
                                 pickedByUser = true
                             }
                         }
+                    }.onFailure { e ->
+                        if (firstRowError == null) {
+                            firstRowError = (e.message ?: e.javaClass.simpleName).take(160)
+                        }
                     }.isSuccess) rendered++
                     }
                 }
-            if (rendered == 0) {
+            // Rows already on screen from an earlier paint (the incremental path
+            // above only counts NEW rows): a paint that appends nothing must not
+            // read as an empty chooser, or every steady-state tick logs a false
+            // "chooser empty" and stacks another Searching card under live rows.
+            val onScreenRows = (list.childCount - 1).coerceAtLeast(0)
+            if (rendered == 0 && onScreenRows == 0) {
                 // Opened before the first server landed ("don't play directly"
                 // opens the chooser the instant the player does): show that the
                 // search is running and that this list is where the servers
@@ -7735,8 +7745,20 @@ class PlayerActivity : ComponentActivity() {
                     com.hikari.app.data.Logs.log(
                         "Player",
                         "chooser empty with $sessionSize server(s) in the live session " +
-                            "(sources=${sources.size}, chip=$chip, sections=${runCatching { sections().size }.getOrDefault(-1)})",
+                            "(sources=${sources.size}, chip=$chip, sections=${runCatching { sections().size }.getOrDefault(-1)}" +
+                            (if (firstRowError != null) ", rowErr=$firstRowError" else "") + ")",
                     )
+                }
+                // A second traversal after measure: rows added just before the
+                // panel's bend pass can sit unmeasured (blank until a touch
+                // forces one), so force layout + draw once more on the next
+                // frame instead of waiting for a finger.
+                list.post {
+                    runCatching {
+                        list.requestLayout()
+                        list.invalidate()
+                        (list.parent as? View)?.invalidate()
+                    }
                 }
                 val stateRow = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -7780,7 +7802,12 @@ class PlayerActivity : ComponentActivity() {
                 ))
                 stateRowView = stateRow
             }
-            builtSig = sig
+            // A paint that drew nothing over a non-empty list must never become
+            // the layout future paints extend: the incremental path would keep
+            // `builtSig.size` existing rows it never put on screen and append
+            // nothing forever (a permanent blank). Reset it so the next tick
+            // does a full rebuild instead.
+            builtSig = if (rendered == 0 && onScreenRows == 0 && sources.isNotEmpty()) ArrayList() else sig
             builtSelected = currentIndex
         }
 

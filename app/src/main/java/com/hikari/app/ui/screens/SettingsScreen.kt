@@ -204,6 +204,7 @@ import com.hikari.app.ui.components.GlassShape
 import com.hikari.app.ui.components.HeroStyles
 import com.hikari.app.ui.components.MultiChoiceDialog
 import com.hikari.app.ui.components.SettingsColorBadge
+import com.hikari.app.ui.components.SettingsBrandBadge
 import com.hikari.app.ui.components.SettingsIconBadge
 import com.hikari.app.ui.components.SettingsIconBadgeRes
 import com.hikari.app.ui.components.SettingsPageHeader
@@ -565,7 +566,7 @@ private fun SettingsSection(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SettingsColorBadge(icon, id)
+            SettingsBrandBadge(id, icon)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1656,7 +1657,7 @@ private fun SettingsFolderRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (folder.iconRes != 0) SettingsIconBadgeRes(folder.iconRes)
-            else SettingsColorBadge(folder.icon, folder.key)
+            else SettingsBrandBadge(folder.key, folder.icon)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1704,7 +1705,7 @@ private fun TvLeftRow(icon: ImageVector, title: String, onClick: () -> Unit, ico
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (iconRes != 0) SettingsIconBadgeRes(iconRes)
-            else SettingsColorBadge(icon, "tvleft:$title")
+            else SettingsBrandBadge("tvleft:$title", icon)
             Spacer(Modifier.width(16.dp))
             Text(
                 title,
@@ -3493,15 +3494,11 @@ private fun SettingsToggle(
     }
 }
 
-/** A card's leading row: the icon token plus the card's own heading. */
+/** A card's leading row: the brand tile plus the card's own heading. */
 @Composable
-private fun SettingsCardHeading(icon: ImageVector, title: String) {
+private fun SettingsCardHeading(icon: ImageVector, title: String, brandKey: String = title) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        SettingsBrandBadge(brandKey, icon, size = 30.dp)
         Spacer(Modifier.width(12.dp))
         Text(
             title,

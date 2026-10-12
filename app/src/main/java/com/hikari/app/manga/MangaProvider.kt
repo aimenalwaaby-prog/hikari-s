@@ -595,7 +595,8 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             val origin = runCatching { http?.baseUrl?.trimEnd('/') }.getOrNull()
                 .orEmpty().ifBlank { site?.trimEnd('/') }
             lastOutcome[config.id] = "✓ ${pages.size} page(s)"
-            pages.mapIndexed { i, page ->
+            val seenPageUrls = HashSet<String>()
+            val outPages = pages.mapIndexed { i, page ->
                 val url = pageUrl(src, page)
                 if (url.isNotBlank()) page.imageUrl = url
                 val headers = if (hasRef) base else {
@@ -611,7 +612,15 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                     headers = headers,
                     pageUrl = page.url,
                 )
-            }
+                // A page without its own image is not a page: the fallback above
+                // leaves the chapter URL itself as the image, so every page of
+                // the chapter would download the same chapter/cover bytes and
+                // the whole chapter (and every chapter like it) shows the same
+                // image. Drop those plus exact duplicates, keeping story order.
+            }.filter { p -> p.url.isNotBlank() && p.url != chapter.id && seenPageUrls.add(p.url) }
+            if (outPages.isEmpty()) return@gate fail("pages failed: no readable pages", emptyList())
+            lastOutcome[config.id] = "✓ ${outPages.size} page(s)"
+            outPages
         } catch (t: Throwable) {
             if (t is kotlinx.coroutines.CancellationException) throw t
             fail("pages failed: ${reason(t)}", emptyList())
