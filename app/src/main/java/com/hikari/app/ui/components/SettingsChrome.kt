@@ -187,7 +187,7 @@ fun SettingsBrandBadge(key: String, icon: ImageVector, size: Dp = 46.dp) {
     }
 }
 
-private data class BrandSpec(
+data class BrandSpec(
     val top: Color,
     val bottom: Color,
     val letters: String? = null,
