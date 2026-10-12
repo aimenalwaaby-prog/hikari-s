@@ -4336,6 +4336,14 @@ fun DetailScreen(
                             }
                         }
                     }
+                    // The episode shelf used to run straight into the release
+                    // details below with no air between them (reported on a TV
+                    // screenshot): one breathing gap, TV series only.
+                    if (isTvLayout && detailIsSeries && episodePosterStyle) {
+                        item(key = "tv-episode-details-spacer") {
+                            Spacer(Modifier.height(18.dp))
+                        }
+                    }
                     if (!isTvLayout) {
                     item {
                     // The first line of the page is spaced off the header art on

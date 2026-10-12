@@ -549,8 +549,10 @@ fun CatalogScreen(
             // Deriving the site loads the extension (its source's baseUrl), so it
             // cannot run on the UI thread — and an extension that declares no
             // site has nothing to open, which is a sentence, not a crash.
+            // The chain also tries the install's own URLs, so a provider the
+            // extension loader cannot read still opens its site.
             val site = withContext(Dispatchers.IO) {
-                hikari.providers.byId(providerId)?.let { webUrlFor(it) }
+                hikari.providers.byId(providerId)?.let { webUrlChain(it) }
             }
             if (site.isNullOrBlank()) {
                 android.widget.Toast.makeText(

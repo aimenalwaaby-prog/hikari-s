@@ -721,18 +721,12 @@ private fun EngineRow(
                 onClick = {
                     // The site is derived by LOADING the extension (its source's
                     // baseUrl), which is blocking — hence the IO hop, and hence
-                    // the toast when the extension declares no site at all.
+                    // the toast when no link in the chain names a site. The
+                    // chain also tries the install's own URLs and needs no
+                    // per-engine branch.
                     scope.launch {
                         val site = withContext(Dispatchers.IO) {
-                            runCatching {
-                                when (engine.config.type) {
-                                    com.hikari.app.data.ProviderType.ANYMEX_MANGA,
-                                    com.hikari.app.data.ProviderType.ANYMEX ->
-                                        com.hikari.app.anymex.AnymexPluginManager.siteUrlOf(engine.config)
-                                    else ->
-                                        com.hikari.app.manga.MangaExtensionManager.siteUrlOf(engine.config)
-                                }
-                            }.getOrNull()
+                            runCatching { webUrlChain(engine) }.getOrNull()
                         }
                         if (site.isNullOrBlank()) {
                             android.widget.Toast.makeText(

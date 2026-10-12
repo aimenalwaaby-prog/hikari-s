@@ -655,11 +655,11 @@ fun MangaReaderScreen(
     }
     val openVerify: () -> Unit = {
         scope.launch {
+            // The chain ends at the chapter's own page: even an engine whose
+            // extension will not load still opens its site from the chapter URL.
             val site = withContext(Dispatchers.IO) {
                 runCatching {
-                    app.providers.byId(providerId)?.config?.let {
-                        com.hikari.app.manga.MangaExtensionManager.siteUrlOf(it)
-                    }
+                    app.providers.byId(providerId)?.let { webUrlChain(it, chapter) }
                 }.getOrNull()
             }
             if (site.isNullOrBlank()) {

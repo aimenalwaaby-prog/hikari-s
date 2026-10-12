@@ -148,11 +148,11 @@ fun MangaDetailScreen(
     val openVerify: () -> Unit = {
         scope.launch {
             val provider = app.providers.byId(providerId)
+            // The chain ends at the manga's own page: even an engine whose
+            // extension will not load still opens its site from the title URL.
             val site = withContext(Dispatchers.IO) {
                 runCatching {
-                    provider?.config?.let {
-                        com.hikari.app.manga.MangaExtensionManager.siteUrlOf(it)
-                    }
+                    provider?.let { webUrlChain(it, mangaUrl) }
                 }.getOrNull()
             }
             if (site.isNullOrBlank()) {

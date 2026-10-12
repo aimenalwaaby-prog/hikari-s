@@ -1,6 +1,11 @@
 ## Unreleased (continuous build only)
 
 ### Fixed
+- New round badges for TV & Remote, Stats and Webview Sites (same navy badge language, background-free, untinted) plus a fixed Nuvio badge: the shipped Nuvio art was a mis-cropped fragment rendering tiny in its row — it now carries the supplied black play-mark badge, full-bleed like every other engine row
+- Globe "Couldn't determine this extension's site": one universal chain behind all six buttons (extension site → the install's own manifest/site URL → a site stashed in extra → the host of the open manga/chapter page), so an engine whose extension will not load still opens its real site; the toast stays only when every link is empty
+- Manga chapters dying on walled sites and hotlink-guarded CDNs: the page list warms the site once before the stale-entry retry (the chapter list already did), and page requests always carry a Referer (the source's own, else the site root) so the plain-client fallback is not refused
+- Next-episode drops to an unrelated mirror: the adopted list starts on the just-watched server when the fresh list carries the same row (same provider + name, else same URL), and the full cross-extension pass is bounded at 90s with an honest "took too long" instead of hanging on "Loading episode"
+- TV episode shelf running straight into the release details with no air: a breathing gap between the poster-episode panel and the details below on TV series pages
 - Round badge icons for every Settings folder and every Extensions add-a-source row: 37 user-designed artworks, cropped to the badge only (no scene background, no captions, transparent outside the rim) and drawn untinted — Stats, Profiles, all 18 folders, all 17 engine/install rows, the Webview-sites folder; Nuvio + the spare moon badge keep their prior art until their designs arrive
 - TV detail blur toggle that visibly did nothing: the sharp art was painted in the FIXED backdrop so it never scrolled away — it now lives in the scrolling hero item (scrolls off like the reference client) over the blur-only fixed backdrop, with a gradient melt at the header's bottom edge
 - Sources server rows hiding ~1-2s after every tally change until touched: the hint line was WRAP_CONTENT so each tally remeasured the whole panel — its height is now locked at the 4-line cap, text swaps move nothing

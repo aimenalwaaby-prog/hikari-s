@@ -918,7 +918,7 @@ fun HomeScreen(nav: NavHostController) {
             // host is the fallback, for the case where the selected extension
             // declares no site of its own.
             val own = withContext(Dispatchers.IO) {
-                providers.firstOrNull { it.config.id == selected }?.let { webUrlFor(it) }
+                providers.firstOrNull { it.config.id == selected }?.let { webUrlChain(it) }
             }
             // The WebView button belongs to the selected extension. Never
             // fall back to the last Cloudflare-blocked host from another
@@ -2750,9 +2750,7 @@ private fun sourceSiteUrl(file: java.io.File, name: String): String? {
 }
 
 internal fun webUrlFor(p: ContentProvider): String? = when (p.config.type) {
-    ProviderType.STREMIO, ProviderType.UNIVERSAL -> p.config.url.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let { raw ->
-        runCatching { val u = java.net.URI(raw); val path = u.path.orEmpty().removeSuffix("/"); val base = if (path.endsWith("/manifest.json", true)) path.dropLast("/manifest.json".length) else path; u.scheme + "://" + u.authority + if (base.isBlank()) "/" else base }.getOrNull()
-    }
+    ProviderType.STREMIO, ProviderType.UNIVERSAL -> webUrlRootOf(p.config.url)
     ProviderType.HIKARI -> com.hikari.app.hiki.HikariRuntime.providerFor(p.config)?.mainUrl
     ProviderType.SKYSTREAM -> com.hikari.app.skystream.SkyStreamPluginManager.siteUrlOf(p.config)
     ProviderType.ANIYOMI -> com.hikari.app.aniyomi.AniyomiExtensionManager.siteUrlOf(p.config)
@@ -2772,6 +2770,40 @@ internal fun webUrlFor(p: ContentProvider): String? = when (p.config.type) {
         apis.getOrNull(p.config.id.substringAfterLast("|").toIntOrNull() ?: 0)?.mainUrl?.takeIf { it.startsWith("http") }
     }.getOrNull()
     else -> null
+}
+
+/**
+ * The site root of any http(s) URL (a manifest.json tail is stripped, so a
+ * Stremio manifest URL yields its addon); null for local paths and blanks.
+ */
+internal fun webUrlRootOf(raw: String?): String? =
+    raw?.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let {
+        runCatching {
+            val u = java.net.URI(it)
+            val path = u.path.orEmpty().removeSuffix("/")
+            val base = if (path.endsWith("/manifest.json", true)) path.dropLast("/manifest.json".length) else path
+            u.scheme + "://" + u.authority + if (base.isBlank()) "/" else base
+        }.getOrNull()
+    }
+
+/**
+ * The universal site chain for the globe/WebView button: the site derived
+ * from the extension first (it knows its mirrors), then any site the install
+ * itself carries (a manifest URL in the config, or a site stashed in extra),
+ * then the host of a page already open on that site (a manga/chapter URL).
+ * The button opens the first answer instead of the "Couldn't determine"
+ * toast; the toast stays only when every link in the chain is empty.
+ */
+internal fun webUrlChain(p: ContentProvider, itemUrl: String? = null): String? {
+    runCatching { webUrlFor(p) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+    webUrlRootOf(p.config.url)?.let { return it }
+    webUrlRootOf(p.config.extra)?.let { return it }
+    val u = itemUrl?.trim().orEmpty()
+    if (u.startsWith("http://") || u.startsWith("https://")) {
+        val host = runCatching { java.net.URI(u).host?.lowercase() }.getOrNull()
+        if (!host.isNullOrBlank() && host.contains(".")) return "https://$host/"
+    }
+    return null
 }
 
 /** The Home top bar. In [overlay] mode it is drawn on top of the hero banner

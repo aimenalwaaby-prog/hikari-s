@@ -6978,6 +6978,9 @@ class PlayerActivity : ComponentActivity() {
                 return@launch
             }
             // The origin had nothing fast: the full pass, with the box up.
+            // Bounded: the full cross-extension pass used to run unbounded here,
+            // so a stuck lookup held "Loading episode" forever. Past 90s the
+            // wait is declared honestly instead of hanging.
             if (!fromAutoplay && dialog == null && !cancelled) {
                 dialog = showGlassProgress(
                     "Loading episode",
@@ -6985,7 +6988,9 @@ class PlayerActivity : ComponentActivity() {
                     cancelable = true,
                 ) { cancelled = true }
             }
-            val streams = runCatching { repo.streamsFor(item, ep) }.getOrNull().orEmpty()
+            val streams = withTimeoutOrNull(90_000L) {
+                runCatching { repo.streamsFor(item, ep) }.getOrNull().orEmpty()
+            }
             dismissDialog()
             if (cancelled) {
                 if (gen == episodeSwitchGen) autoplayRunning = false
@@ -6993,6 +6998,13 @@ class PlayerActivity : ComponentActivity() {
             }
             // Superseded: the user picked another episode while this search ran.
             if (gen != episodeSwitchGen) return@launch
+            if (streams == null) {
+                autoplayRunning = false
+                Toast.makeText(
+                    this@PlayerActivity, I18n.t("Still searching took too long — try this episode again"), Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
             if (streams.isEmpty()) {
                 autoplayRunning = false
                 Toast.makeText(
@@ -7041,16 +7053,30 @@ class PlayerActivity : ComponentActivity() {
         noSubsRetry = false
         resetHeaderWalk()
         triedUrls.clear()
+        // Same-server advance: the next episode of the same show usually lives
+        // on the server just watched. When the fresh list carries that same
+        // row (same provider + same name, else the same URL), it starts at
+        // once instead of dropping to an unrelated mirror.
+        val prev = sources.getOrNull(currentIndex)
         sources = playerSources
         notifySourcesChanged()
-        currentIndex = 0
+        currentIndex = prev?.let { p ->
+            val key = (p.infoHash ?: p.url).takeIf { it.isNotBlank() }
+            playerSources.indexOfFirst { q ->
+                q.providerId == p.providerId && q.providerId.isNotBlank() &&
+                    q.name == p.name && q.name.isNotBlank()
+            }.takeIf { it >= 0 }
+                ?: key?.let { k ->
+                    playerSources.indexOfFirst { (it.infoHash ?: it.url) == k }.takeIf { it >= 0 }
+                }
+        }?.takeIf { it >= 0 } ?: 0
         // An autoplay advance always plays directly: popping a server
         // chooser over the credits is not "automatic" in any sense.
         // "Don't play directly" applies to an in-player episode switch too:
         // this is a brand-new server list, so it gets its own chooser
         // instead of auto-starting on the first server.
         if (fromAutoplay || !shouldAskServer()) {
-            playSource(0)
+            playSource(currentIndex)
         } else {
             startChooserShown = false
             showServerChooser(startMode = true)

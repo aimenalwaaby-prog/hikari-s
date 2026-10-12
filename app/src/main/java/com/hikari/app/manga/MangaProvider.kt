@@ -566,6 +566,13 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             // uses (works for old and Kei sources alike) and retry on the fresh
             // entry before reporting failure.
             var pageList = runCatching { src.getPageList(ch(chapter.id)) }.getOrNull()
+            // A site behind a browser check refuses the page list the same way
+            // it refuses the chapter list (which warms in getEpisodes) — warm
+            // once and ask again before the stale-entry retry, so a walled
+            // chapter reads after verification instead of reporting failure.
+            if (pageList == null && warmSite()) {
+                pageList = runCatching { src.getPageList(ch(chapter.id)) }.getOrNull()
+            }
             if (pageList == null) {
                 runCatching {
                     val fresh = updateOf(src, item, details = false, chapters = true).chapters
@@ -575,7 +582,14 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 }
             }
             val pages = pageList ?: return@gate fail("pages failed: Refresh Chapter List", emptyList())
-            val headers = sourceHeaders(src)
+            // The plain-client fallback (HikariPageSource.downloadTo) sends
+            // exactly these headers: a source whose own headers name no Referer
+            // gets the site root as one, the way the cover fetcher already does,
+            // so a hotlink-guarded CDN stops refusing the pages.
+            val headers = sourceHeaders(src).let { h ->
+                if (h.keys.any { it.equals("Referer", ignoreCase = true) }) h
+                else siteUrl()?.let { site -> h + ("Referer" to site) } ?: h
+            }
             lastOutcome[config.id] = "✓ ${pages.size} page(s)"
             pages.mapIndexed { i, page ->
                 val url = pageUrl(src, page)

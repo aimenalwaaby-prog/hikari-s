@@ -6482,7 +6482,7 @@ private fun rememberVerifyAction(p: ContentProvider): (() -> Unit)? {
         {
             scope.launch {
                 val site = withContext(Dispatchers.IO) {
-                    runCatching { webUrlFor(p) }.getOrNull()
+                    runCatching { webUrlChain(p) }.getOrNull()
                 }
                 if (site.isNullOrBlank()) {
                     Toast.makeText(
