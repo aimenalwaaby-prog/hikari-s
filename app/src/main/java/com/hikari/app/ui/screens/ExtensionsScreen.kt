@@ -131,6 +131,8 @@ import com.hikari.app.net.Http
 import com.hikari.app.net.PromoGuard
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.providers.ProviderManager
+import com.hikari.app.ui.FlagIcon
+import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.ui.ProviderPack
 import com.hikari.app.ui.ProviderPacks
 import com.hikari.app.ui.components.EmptyState
@@ -7990,39 +7992,15 @@ private fun repoAvatarUrl(repo: Cs3Repo): String? {
  * Country+language flag for an extension row, read from the repo listing's own
  * name+description ("Movies and Series upto 4K", "Hindi", "English", …): the
  * user knows at a glance which language an extension carries. Null when the
- * listing names none — never guessed.
+ * listing names none — never guessed. (See [ProviderFlags] — same rule, plus
+ * the real flag image in [FlagIcon].)
  */
-private fun langFlagOf(p: Cs3RepoPlugin): String? {
-    val hay = (p.name + " " + p.description).lowercase()
-    fun has(vararg words: String) = words.any { w ->
-        Regex("(^|[^a-z])" + Regex.escape(w) + "([^a-z]|$)").containsMatchIn(hay)
-    }
-    return when {
-        has("hindi", "hindi-audio", "bollywood") -> "🇮🇳 Hindi"
-        has("tamil") -> "🇮🇳 Tamil"
-        has("telugu") -> "🇮🇳 Telugu"
-        has("malayalam") -> "🇮🇳 Malayalam"
-        has("kannada") -> "🇮🇳 Kannada"
-        has("bengali", "bangla") -> "🇮🇳 Bengali"
-        has("marathi", "punjabi", "gujarati", "desi") -> "🇮🇳 Desi"
-        has("english", "hollywood") -> "🇬🇧 English"
-        has("spanish", "espanol", "español", "latino") -> "🇪🇸 Spanish"
-        has("french", "francais", "français") -> "🇫🇷 French"
-        has("german", "deutsch") -> "🇩🇪 German"
-        has("italian") -> "🇮🇹 Italian"
-        has("portuguese", "brasileiro") -> "🇧🇷 Portuguese"
-        has("russian") -> "🇷🇺 Russian"
-        has("turkish") -> "🇹🇷 Turkish"
-        has("arabic") -> "🇸🇦 Arabic"
-        has("japanese", "anime") -> "🇯🇵 Japanese"
-        has("korean", "kdrama", "k-drama") -> "🇰🇷 Korean"
-        has("chinese", "donghua", "cdrama", "c-drama") -> "🇨🇳 Chinese"
-        has("indonesian", "indo") -> "🇮🇩 Indonesian"
-        has("vietnamese") -> "🇻🇳 Vietnamese"
-        has("thai") -> "🇹🇭 Thai"
-        else -> null
-    }
-}
+private fun langFlagOf(p: Cs3RepoPlugin): String? =
+    ProviderFlags.flagOf(p.name, p.description)
+
+/** ISO country code for an extension row's real flag image — null draws none. */
+private fun langCodeOf(p: Cs3RepoPlugin): String? =
+    ProviderFlags.codeOf(p.name, p.description)
 
 private fun isDartOnlyPlugin(p: Cs3RepoPlugin): Boolean {    val u = p.url
     // A runnable JS URL always wins — index metadata is often wrong.
@@ -8111,6 +8089,13 @@ private fun PluginRow(
             )
         }
         Spacer(Modifier.width(12.dp))
+        // The real country flag in front of the name (the reference provider
+        // list's flags) — the text meta below keeps the "🇮🇳 Hindi" label too.
+        val flagCode = langCodeOf(p)
+        if (flagCode != null) {
+            FlagIcon(code = flagCode, size = 24.dp)
+            Spacer(Modifier.width(10.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 p.name,

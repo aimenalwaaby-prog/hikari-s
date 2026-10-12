@@ -5784,8 +5784,34 @@ class PlayerActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = (3 * density).toInt() })
         }
+        // Logo badges, the reference Sources look: each fact the row states
+        // that carries REAL logo artwork (4K Ultra HD, Dolby Vision/Atmos,
+        // HEVC, Blu-ray, DTS — see ServerMeta.badgeIconRes) draws its logo;
+        // the rest keep their text pills below. Never invented: only chips
+        // the name/details/url already stated get either treatment.
+        val iconChips = option.chips.filter { ServerMeta.badgeIconRes(it) != 0 }.distinct().take(4)
+        if (iconChips.isNotEmpty()) {
+            card.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                for ((bi, chip) in iconChips.withIndex()) {
+                    addView(ImageView(this@PlayerActivity).apply {
+                        setImageResource(ServerMeta.badgeIconRes(chip))
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        adjustViewBounds = true
+                        contentDescription = chip
+                    }, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, (20 * density).toInt()
+                    ).apply {
+                        if (bi > 0) marginStart = (8 * density).toInt()
+                    })
+                }
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (6 * density).toInt() })
+        }
         // Fact chips, greedily wrapped into rows by estimated width.
-        val chips = option.chips.take(6)
+        val chips = option.chips.filter { ServerMeta.badgeIconRes(it) == 0 }.take(6)
         if (chips.isNotEmpty()) {
             val rows = ArrayList<LinearLayout>()
             var cur = LinearLayout(this).apply {
@@ -6169,6 +6195,12 @@ class PlayerActivity : ComponentActivity() {
          */
         fillFractionX: Float = 0f,
         fillFractionY: Float = 0f,
+        /** Full-bleed box: the panel's silhouette spans the window's own
+         *  width (the Sources screen, like the reference full-page list)
+         *  instead of floating inside halo+margin insets. The window grows
+         *  by the halo around it so the glow spills past the screen edges;
+         *  the box itself covers left to right. */
+        edgeToEdge: Boolean = false,
         /** How much the video behind the panel is dimmed (the custom-preset
          *  editor passes a light one so the live picture stays judgeable). */
         dimAmount: Float = 0.65f,
@@ -6415,16 +6447,23 @@ class PlayerActivity : ComponentActivity() {
                 (w.y * if (flatPanel) 0.97f else 0.93f).toInt(),
                 (560 * density).toInt(),
             )
-        }).coerceAtMost(w.x - 2 * halo - (8 * density).toInt())
-            .coerceAtLeast((140 * density).toInt())
+        }).let { base ->
+            // A full-bleed box (the Sources screen) skips the floating-panel
+            // insets: its silhouette IS the window width, and the window
+            // below grows by the halo around it so the glow spills off
+            // screen instead of insetting the box.
+            if (edgeToEdge) base.coerceAtLeast(w.x - 2 * halo).coerceAtMost(w.x)
+            else base.coerceAtMost(w.x - 2 * halo - (8 * density).toInt())
+                .coerceAtLeast((140 * density).toInt())
+        }
         val panelW = if (tvSheet) {
             // With the TV-panel preference enabled, every sheet gets at least
             // half of the actual player width. A caller can request a wider
             // results panel (the live server chooser does this below).
             val requestedFraction = if (fillFractionX > 0f) fillFractionX
             else if (sideTvPanel) 0.62f else 0.70f
-            (win.x * requestedFraction.coerceIn(0.50f, 0.94f)).toInt()
-                .coerceAtMost(win.x - 2 * halo - (18 * density).toInt())
+            (win.x * requestedFraction.coerceIn(0.50f, if (edgeToEdge) 1f else 0.94f)).toInt()
+                .coerceAtMost(win.x - 2 * halo - (if (edgeToEdge) 0 else (18 * density).toInt()))
         } else {
             panelWidthFor(win)
         }
@@ -6645,7 +6684,7 @@ class PlayerActivity : ComponentActivity() {
             lastWinW = now.x
             lastWinH = now.y
             val w = if (tvSheet) {
-                (now.x * (if (fillFractionX > 0f) fillFractionX else if (sideTvPanel) 0.62f else 0.70f).coerceIn(0.50f, 0.94f)).toInt().coerceAtMost(now.x - 2 * halo - (18 * density).toInt())
+                (now.x * (if (fillFractionX > 0f) fillFractionX else if (sideTvPanel) 0.62f else 0.70f).coerceIn(0.50f, if (edgeToEdge) 1f else 0.94f)).toInt().coerceAtMost(now.x - 2 * halo - (if (edgeToEdge) 0 else (18 * density).toInt())
             } else {
                 panelWidthFor(now)
             }
@@ -7699,12 +7738,17 @@ class PlayerActivity : ComponentActivity() {
         var builtChips = ""
         var builtChipSelection = ""
         fun rebuildChips() {
-            val names = listOf("All") + sections().map { it.first }
+            // sections() walks provider metadata; a poison entry must degrade
+            // to the bare "All" strip instead of throwing out of the watcher
+            // (a throw here used to abort paintChooser before rebuildList, so
+            // the box sat blank over servers the search had already found).
+            val secs = runCatching { sections() }.getOrDefault(emptyList())
+            val names = listOf("All") + secs.map { it.first }
             val sig = names.joinToString("\u0000")
             // Counts first: the strip rebuilds when servers land (counts change)
             // as well as when sections appear — but never for nothing, so the
             // strip's scroll offset survives live ticks that change nothing.
-            val chipCounts = runCatching { sections().toMap().mapValues { it.value.size } }
+            val chipCounts = runCatching { secs.toMap().mapValues { it.value.size } }
                 .getOrDefault(emptyMap())
             val totalCount = chipCounts.values.sum()
             if (sig == builtChips && chip + "|" + totalCount == builtChipSelection) return
@@ -7860,7 +7904,48 @@ class PlayerActivity : ComponentActivity() {
             // Full-window on both phone and TV so the list reads as its own page.
             fillFractionX = 1.0f,
             fillFractionY = 0.98f,
+            // The main box covers left to right (the red-marked report): no
+            // floating-panel side insets on this screen.
+            edgeToEdge = true,
         )
+        // The dialog is on screen from here: converge the list on the live
+        // session one more time, on the window's own message queue. The open
+        // path above rebuilt while the views were still unattached, and any
+        // servers that landed between that rebuild and the show have no tick
+        // of their own yet — that window is the box that stayed blank until
+        // a touch drove a traversal by hand.
+        list.post {
+            if (!dialog.isShowing) return@post
+            syncFromSession()
+            rebuildChips()
+            rebuildList()
+            list.requestLayout()
+            (list.parent as? View)?.requestLayout()
+        }
+        // Rows added by ANY path repaint without a touch: the coalesced
+        // watcher covers collector ticks, this covers the rest (a sync that
+        // adopts rows between ticks, a rebuild from the post above). It
+        // settles: a paint whose layout matches the signature adds no views,
+        // so no second paint follows it. Television rows also join the focus
+        // walk here (the generic panel pass ran before these rows existed).
+        list.setOnHierarchyChangeListener(object : ViewGroup.OnHierarchyChangeListener {
+            override fun onChildViewAdded(parent: View, child: View) {
+                if (!dialog.isShowing) return
+                if (playerTvRemote()) runCatching {
+                    child.tvFocusableTree()
+                    (child as? ViewGroup)?.let { wireTvFocus(it) }
+                }
+                list.post {
+                    if (!dialog.isShowing) return@post
+                    syncFromSession()
+                    rebuildChips()
+                    rebuildList()
+                    list.requestLayout()
+                    (list.parent as? View)?.requestLayout()
+                }
+            }
+            override fun onChildViewRemoved(parent: View, child: View) {}
+        })
         if (hintView != null) {
             // The hint doubles as the live status of the OTHER extensions: which
             // ones are still being asked right now, and which came back without a

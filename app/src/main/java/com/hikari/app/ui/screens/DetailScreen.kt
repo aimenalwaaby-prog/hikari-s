@@ -1730,9 +1730,9 @@ fun DetailScreen(
     val isTvLayout = com.hikari.app.tv.TvMode.current()
     val tvDetailBigFlow = remember { detailApp.store.tvDetailBigFlow() }
     val tvDetailBig by tvDetailBigFlow.collectAsState(initial = isTvLayout)
-    // Blur-merge detail art (Settings → TV & Remote, off by default): the fit
-    // image on top, its blurred copy filling and merging below — no cropped
-    // full-bleed background.
+    // Full-bleed detail art (Settings → TV & Remote, off by default): the
+    // art fills the frame edge to edge — portrait, square and wide alike —
+    // instead of a fit strip with blurred bars down both sides.
     val tvBlurFlow = remember { detailApp.store.tvBlurDetailFlow() }
     val tvBlurDetail by tvBlurFlow.collectAsState(initial = false)
     val tvEpisodeSizeFlow = remember { detailApp.store.tvEpisodeSizeFlow() }
@@ -3642,7 +3642,7 @@ fun DetailScreen(
                     Box(
                         Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(top = 58.dp, end = 22.dp, bottom = 24.dp)
+                            .padding(top = 58.dp, end = 14.dp, bottom = 24.dp)
                             .fillMaxWidth(0.37f)
                             .fillMaxHeight(0.88f)
                             .clip(RoundedCornerShape(18.dp))
@@ -3881,12 +3881,12 @@ fun DetailScreen(
                         // Normal episode-list mode owns the right side of the TV hero.
                         // Keep the detail text inside the remaining left area instead of
                         // letting long overviews draw underneath the episode panel.
-                        .fillMaxWidth(if (episodePosterStyle) 1f else 0.56f)
+                        .fillMaxWidth(if (episodePosterStyle) 1f else 0.60f)
                         .padding(
                             start = 42.dp,
-                            end = 18.dp,
+                            end = 12.dp,
                             top = if (episodePosterStyle) 0.dp else 82.dp,
-                            bottom = if (episodePosterStyle) 24.dp else 0.dp,
+                            bottom = if (episodePosterStyle) 12.dp else 0.dp,
                         )
                 ) {
                     if (!heroLogo.isNullOrBlank()) {
@@ -4048,22 +4048,17 @@ fun DetailScreen(
         if (isTvLayout) {
             Box(Modifier.fillMaxSize()) {
                 if (tvBlurDetail) {
-                    // Blur-merge art (opt-in): the blurred copy fills the frame
-                    // and the fit image sits on top of it, merging downward —
-                    // no cropped full-bleed background image.
+                    // Full-bleed detail art (opt-in): the art fills the frame
+                    // edge to edge, portrait/square/wide alike, exactly like
+                    // the reference detail backdrop — no fit strip with
+                    // blurred bars down both sides. Top-anchored so faces and
+                    // title art stay in frame on tall art.
                     AsyncImage(
                         model = tvHeroImage.first,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().blur(28.dp),
-                    )
-                    AsyncImage(
-                        model = tvHeroImage.first,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxWidth()
-                            .fillMaxHeight(0.62f)
-                            .align(Alignment.TopCenter),
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     // tvHeroImage.second is true only for genuinely wide art: a
@@ -4137,8 +4132,8 @@ fun DetailScreen(
                                     .padding(
                                         start = 20.dp,
                                         end = 20.dp,
-                                        top = 10.dp,
-                                        bottom = 24.dp,
+                                        top = 6.dp,
+                                        bottom = 10.dp,
                                     )
                             ) {
                                 tvPlayRow(8.dp)

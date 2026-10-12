@@ -82,8 +82,6 @@ import com.hikari.app.ui.navigation.LocalTaskbarInset
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.ui.rememberVisibleItems
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -153,6 +151,9 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
     var confirmClearReading by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    // Engines that have not answered the current query yet — the grid fills
+    // per answer (see below) and this counts the stragglers for the footer.
+    var enginesLeft by remember { mutableStateOf(0) }
 
     val scope = rememberCoroutineScope()
     val typed = query.trim()
@@ -174,22 +175,41 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
             return@LaunchedEffect
         }
         searching = true
+        results = emptyList()
         // Every engine at once — each one is a separate site and they answer in
         // parallel; the app's own gate keeps a big install from flooding the
         // network (see ProviderGate). One engine throwing must not empty the
         // whole result list, so each call is caught on its own. Each call is
         // also bounded: one hung site used to hold the whole await forever, so
         // a genre tap sat on "Asking your engines…" and never showed anything.
-        val found = coroutineScope {
-            targets.map { p ->
-                async {
-                    withTimeoutOrNull(25_000L) {
-                        runCatching { p.search(typed, 1) }.getOrDefault(emptyList())
-                    } ?: emptyList()
+        //
+        // Results stream in per engine: each answer is appended the moment it
+        // lands instead of waiting for every engine (the "All shows nothing
+        // while one engine hangs" report) — the grid keeps filling as the
+        // user scrolls, and the spinner only owns the screen while NOTHING
+        // has arrived yet.
+        enginesLeft = targets.size
+        coroutineScope {
+            targets.forEach { p ->
+                launch {
+                    try {
+                        val found = withTimeoutOrNull(25_000L) {
+                            runCatching { p.search(typed, 1) }.getOrDefault(emptyList())
+                        } ?: emptyList()
+                        if (found.isNotEmpty()) {
+                            results = (results + found).distinctBy { it.uniqueId }
+                        }
+                    } finally {
+                        // A restarted query cancels these children: their
+                        // finally must not eat the new run's own count.
+                        if (isActive) {
+                            enginesLeft--
+                            if (enginesLeft <= 0) searching = false
+                        }
+                    }
                 }
-            }.awaitAll().flatten()
+            }
         }
-        results = found.distinctBy { it.uniqueId }
         searching = false
     }
 
@@ -317,6 +337,30 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
                             )
                         },
                     )
+                }
+                // Answers still landing while results are already on screen:
+                // a slim footer says so, so the list reads as live rather
+                // than complete.
+                if (searching) {
+                    item(key = "manga-searching-more", span = { GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (enginesLeft > 0) I18n.t("%s engines still answering…")
+                                    .replace("%s", enginesLeft.toString())
+                                else tr("Asking other engines…"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
             return@LazyVerticalGrid

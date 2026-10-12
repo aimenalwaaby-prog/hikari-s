@@ -26,7 +26,11 @@ import org.json.JSONObject
 object TmdbMeta {
 
     private const val IMG = "https://image.tmdb.org/t/p/w500"
-    private const val IMG_WIDE = "https://image.tmdb.org/t/p/w780"
+    // Backdrops are drawn full-bleed (detail page, TV hero, Continue cards):
+    // w780 stretched over a fullscreen frame read as visibly soft (the "low
+    // quality background" report), so backdrops resolve one step higher.
+    // Grid cells still downsample through Coil, so this costs nothing there.
+    private const val IMG_WIDE = "https://image.tmdb.org/t/p/w1280"
     /** Cast headshots: TMDB's small profile size renders well in a circle. */
     private const val IMG_PROFILE = "https://image.tmdb.org/t/p/w185"
 

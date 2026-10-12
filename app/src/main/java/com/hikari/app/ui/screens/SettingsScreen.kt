@@ -3254,8 +3254,8 @@ private fun TvDetailStyleCard(app: HikariApp) {
             },
         )
         SettingsToggle(
-            label = tr("Blur-merge detail art"),
-            supporting = tr("Fit image on top, its blurred copy merging below — no cropped background"),
+            label = tr("Full-bleed detail art"),
+            supporting = tr("Art fills the full screen — no side bars on tall images"),
             checked = blurOn,
             onCheckedChange = { value ->
                 scope.launch { runCatching { app.store.setTvBlurDetail(value) } }

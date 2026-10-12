@@ -21,6 +21,14 @@
 - Manga tags stay in the manga tab: tapping a genre chip opens the manga search inside the Manga tab instead of jumping to the global Search tab
 - Manga chapters failing with "Refresh Chapter List" while the same extension reads fine in the reference app: the page list gets one retry on a freshly re-resolved chapter entry through the same combined call the chapter screen uses (old and Kei sources alike) before the failure is reported
 - Multi-source manga extensions spamming the list with "MangaDot (7)" … "(14)": colliding source names are disambiguated with the site host ("MangaDot • mangadot") Mihon-style, numbered ("MangaDot (1)" …) when the host is the same or absent, and host+suffix+number inside a shared host
+- TV detail art goes full-bleed: the Settings → TV & Remote toggle is now "Full-bleed detail art" and paints the art edge-to-edge, top-anchored (faces/title art stay in frame on tall art) instead of a fit strip with blurred bars down both sides; the default path keeps the cinematic blurred fill, also top-anchored for poster-only titles
+- TV detail spacing tightened: slimmer poster-shelf padding, smaller hero-poster gap, wider non-poster text column, tighter episode-panel edge
+- Sharper detail backdrops everywhere: wide art loads at w1280 instead of w780
+- Manga "All engines" search streams in: every engine is asked at once, each bounded at 25s, and each answer appends the moment it lands (the grid fills while stragglers are still working — footer counts "N engines still answering") instead of one hung site holding the whole join hostage
+- TV home hero art drops instantly on provider switch (was: stale art lingered until the next load)
+- Sources sheet hardening: explicit layout on open and every live append (no more blank-until-touched), guarded rebuild, fallback sections so the list always renders
+- Real flag images in every provider chooser (Home picker, TV Select Provider, extension rows, collection packs/members): the country's actual flag over the network with the emoji flag as offline fallback — never a broken tile, never guessed; Bangladesh split from Indian languages (Bangla/BD/Dhaka/BDIX → 🇧🇩), well-known names flagged by name, anything naming no country shows none
+- Server rows draw real codec-badge logos (4K Ultra HD, Dolby Vision, Dolby Atmos, HEVC/x265, Blu-ray, DTS) from bundled artwork, with Atmos/DD+/TrueHD/DTS detection on the name/details/url — text pills remain for facts with no logo
 
 ### Added
 - File size badge API on ServerMeta (sizeOf) feeding the Sources screen rows

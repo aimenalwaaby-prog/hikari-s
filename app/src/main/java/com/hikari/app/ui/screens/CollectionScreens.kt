@@ -174,9 +174,11 @@ import com.hikari.app.data.TmdbSpec
 import com.hikari.app.net.Http
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.ui.Artwork
+import com.hikari.app.ui.FlagIcon
 import com.hikari.app.ui.PosterArt
 import com.hikari.app.ui.PosterLoader
 import com.hikari.app.ui.PosterStyle
+import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.ui.components.EmptyState
 import com.hikari.app.ui.components.GlassCard
 import com.hikari.app.ui.components.GlassCornerRadius
@@ -3152,11 +3154,13 @@ private fun ExtensionPickerSheet(
             } else {
                 LazyColumn(Modifier.padding(top = 8.dp, bottom = 24.dp)) {
                     items(active.distinctBy { it.config.id }, key = { it.config.id }) { p ->
+                        val lineSupporting = repoNameByProvider[p.config.id]
+                            ?.let { "${p.config.type.groupLabel} · $it" }
                         PickerLine(
                             label = p.config.name,
                             selected = false,
-                            supporting = repoNameByProvider[p.config.id]
-                                ?.let { "${p.config.type.groupLabel} · $it" },
+                            supporting = lineSupporting,
+                            flagCode = ProviderFlags.codeOf(p.config.name, lineSupporting),
                         ) { onPick(p) }
                     }
                 }
@@ -3175,6 +3179,8 @@ private fun PickerLine(
     label: String,
     selected: Boolean,
     supporting: String? = null,
+    /** ISO country code for the real flag image in front of the name. */
+    flagCode: String? = null,
     onClick: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -3190,6 +3196,10 @@ private fun PickerLine(
                 .padding(horizontal = 10.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (flagCode != null) {
+                FlagIcon(code = flagCode, size = 22.dp)
+                Spacer(Modifier.width(10.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     label,

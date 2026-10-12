@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.data.Profiles
+import com.hikari.app.ui.FlagIcon
+import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.i18n.tr
 
 /**
@@ -473,6 +475,7 @@ fun TvSelectProviderDialog(
                             name = p.config.name,
                             supporting = p.config.type.groupLabel,
                             selected = id in selection,
+                            flagCode = ProviderFlags.codeOf(p.config.name),
                             icon = {
                                 TvProviderIcon(
                                     iconUrl = p.config.iconUrl,
@@ -555,6 +558,7 @@ fun TvManageFeedDialog(
                                 name = p.config.name,
                                 supporting = p.config.type.groupLabel,
                                 selected = true,
+                                flagCode = ProviderFlags.codeOf(p.config.name),
                                 icon = {
                                     TvProviderIcon(
                                         iconUrl = p.config.iconUrl,
@@ -602,6 +606,7 @@ fun TvManageFeedDialog(
                                     name = p.config.name,
                                     supporting = p.config.type.groupLabel,
                                     selected = false,
+                                    flagCode = ProviderFlags.codeOf(p.config.name),
                                     icon = {
                                         TvProviderIcon(
                                             iconUrl = p.config.iconUrl,
@@ -646,6 +651,9 @@ private fun TvProviderCard(
     icon: @Composable () -> Unit,
     onClick: () -> Unit,
     onHold: (() -> Unit)? = null,
+    /** ISO country code for the real flag image beside the icon — null draws
+     *  no flag. */
+    flagCode: String? = null,
 ) {
     val shape = RoundedCornerShape(16.dp)
     Row(
@@ -668,6 +676,10 @@ private fun TvProviderCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon()
+        if (flagCode != null) {
+            Spacer(Modifier.width(8.dp))
+            FlagIcon(code = flagCode, size = 20.dp)
+        }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(

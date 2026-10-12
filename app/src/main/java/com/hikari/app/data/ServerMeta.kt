@@ -1,5 +1,7 @@
 package com.hikari.app.data
 
+import com.hikari.app.R
+
 /**
  * Best-effort server-row details for EVERY engine.
  *
@@ -69,6 +71,13 @@ object ServerMeta {
         val low = text.lowercase()
         if ("multi" in low && "audio" in low) return "Multi-Audio"
         if ("dual" in low && "audio" in low) return "Dual-Audio"
+        // Object/surround codecs the reference Sources screen draws as logo
+        // badges (Dolby Atmos, DD+, DTS) — read from the name/details, never
+        // invented (see [badgeIconRes] for the artwork).
+        if (Regex("""(^|[^a-z])atmos([^a-z]|$)""").containsMatchIn(low)) return "Atmos"
+        if (Regex("""(^|[^a-z0-9])(dd\+|ddp|eac3)""").containsMatchIn(low)) return "DD+"
+        if (Regex("""(^|[^a-z])truehd([^a-z]|$)""").containsMatchIn(low)) return "TrueHD"
+        if (Regex("""(^|[^a-z])dts([^a-z]|$)""").containsMatchIn(low)) return "DTS"
         for (l in langs) {
             if (Regex("""(^|[^a-z])${Regex.escape(l)}([^a-z]|$)""").containsMatchIn(low)) {
                 return l.replaceFirstChar { it.uppercase() }
@@ -153,4 +162,21 @@ object ServerMeta {
     /** Seeder fragment if the texts carry one (Torrentio-style), else null. */
     fun seederOf(name: String, details: String): String? =
         seedRe.find("$name $details")?.groupValues?.getOrNull(1)?.trim()
+
+    /**
+     * Real logo artwork for a fact [chip] from [chipsOf] (the badges the
+     * reference Sources screen draws: 4K Ultra HD, Dolby Vision/Atmos, HEVC,
+     * Blu-ray, DTS), as a drawable resource — 0 when the chip has no logo and
+     * keeps its text pill. Only what name/details/url already state ever
+     * becomes a chip, so a logo here is never invented either.
+     */
+    fun badgeIconRes(chip: String): Int = when (chip.uppercase()) {
+        "4K" -> R.drawable.badge_uhd
+        "DV" -> R.drawable.badge_dv
+        "ATMOS" -> R.drawable.badge_atmos
+        "HEVC" -> R.drawable.badge_hevc
+        "BLU-RAY" -> R.drawable.badge_bluray
+        "DTS" -> R.drawable.badge_dts
+        else -> 0
+    }
 }

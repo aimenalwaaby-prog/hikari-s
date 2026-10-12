@@ -130,7 +130,9 @@ import com.hikari.app.tv.TvProfileMenuDialog
 import com.hikari.app.tv.TvSelectProviderDialog
 import com.hikari.app.tv.TvUi
 import com.hikari.app.ui.Artwork
+import com.hikari.app.ui.FlagIcon
 import com.hikari.app.ui.PosterLoader
+import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.ui.ProviderPacks
 import com.hikari.app.ui.rememberVisibleItems
 import com.hikari.app.ui.components.ContinueWatchingRow
@@ -841,7 +843,14 @@ fun HomeScreen(nav: NavHostController) {
         val first = rows.firstOrNull()?.items.orEmpty()
         (first.filter { !it.backdropUrl.isNullOrBlank() }.ifEmpty { first }).take(8)
     }
-    var tvHero by remember { mutableStateOf(emptyList<MediaItem>()) }
+    // The TV hero latches the first rows so it never flashes while shelves
+    // stream in — but it must latch PER provider pick, or the header keeps
+    // showing the previous extension's art after a switch (the "header image
+    // is not updating" report). Keying the latch on the selection drops the
+    // stale art the instant the pick changes; the new rows latch when they
+    // land. Left/Right on the hero itself steps through every latched title
+    // (see TvCinematicHero) — nothing is fixed to one.
+    var tvHero by remember(selection) { mutableStateOf(emptyList<MediaItem>()) }
     if (TvMode.current()) {
         if (tvHero.isEmpty() && featuredLive.isNotEmpty()) tvHero = featuredLive
     } else if (tvHero.isNotEmpty()) {
@@ -2176,6 +2185,12 @@ internal fun ProviderPickerSheet(
                         label = pack.label,
                         isSelected = if (multi) ticked else selection.contains(key),
                         multi = multi,
+                        // The reference provider list's flag in front of every
+                        // extension — read from the name + repo, never guessed.
+                        flagCode = ProviderFlags.codeOf(
+                            pack.label,
+                            repoLabels[pack.primary.config.id],
+                        ),
                         // The pin is on EVERY row, not revealed by a hold: with
                         // hundreds of installed extensions the user is looking
                         // for the pin itself, and a control they have to know
@@ -2248,6 +2263,7 @@ internal fun ProviderPickerSheet(
                                         label = pack.memberLabel(i),
                                         isSelected = if (multi) mticked else selection.contains(mkey),
                                         multi = multi,
+                                        flagCode = ProviderFlags.codeOf(pack.memberLabel(i)),
                                         pinned = pinOrder.containsKey(mkey),
                                         onTogglePin = {
                                             scope.launch { app.store.togglePinnedProvider(mkey) }
@@ -2449,6 +2465,9 @@ private fun PickerRow(
     isSelected: Boolean,
     supporting: String? = null,
     leadingIcon: ImageVector? = null,
+    /** ISO country code for the real flag image in front of the name (the
+     *  reference provider list's flags) — null draws no flag. */
+    flagCode: String? = null,
     showDivider: Boolean = true,
     multi: Boolean = false,
     pinned: Boolean = false,
@@ -2506,6 +2525,10 @@ private fun PickerRow(
                 .padding(horizontal = 10.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (flagCode != null) {
+                FlagIcon(code = flagCode, size = 22.dp)
+                Spacer(Modifier.width(10.dp))
+            }
             if (leadingIcon != null) {
                 Icon(
                     leadingIcon,
