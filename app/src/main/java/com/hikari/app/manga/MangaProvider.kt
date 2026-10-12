@@ -60,6 +60,9 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             val low = u.lowercase()
             return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
         }
+        // Same cover served with per-page signed queries: exact-URL dedup
+        // never sees them as equal, so compare query-stripped.
+        fun normImg(u: String): String = u.substringBefore("?").substringBefore("#").trim().lowercase()
         fun isPreviewSet(providerId: String, chapterUrl: String, urls: List<String>): Boolean {
             if (urls.isEmpty()) return false
             val h = urls.sorted().joinToString("|").hashCode().toString() + "|" + urls.size
@@ -530,6 +533,15 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             noteWall(why)
             return@gate failEpisodes("chapters failed: $why")
         }
+        // An empty answer is not chapters: some sites need the details call to
+        // prime the session before the list exists. Prime once before calling
+        // it empty, so a first-open "0 chapters" can still recover.
+        if (raw.isEmpty()) {
+            runCatching { updateOf(src, item, details = true, chapters = true) }
+            val retry = runCatching { ask() }.getOrNull()
+            if (!retry.isNullOrEmpty()) raw = retry
+        }
+        if (raw.isEmpty()) return@gate failEpisodes("no chapters in this answer")
         val sorted = sortChapters(raw)
         MangaStore.putChapters(item.providerId + "|" + item.id, sorted.map { it.toChapter() })
         lastOutcome[config.id] = "✓ ${sorted.size} chapter(s)"
@@ -618,21 +630,36 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             // not absolute.
             val base = sourceHeaders(src)
             val hasRef = base.keys.any { it.equals("Referer", ignoreCase = true) }
+            val hasUA = base.keys.any { it.equals("User-Agent", ignoreCase = true) }
+            fun originOf(ref: String?): String? = runCatching {
+                val u = android.net.Uri.parse(ref ?: return@runCatching null)
+                if (u.scheme.isNullOrBlank() || u.host.isNullOrBlank()) null else u.scheme + "://" + u.host
+            }.getOrNull()
             val site = siteUrl()
             val http = src as? HttpSource
             val origin = runCatching { http?.baseUrl?.trimEnd('/') }.getOrNull()
                 .orEmpty().ifBlank { site?.trimEnd('/') }
             lastOutcome[config.id] = "✓ ${pages.size} page(s)"
             val seenPageUrls = HashSet<String>()
+            val seenNorm = HashSet<String>()
             val outPages = pages.mapIndexed { i, page ->
                 val url = pageUrl(src, page)
                 if (url.isNotBlank()) page.imageUrl = url
-                val headers = if (hasRef) base else {
-                    val ref = page.url.takeIf { it.startsWith("http") }
+                val headers = run {
+                    var h = base
+                    val ref = if (hasRef) null else (page.url.takeIf { it.startsWith("http") }
                         ?: page.url.takeIf { it.isNotBlank() }?.let { rel ->
                             origin?.let { o -> o.trimEnd('/') + "/" + rel.trimStart('/') }
-                        } ?: site
-                    if (ref != null) base + ("Referer" to ref) else base
+                        } ?: site)
+                    if (ref != null) h = h + ("Referer" to ref)
+                    // Hotlink/CDN guards beyond Referer: Origin + UA travel with
+                    // every page so a "Couldn't load page" is not one missing
+                    // header away. Values already present are never overwritten.
+                    val useRef = h["Referer"] ?: ref
+                    val originV = originOf(useRef)
+                    if (originV != null && h.keys.none { it.equals("Origin", ignoreCase = true) }) h = h + ("Origin" to originV)
+                    if (!hasUA && h.keys.none { it.equals("User-Agent", ignoreCase = true) }) h = h + ("User-Agent" to com.hikari.app.net.Http.UA)
+                    h
                 }
                 StreamSource(
                     name = "Page ${i + 1}",
@@ -649,13 +676,15 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             }.filter { p ->
                 val poster = item.posterUrl?.trim().orEmpty()
                 p.url.isNotBlank() && p.url != chapter.id && !isPreviewUrl(p.url) &&
-                    (poster.isBlank() || p.url != poster) && seenPageUrls.add(p.url)
+                    (poster.isBlank() || p.url != poster) && (poster.isBlank() || normImg(p.url) != normImg(poster)) &&
+                    seenPageUrls.add(p.url) && seenNorm.add(normImg(p.url))
             }
             // Same 2 previews in every chapter (universal): a set repeating
             // verbatim for another chapter is previews, not pages.
             if (outPages.isNotEmpty() && isPreviewSet(config.id, chapter.id, outPages.map { it.url })) {
                 return@gate fail("chapter locked or pages-walled", emptyList())
             }
+            if (outPages.size >= 2 && seenNorm.size == 1) return@gate fail("chapter locked or pages-walled", emptyList())
             if (outPages.isEmpty()) return@gate fail("pages failed: no readable pages", emptyList())
             lastOutcome[config.id] = "✓ ${outPages.size} page(s)"
             outPages

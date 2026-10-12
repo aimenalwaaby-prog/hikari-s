@@ -277,6 +277,41 @@ object Profiles {
             marker
         }
 
+    /**
+     * Stores an already-cropped square [bmp] for [id] (the profile-picture
+     * crop sheet's output): same 512px JPEG device-local file as [setAvatar],
+     * same marker shape. Bitmap is not recycled here; the caller owns it.
+     */
+    suspend fun saveAvatarBitmap(app: HikariApp, id: String, bmp: android.graphics.Bitmap): String =
+        withContext(Dispatchers.IO) {
+            val ctx = app
+            val marker = runCatching {
+                val bound = 512
+                val scale = minOf(1f, bound / maxOf(bmp.width, bmp.height).toFloat())
+                val outBmp = if (scale < 1f) {
+                    android.graphics.Bitmap.createScaledBitmap(
+                        bmp,
+                        (bmp.width * scale).toInt().coerceAtLeast(1),
+                        (bmp.height * scale).toInt().coerceAtLeast(1),
+                        true,
+                    )
+                } else bmp
+                val out = File(avatarsDir(ctx), "$id.jpg")
+                out.outputStream().use { outBmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                if (outBmp !== bmp) runCatching { outBmp.recycle() }
+                "file:$id.jpg"
+            }.getOrDefault("")
+            if (marker.isNotBlank()) {
+                lock.withLock {
+                    val reg = readRegistry(ctx)
+                    val next = profilesOf(reg).map { p -> if (p.id == id) p.copy(avatar = marker) else p }
+                    writeRegistry(ctx, next, _activeId.value)
+                    publish(ctx, readRegistry(ctx))
+                }
+            }
+            marker
+        }
+
     // ---------------------------------------------------------- registry --
 
     private fun readRegistry(ctx: Context): JSONObject =

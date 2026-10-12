@@ -34,6 +34,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             val low = u.lowercase()
             return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
         }
+        fun normImg(u: String): String = u.substringBefore("?").substringBefore("#").trim().lowercase()
         fun isPreviewSet(providerId: String, chapterUrl: String, urls: List<String>): Boolean {
             if (urls.isEmpty()) return false
             val h = urls.sorted().joinToString("|").hashCode().toString() + "|" + urls.size
@@ -498,9 +499,9 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             val out = ArrayList<Episode>()
             for (i in 0 until minOf(arr.length(), MAX_CHAPTERS)) {
                 val o = arr.optJSONObject(i) ?: continue
-                val url = o.optString("url").ifBlank { o.optString("link") }.trim()
+                val url = o.optString("url").ifBlank { o.optString("link") }.ifBlank { o.optString("href") }.ifBlank { o.optString("id") }.trim()
                 if (url.isBlank()) continue
-                val name = o.optString("name").ifBlank { o.optString("title") }
+                val name = o.optString("name").ifBlank { o.optString("title") }.ifBlank { o.optString("label") }
                     .trim().ifBlank { null }
                 out += Episode(number = i + 1, id = url, name = name)
             }
@@ -536,19 +537,19 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         val queue = ArrayDeque<Pair<Any, Int>>()
         queue += root to 0
         var seen = 0
-        while (queue.isNotEmpty() && seen < 400) {
+        while (queue.isNotEmpty() && seen < 800) {
             val (node, depth) = queue.removeFirst()
             seen++
             if (node is JSONArray) {
                 if (node.length() > 0 && isChapterArray(node)) return node
-                if (depth < 3) {
+                if (depth < 4) {
                     for (i in 0 until node.length()) {
                         when (val e = node.opt(i)) {
                             is JSONObject, is JSONArray -> queue += e to depth + 1
                         }
                     }
                 }
-            } else if (node is JSONObject && depth < 3) {
+            } else if (node is JSONObject && depth < 4) {
                 val keys = node.keys()
                 while (keys.hasNext()) {
                     when (val v = node.opt(keys.next())) {
@@ -564,7 +565,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
     private fun isChapterArray(arr: JSONArray): Boolean {
         for (i in 0 until minOf(arr.length(), 8)) {
             val o = arr.optJSONObject(i) ?: continue
-            if (o.optString("url").isNotBlank() || o.optString("link").isNotBlank()) return true
+            if (o.optString("url").isNotBlank() || o.optString("link").isNotBlank() || o.optString("href").isNotBlank() || o.optString("id").isNotBlank()) return true
         }
         return false
     }
@@ -603,6 +604,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             val raw = AnymexRuntime.pages(mod, config.id, chUrl) ?: return@withContext emptyList()
             val arr = pageArray(raw) ?: return@withContext emptyList()
             val seenAnymex = HashSet<String>()
+            val seenAnymexNorm = HashSet<String>()
             val out = ArrayList<StreamSource>()
             for (i in 0 until arr.length()) {
                 when (val e = arr.opt(i)) {
@@ -613,13 +615,21 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                         // image); repeats of one cover would paint every
                         // chapter with the same image, so they are dropped and
                         // de-duplicated here, keeping story order.
-                        if (u.isBlank() || u == chUrl || isPreviewUrl(u) || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
+                        if (u.isBlank() || u == chUrl || isPreviewUrl(u) || (chPoster.isNotBlank() && (u == chPoster || normImg(u) == normImg(chPoster))) || !seenAnymex.add(u) || !seenAnymexNorm.add(normImg(u))) continue
                         // Hotlink-guarded CDNs refuse a page with no Referer even
                         // when no Cloudflare wall exists — the module often names
-                        // none, so the chapter itself stands in.
+                        // none, so the chapter itself stands in (plus Origin/UA).
                         val h = mapHeaders(e.optJSONObject("headers")).toMutableMap()
                         if (h.keys.none { it.equals("Referer", ignoreCase = true) }) {
                             h["Referer"] = chUrl
+                        }
+                        if (h.keys.none { it.equals("Origin", ignoreCase = true) }) {
+                            runCatching { android.net.Uri.parse(chUrl) }.getOrNull()?.let { uu ->
+                                if (!uu.scheme.isNullOrBlank() && !uu.host.isNullOrBlank()) h["Origin"] = uu.scheme + "://" + uu.host
+                            }
+                        }
+                        if (h.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+                            h["User-Agent"] = com.hikari.app.net.Http.UA
                         }
                         out += StreamSource(
                             name = "Page ${out.size + 1}",
@@ -633,11 +643,11 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     }
                     is String -> {
                         val u = e.trim()
-                        if (u.isBlank() || u == chUrl || isPreviewUrl(u) || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
+                        if (u.isBlank() || u == chUrl || isPreviewUrl(u) || (chPoster.isNotBlank() && (u == chPoster || normImg(u) == normImg(chPoster))) || !seenAnymex.add(u) || !seenAnymexNorm.add(normImg(u))) continue
                         out += StreamSource(
                             name = "Page ${out.size + 1}",
                             url = u,
-                            headers = mapOf("Referer" to chUrl),
+                            headers = mapOf("Referer" to chUrl, "User-Agent" to com.hikari.app.net.Http.UA),
                             pageUrl = chUrl,
                             provider = "Anymex",
                             providerId = config.id,
@@ -658,6 +668,10 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             // small set, matching the detail poster) is a walls/covers answer,
             // not pages — serving it paints identical "pages" in every chapter.
             // Report it honestly instead, like a locked Webtoons episode.
+            if (out.size >= 2 && out.map { normImg(it.url) }.toSet().size == 1) {
+                lastOutcome[config.id] = "chapter locked or pages-walled"
+                return@withContext emptyList()
+            }
             if (out.isNotEmpty() && chPoster.isNotBlank() && out.all { it.url == chPoster }) {
                 lastOutcome[config.id] = "✗ chapter locked or pages-walled"
                 return@withContext emptyList()

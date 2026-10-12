@@ -6,7 +6,12 @@
 - Manga same 2 previews in every chapter of every title, universally (Ex-Love Review / My Meddler in Love class): any webtoons.com viewer chapter now prefers its own imageList strips regardless of owner engine (Tachiyomi engine gains the same native reader), preview/thumbnail URLs filtered at all layers, and a page set repeating verbatim for another chapter reports honest empty instead of painting repeats
 - New-profile picture row clipped to a sliver (red-marked 7th tile): the tile row scrolls sideways now, so all 8 gradients + the storage tile are fully drawn on any width
 - TV repo folder bouncing straight back to Home with focus on the Home rail button: the rail now fires on Down (tvPress) instead of Up (clickable), so the opening press's trailing Up can never activate Home; folder + repo pages already park focus on Back
-- Version 286/0.11.15
+- Sources invisible-until-touch fixed correctly (below-fold append class): stable row diff (steady ticks touch no view; tail appends never tear down), first-overflow no longer auto-follows to the bottom, scroll restores after the new measure (double-posted), and the hierarchy feedback repaint is removed — a touch no longer finishes the layout
+- Sources box runs the red-marked length: full-page status line is smaller (8.5sp, 2 lines locked) and the room keeps one halo + 4dp instead of two + 8dp, so the panel grows
+- Manga empty chapters recover (primed details+chapters retry; empty answers report honestly instead of silent 0), same-cover pages collapse by query-stripped URL at engine + reader layers (signed-query covers report locked/walled), and page headers carry Referer + Origin + UA (hotlink 403 class)
+- Anymex chapters scan deeper/wider (depth 4, 800 nodes, href/id fallbacks) so nested chapter arrays are not reported as no-chapters
+- New-profile pictures wrap into two rows (no sideways scroll/sliver) and storage photos pass through a crop sheet (pinch 1x-4x zoom, drag to fit, circular preview, center-square crop saved device-local)
+- Version 287/0.11.16
 
 ## Unreleased (continuous build only)
 

@@ -6234,7 +6234,11 @@ class PlayerActivity : ComponentActivity() {
             ?.let { line ->
                 TextView(this).apply {
                     text = line
-                    dpText(10f)
+                    // Full-page Sources reads as its own page: its status line
+                    // stays small (8.5sp, 2 lines) so the panel below can run
+                    // the red-marked length instead of spending 4 tall lines
+                    // above the glass.
+                    dpText(if (fillFractionY > 0.9f) 8.5f else 10f)
                     includeFontPadding = false
                     // Four lines, not three: the cross-extension status line
                     // ("Asked 254 other repos (Aniyomi 13, CloudStream 57,
@@ -6246,8 +6250,9 @@ class PlayerActivity : ComponentActivity() {
                     // was asked — and at three it was sliced mid-fact
                     // ("… done, 17 with s…"). The hint is the only place the
                     // search explains itself, so it gets the room. A short hint
-                    // still takes the one line it needs: this is a cap.
-                    maxLines = 4
+                    // still takes the one line it needs: this is a cap. Full-page
+                    // Sources caps at 2 so the box can grow.
+                    maxLines = if (fillFractionY > 0.9f) 2 else 4
                     ellipsize = TextUtils.TruncateAt.END
                     setTextColor(0xFF9AA5B5.toInt())
                 }
@@ -6504,7 +6509,12 @@ class PlayerActivity : ComponentActivity() {
          * long list (thirty subtitle tracks) has to scroll.
          */
         fun roomFor(winNow: Point, width: Int): Int =
-            (winNow.y - headerHeightFor(width + 2 * halo) - 2 * halo - (8 * density).toInt())
+            // Full-bleed Sources (edge-to-edge): the glow spills past the screen
+            // edges instead of insetting the box, so only one halo plus a 4dp
+            // breath is kept — the red-marked extra length lives here.
+            (winNow.y - headerHeightFor(width + 2 * halo) -
+                (if (edgeToEdge) halo else 2 * halo) -
+                ((if (edgeToEdge) 4 else 8) * density).toInt())
                 .coerceAtLeast((110 * density).toInt())
 
         val room = roomFor(win, panelW)
@@ -7628,10 +7638,26 @@ class PlayerActivity : ComponentActivity() {
             )
             val visible = if (chip == "All") all else all.filter { it.first == chip }
             val sig = ArrayList<String>()
+            val sigCounts = HashMap<String, Int>()
             visible.forEach { (name, memberIdx) ->
-                if (chip == "All") sig.add("#" + name + "\u0001" + memberIdx.size)
+                if (chip == "All") sig.add("#" + name)
+                sigCounts[name] = memberIdx.size
                 memberIdx.forEach { sig.add(itemKey(it)) }
             }
+            // Steady tick (nothing changed, views intact): touch nothing. The
+            // paint-level sig guard covers most of these, but a rebuild called
+            // from open/post paths must also settle instead of tearing down
+            // 20+ cards per tick and keeping rows mid-layout.
+            if (sig == builtSig && builtSelected == currentIndex && stateRowView == null &&
+                (list.childCount - 1) == sig.size) return
+            // Append-only live growth (the common search case: new servers land
+            // at the end of the last section): keep every view on screen and
+            // only inflate the tail. A full teardown on every below-fold append
+            // collapsed the ScrollView measurement and, with the scroll restore
+            // below, blanked the list until a touch forced a traversal.
+            val keep = if (builtSig.isNotEmpty() && sig.size > builtSig.size &&
+                sig.subList(0, builtSig.size) == builtSig &&
+                (list.childCount - 1) == builtSig.size) builtSig.size else 0
             // A live search keeps appending servers for a minute or two. The
             // incremental append path (keep-what-is-on-screen) is REMOVED: it
             // kept a prefix signature of rows it believed were on screen while
@@ -7643,13 +7669,22 @@ class PlayerActivity : ComponentActivity() {
             // is what guarantees the rows on screen always match the session.
             // The tap-tear concern is handled by the coalescer (no mid-press
             // rebuild storm), not by skipping views.
-            run {
+            if (keep == 0) {
                 // The chip strip is this container's FIRST child (see above), so
                 // drop only the headers and rows — removeAllViews would take the
                 // chips with them and leave an empty strip behind.
                 while (list.childCount > 1) list.removeViewAt(list.childCount - 1)
+            } else {
+                // Tail-only growth: existing headers keep their views, but the
+                // section counts they show must follow the new totals.
+                for (i in 0 until keep) {
+                    val h = builtSig[i]
+                    if (!h.startsWith("#")) continue
+                    val name = h.removePrefix("#")
+                    val count = sigCounts[name] ?: continue
+                    runCatching { (list.getChildAt(i + 1) as? TextView)?.text = name.uppercase() + "  \u00B7  " + count }
+                }
             }
-            val keep = 0
             var pos = 0
             // Rows actually put on screen. One undrawable row (a poison label,
             // a row inflation that throws) is skipped instead of aborting the
@@ -7895,10 +7930,20 @@ class PlayerActivity : ComponentActivity() {
             // reads the list would yank them to the top.
             val keepY = sv?.scrollY ?: 0
             val nearBottomPx = (48 * density).roundToInt()
-            val wasAtBottom = sv?.let { v ->
+            // First-overflow guard: while the content fits, every tick reads as
+            // "at bottom" (content.bottom - height <= 0). Treating that as a
+            // follow would yank a top-reading user to the bottom on the exact
+            // tick the list first needs scrolling — the reported "all servers
+            // vanished when PlayIMDb landed". Only follow when the list could
+            // already scroll before this paint.
+            val canScrollBefore = sv?.let { v ->
+                val content = if (v.childCount > 0) v.getChildAt(0) else null
+                content != null && content.height > v.height
+            } ?: false
+            val wasAtBottom = canScrollBefore && (sv?.let { v ->
                 val content = if (v.childCount > 0) v.getChildAt(0) else null
                 content != null && content.bottom - (v.scrollY + v.height) <= nearBottomPx
-            } ?: false
+            } ?: false)
             val keepX = chipScroll.scrollX
             syncFromSession()
             // Nothing new to show (no adopted servers, same chip/selection)?
@@ -7942,8 +7987,17 @@ class PlayerActivity : ComponentActivity() {
             if (playerTvRemote()) {
                 runCatching { dialog.window?.decorView?.tvFocusableTree() }
             }
-            if (wasAtBottom) sv?.post { sv.scrollTo(0, Int.MAX_VALUE) } else sv?.post { sv.scrollTo(0, keepY) }
-            chipScroll.post { chipScroll.scrollTo(keepX, 0) }
+            // Restore AFTER the new measure: scrollTo clamps to the scroller's
+            // current max, so a post that runs before the taller layout lands
+            // mid-measure (half-cut bottom row, blank rows until a touch
+            // finishes the traversal). Double-posted, it runs after it.
+            list.post {
+                sv?.post {
+                    if (!dialog.isShowing) return@post
+                    if (wasAtBottom) sv.scrollTo(0, Int.MAX_VALUE) else sv.scrollTo(0, keepY)
+                }
+                chipScroll.post { if (dialog.isShowing) chipScroll.scrollTo(keepX, 0) }
+            }
         }
         // Live servers land in bursts (hundreds for big titles): running the
         // full sync+sections+rebuild+layout pass on EVERY tick saturates the
@@ -8077,11 +8131,11 @@ class PlayerActivity : ComponentActivity() {
                     child.tvFocusableTree()
                     (child as? ViewGroup)?.let { wireTvFocus(it) }
                 }
-                // Through the same 750ms coalescer as the watcher: a burst of
-                // landing servers used to run the full sync+rebuild+layout
-                // pass once PER ADDED ROW from here, which is the O(n²) storm
-                // that froze the sheet on big titles.
-                list.post { requestPaint() }
+                // No repaint from here: this fires once PER ROW the paint above
+                // just added (20+ posts per tick), which re-entered the full
+                // rebuild through the coalescer and kept rows mid-layout on
+                // slow devices (blank until touch, blank again next tick). The
+                // collector watcher above is the only repaint path.
             }
             override fun onChildViewRemoved(parent: View, child: View) {}
         })
@@ -8091,7 +8145,10 @@ class PlayerActivity : ComponentActivity() {
             // the whole panel on each change — the list below collapsed to
             // blank until the next touch drove a traversal (the hide / show
             // cycle). Fixed height: text swaps never move a pixel.
-            hintView.minLines = 4
+            // Locked small like the header above: the tally swaps text every
+            // 1.5s, and at 4 lines it remeasured the whole panel per change.
+            hintView.minLines = 2
+            hintView.maxLines = 2
             // The hint doubles as the live status of the OTHER extensions: which
             // ones are still being asked right now, and which came back without a
             // single server (and why). A repo that carries the title but cannot be

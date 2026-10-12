@@ -4,10 +4,12 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -59,6 +62,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -122,19 +127,22 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
     var typed by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     // Creation-sheet picture: a built-in gradient marker ("grad:N"), or a
-    // storage photo picked below (applied after the profile exists).
+    // storage photo picked below (applied after the profile exists). A picked
+    // photo always passes through the crop sheet first (pinch to zoom, drag to
+    // fit); the cropped square is what the preview shows and what gets stored.
     var namingAvatar by remember { mutableStateOf("") }
     var namingPhoto by remember { mutableStateOf<Uri?>(null) }
+    var namingCropped by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var namingCropUri by remember { mutableStateOf<Uri?>(null) }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            namingPhoto = uri
-            namingAvatar = ""
-        }
+        if (uri != null) namingCropUri = uri
     }
     fun openNaming(defaultName: String) {
         typed = defaultName
         namingAvatar = ""
         namingPhoto = null
+        namingCropped = null
+        namingCropUri = null
         naming = true
     }
     // The app-lock gate over this page: when an app lock is set, creating,
@@ -429,23 +437,29 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
             onAvatarChange = {
                 namingAvatar = it
                 namingPhoto = null
+                namingCropped = null
             },
             photoUri = namingPhoto,
+            cropped = namingCropped,
             onPickPhoto = { photoPicker.launch("image/*") },
-            onClearPhoto = { namingPhoto = null },
+            onClearPhoto = { namingPhoto = null; namingCropped = null },
             confirmLabel = if (profiles.isEmpty()) tr("Save") else tr("Create"),
             onConfirm = {
                 val name = typed.trim()
                 val grad = namingAvatar
                 val photo = namingPhoto
+                val cropped = namingCropped
                 naming = false
                 namingPhoto = null
+                namingCropped = null
+                namingCropUri = null
                 busy = true
                 scope.launch {
                     val result = runCatching {
                         val created = if (profiles.isEmpty()) Profiles.adopt(app, name.ifBlank { "Default" }, grad)
                         else Profiles.createEmpty(app, name.ifBlank { "Profile" }, grad)
-                        if (photo != null) runCatching { Profiles.setAvatar(app, created.id, photo) }
+                        if (cropped != null) runCatching { Profiles.saveAvatarBitmap(app, created.id, cropped) }
+                        else if (photo != null) runCatching { Profiles.setAvatar(app, created.id, photo) }
                         created
                     }
                     busy = false
@@ -457,6 +471,21 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
                 }
             },
             onDismiss = { naming = false },
+        )
+    }
+    // Picked photo -> square crop sheet (pinch to zoom, drag to fit). It sits
+    // above the creation sheet; confirming stores the cropped square for the
+    // preview and the later save, cancelling keeps the previous picture.
+    namingCropUri?.let { cropUri ->
+        ProfileCropDialog(
+            uri = cropUri,
+            onConfirm = { bmp ->
+                namingCropped = bmp
+                namingPhoto = null
+                namingAvatar = ""
+                namingCropUri = null
+            },
+            onDismiss = { namingCropUri = null },
         )
     }
 
@@ -796,6 +825,7 @@ private fun ProfileAvatar(
     active: Boolean,
     size: Dp = 44.dp,
     photoUri: Uri? = null,
+    cropped: android.graphics.Bitmap? = null,
 ) {
     val context = LocalContext.current
     val file = remember(profile.avatar) { Profiles.avatarFile(context, profile.avatar) }
@@ -805,6 +835,12 @@ private fun ProfileAvatar(
         Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
     } else Modifier
     when {
+        cropped != null -> Image(
+            bitmap = cropped.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape).then(ring),
+        )
         photoUri != null -> AsyncImage(
             model = photoUri,
             contentDescription = null,
@@ -852,6 +888,7 @@ private fun ProfileCreateDialog(
     avatar: String,
     onAvatarChange: (String) -> Unit,
     photoUri: Uri?,
+    cropped: android.graphics.Bitmap? = null,
     onPickPhoto: () -> Unit,
     onClearPhoto: () -> Unit,
     confirmLabel: String,
@@ -870,6 +907,7 @@ private fun ProfileCreateDialog(
                         active = false,
                         size = 64.dp,
                         photoUri = photoUri,
+                        cropped = cropped,
                     )
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
@@ -886,40 +924,58 @@ private fun ProfileCreateDialog(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                // Picture tiles scroll sideways: 8 gradients + the storage tile need
-                // ~388dp but the dialog is narrower — a fixed row clipped the last
-                // tile to a sliver (the red-marked report). Scrolled, every tile
-                // is reachable and fully drawn on any width.
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ProfileGradients.forEachIndexed { i, g ->
-                        val marker = "grad:$i"
-                        val selected = photoUri == null && avatar == marker
+                // Picture tiles wrap into two rows: whatever does not fit on the
+                // first line sits on the second — no sideways scroll, no sliver
+                // (the red-marked report). 8 gradients + the storage tile.
+                val hasPhoto = photoUri != null || cropped != null
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ProfileGradients.take(5).forEachIndexed { i, g ->
+                            val marker = "grad:$i"
+                            val selected = !hasPhoto && avatar == marker
+                            Box(
+                                Modifier.size(36.dp).clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(g.first, g.second)))
+                                    .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+                                    .clickable { onAvatarChange(marker) },
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ProfileGradients.drop(5).forEachIndexed { k, g ->
+                            val i = k + 5
+                            val marker = "grad:$i"
+                            val selected = !hasPhoto && avatar == marker
+                            Box(
+                                Modifier.size(36.dp).clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(g.first, g.second)))
+                                    .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+                                    .clickable { onAvatarChange(marker) },
+                            )
+                        }
                         Box(
                             Modifier.size(36.dp).clip(CircleShape)
-                                .background(Brush.linearGradient(listOf(g.first, g.second)))
-                                .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
-                                .clickable { onAvatarChange(marker) },
-                        )
-                    }
-                    Box(
-                        Modifier.size(36.dp).clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .then(if (photoUri != null) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
-                            .clickable { onPickPhoto() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (photoUri != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                IconButton(onClick = onClearPhoto, modifier = Modifier.size(20.dp)) {
-                                    Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .then(if (hasPhoto) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+                                .clickable { onPickPhoto() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (hasPhoto) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                    IconButton(onClick = onClearPhoto, modifier = Modifier.size(20.dp)) {
+                                        Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(12.dp))
+                                    }
                                 }
+                            } else {
+                                Icon(Icons.Filled.PhotoLibrary, contentDescription = tr("Choose from storage"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        } else {
-                            Icon(Icons.Filled.PhotoLibrary, contentDescription = tr("Choose from storage"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -941,6 +997,98 @@ private fun ProfileCreateDialog(
         },
         confirmButton = {
             TextButton(enabled = value.isNotBlank(), onClick = onConfirm) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(tr("Cancel")) }
+        },
+    )
+}
+
+/**
+ * Square crop sheet for a storage-picked picture: the photo draws under a
+ * circular preview mask, pinch (two fingers) zooms 1x-4x, drag pans, and
+ * confirm center-crops the square the preview shows. Zooming in crops a
+ * smaller center region (enlarged to the avatar size), so the face/detail can
+ * be fitted exactly; zoomed out the whole photo's center square is used.
+ */
+@Composable
+private fun ProfileCropDialog(
+    uri: Uri,
+    onConfirm: (android.graphics.Bitmap) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val src = remember(uri) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { ins ->
+                android.graphics.BitmapFactory.decodeStream(ins)
+            }
+        }.getOrNull()
+    }
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val transform = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 4f)
+        val max = 220f * scale
+        offset = androidx.compose.ui.geometry.Offset(
+            (offset.x + panChange.x).coerceIn(-max, max),
+            (offset.y + panChange.y).coerceIn(-max, max),
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(tr("Crop picture")) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (src == null) {
+                    Text(tr("Could not read that photo."))
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .transformable(transform),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(
+                            bitmap = src.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offset.x,
+                                translationY = offset.y,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        tr("Pinch to zoom, drag to fit — the circle is the picture."),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = src != null,
+                onClick = {
+                    val bmp = src ?: return@TextButton
+                    val sideFull = minOf(bmp.width, bmp.height)
+                    // Zoomed-in preview shows a smaller center region enlarged:
+                    // crop that region so the saved picture matches the preview.
+                    val side = (sideFull / scale).toInt().coerceIn(64, sideFull)
+                    var cx = (bmp.width / 2f) + (-offset.x / scale)
+                    var cy = (bmp.height / 2f) + (-offset.y / scale)
+                    cx = cx.coerceIn(side / 2f, (bmp.width - side / 2f).coerceAtLeast(side / 2f))
+                    cy = cy.coerceIn(side / 2f, (bmp.height - side / 2f).coerceAtLeast(side / 2f))
+                    val out = runCatching {
+                        android.graphics.Bitmap.createBitmap(bmp, (cx - side / 2f).toInt().coerceAtLeast(0), (cy - side / 2f).toInt().coerceAtLeast(0), side.coerceAtMost(bmp.width - (cx - side / 2f).toInt().coerceAtLeast(0)), side.coerceAtMost(bmp.height - (cy - side / 2f).toInt().coerceAtLeast(0)))
+                    }.getOrNull() ?: bmp
+                    onConfirm(out)
+                },
+            ) { Text(tr("Crop")) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(tr("Cancel")) }

@@ -294,9 +294,10 @@ fun MangaReaderScreen(
             val low = u.lowercase()
             return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
         }
+        fun norm(u: String): String = u.substringBefore("?").substringBefore("#").trim().lowercase()
         val out = runCatching { p.getStreams(item, ep) }.getOrNull().orEmpty()
-            .filter { it.url.isNotBlank() && it.url != url && !isPreview(it.url) && (poster.isBlank() || it.url != poster) }
-            .distinctBy { it.url }
+            .filter { it.url.isNotBlank() && it.url != url && !isPreview(it.url) && (poster.isBlank() || (it.url != poster && norm(it.url) != norm(poster))) }
+            .distinctBy { norm(it.url) }
         // Every page is downloaded through the extension's OWN source (see
         // [HikariPageSource]): `getImage(page)` is what carries the extension's
         // imageRequest headers and its own interceptors, which is the whole
