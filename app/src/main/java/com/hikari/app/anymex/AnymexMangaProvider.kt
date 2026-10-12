@@ -335,6 +335,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                 .map { it.groupValues[1].trim() }
                 .filter { it.startsWith("http") }
                 .distinct()
+                .toList()
             if (urls.isNotEmpty()) {
                 return urls.take(400).mapIndexed { i, img -> toSource(img, i + 1) }
             }
