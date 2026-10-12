@@ -203,6 +203,7 @@ import com.hikari.app.ui.components.GlassCard
 import com.hikari.app.ui.components.GlassShape
 import com.hikari.app.ui.components.HeroStyles
 import com.hikari.app.ui.components.MultiChoiceDialog
+import com.hikari.app.ui.components.SettingsColorBadge
 import com.hikari.app.ui.components.SettingsIconBadge
 import com.hikari.app.ui.components.SettingsIconBadgeRes
 import com.hikari.app.ui.components.SettingsPageHeader
@@ -564,11 +565,7 @@ private fun SettingsSection(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            SettingsColorBadge(icon, id)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1659,7 +1656,7 @@ private fun SettingsFolderRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (folder.iconRes != 0) SettingsIconBadgeRes(folder.iconRes)
-            else SettingsIconBadge(folder.icon)
+            else SettingsColorBadge(folder.icon, folder.key)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1707,7 +1704,7 @@ private fun TvLeftRow(icon: ImageVector, title: String, onClick: () -> Unit, ico
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (iconRes != 0) SettingsIconBadgeRes(iconRes)
-            else SettingsIconBadge(icon)
+            else SettingsColorBadge(icon, "tvleft:$title")
             Spacer(Modifier.width(16.dp))
             Text(
                 title,

@@ -5722,6 +5722,10 @@ class PlayerActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             isClickable = onClick != null
             isFocusable = onClick != null
+            // Same containment as the pill rows: no paint past the card's own
+            // rounded box (see glassRow) — the focused server card on TV stays
+            // inside the panel instead of bleeding over its edge.
+            clipToOutline = true
             if (onClick != null && playerTvRemote()) {
                 isFocusableInTouchMode = true
                 if (foreground == null) foreground = tvFocusRing()
@@ -5731,7 +5735,7 @@ class PlayerActivity : ComponentActivity() {
                 (12 * density).toInt(), (10 * density).toInt()
             )
             background = if (onClick == null) cardShape
-            else RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), cardShape, null)
+            else RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), cardShape, cardShape)
         }
         // Top line: provider in red on the left, size badge on the right.
         if (!option.topLabel.isNullOrBlank() || !option.badge.isNullOrBlank()) {
@@ -5908,6 +5912,10 @@ class PlayerActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             isClickable = onClick != null
             isFocusable = onClick != null
+            // A focused/pressed pill must never paint past its own box on a
+            // television: the outline clips everything (background, ripple and
+            // focus ring) to the row's own rounded shape, on every skin.
+            clipToOutline = true
             if (onClick != null && playerTvRemote()) {
                 // Ringed at BIRTH, not by the dialog's one-time focus pass:
                 // rows appended later (servers landing in the chooser) would
@@ -5924,7 +5932,7 @@ class PlayerActivity : ComponentActivity() {
                 ((if (card) 12 else 6) * density).toInt()
             )
             background = if (onClick == null) rowShape
-            else RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), rowShape, null)
+            else RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), rowShape, rowShape)
         }
         rowMarker(option)?.let { row.addView(it) }
         row.addView(LinearLayout(this).apply {
@@ -7860,8 +7868,16 @@ class PlayerActivity : ComponentActivity() {
             // Nothing new to show (no adopted servers, same chip/selection)?
             // Return before touching a single view — this is what settles the
             // loop (see above). builtSig empty means the open-path rebuild has
-            // not run yet, so the first paint always goes through.
-            val paintSig = sources.size.toString() + "|" + chip + "|" +
+            // not run yet, so the first paint always goes through. The content
+            // hash is what makes this airtight: size alone could not tell "the
+            // same 52 servers" from "52 different servers", so a tick that
+            // swapped the set still repainted — and a tick that changed
+            // nothing still ran layout+invalidate+scroll posts, which on slow
+            // devices kept rows perpetually mid-layout (visible after a touch,
+            // blank again on the next tick). Identical ticks now touch nothing.
+            var contentHash = 0
+            for (s in sources) contentHash = contentHash * 31 + (s.infoHash ?: s.url).hashCode()
+            val paintSig = sources.size.toString() + "|" + contentHash + "|" + chip + "|" +
                 currentIndex + "|" + playbackCommitted
             if (paintSig == lastPaintSig && builtSig.isNotEmpty()) return
             lastPaintSig = paintSig

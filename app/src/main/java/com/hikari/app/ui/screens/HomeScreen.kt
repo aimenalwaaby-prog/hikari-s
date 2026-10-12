@@ -2214,8 +2214,20 @@ internal fun ProviderPickerSheet(
                             multi && ticked && !allTicked -> I18n.t("%s of %s picked")
                                 .replaceFirst("%s", tickedIds.size.toString())
                                 .replaceFirst("%s", ids.size.toString())
-                            else -> pack.countLabel +
-                                (pack.detailLabel.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+                            else -> {
+                                // A pack row names what it folds: the count, the
+                                // member details — and the repo(s) the members
+                                // were installed from, so five identical names
+                                // still tell which install each one is.
+                                val base = pack.countLabel +
+                                    (pack.detailLabel.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+                                val packRepos = pack.members
+                                    .mapNotNull { repoLabels[it.config.id]?.takeIf { r -> r.isNotBlank() } }
+                                    .distinct()
+                                if (packRepos.isEmpty()) base
+                                else if (packRepos.size == 1) "$base · ${packRepos[0]}"
+                                else "$base · ${packRepos[0]} · +${packRepos.size - 1}"
+                            }
                         },
                         onLongClick = {
                             if (!multi) {
@@ -2267,6 +2279,16 @@ internal fun ProviderPickerSheet(
                                         label = if (pack.cross) pack.memberEngine(i).ifBlank { pack.memberLabel(i) } else pack.memberLabel(i),
                                         isSelected = if (multi) mticked else selection.contains(mkey),
                                         multi = multi,
+                                        // Every member names its engine AND the
+                                        // repo it was installed from ("CloudStream
+                                        // · Codegeasse Repo"), so same-named
+                                        // sources are telling apart at a glance.
+                                        supporting = listOf(
+                                            member.config.type.groupLabel,
+                                            repoLabels[mkey]?.takeIf { it.isNotBlank() },
+                                        ).filterNotNull().filter { it.isNotBlank() }
+                                            .distinct().joinToString(" · ")
+                                            .ifBlank { null },
                                         flagCode = ProviderFlags.codeOf(member.config.name, pack.memberLabel(i)),
                                         pinned = pinOrder.containsKey(mkey),
                                         onTogglePin = {

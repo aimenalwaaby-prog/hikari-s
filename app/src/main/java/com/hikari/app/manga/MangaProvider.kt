@@ -584,16 +584,27 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             val pages = pageList ?: return@gate fail("pages failed: Refresh Chapter List", emptyList())
             // The plain-client fallback (HikariPageSource.downloadTo) sends
             // exactly these headers: a source whose own headers name no Referer
-            // gets the site root as one, the way the cover fetcher already does,
-            // so a hotlink-guarded CDN stops refusing the pages.
-            val headers = sourceHeaders(src).let { h ->
-                if (h.keys.any { it.equals("Referer", ignoreCase = true) }) h
-                else siteUrl()?.let { site -> h + ("Referer" to site) } ?: h
-            }
+            // gets one per page — the page's own URL first (hotlink guards
+            // check the chapter, not the site root, and refuse a root Referer
+            // with no wall to solve), the site root only when the page URL is
+            // not absolute.
+            val base = sourceHeaders(src)
+            val hasRef = base.keys.any { it.equals("Referer", ignoreCase = true) }
+            val site = siteUrl()
+            val http = src as? HttpSource
+            val origin = runCatching { http?.baseUrl?.trimEnd('/') }.getOrNull()
+                .orEmpty().ifBlank { site?.trimEnd('/') }
             lastOutcome[config.id] = "✓ ${pages.size} page(s)"
             pages.mapIndexed { i, page ->
                 val url = pageUrl(src, page)
                 if (url.isNotBlank()) page.imageUrl = url
+                val headers = if (hasRef) base else {
+                    val ref = page.url.takeIf { it.startsWith("http") }
+                        ?: page.url.takeIf { it.isNotBlank() }?.let { rel ->
+                            origin?.let { o -> o.trimEnd('/') + "/" + rel.trimStart('/') }
+                        } ?: site
+                    if (ref != null) base + ("Referer" to ref) else base
+                }
                 StreamSource(
                     name = "Page ${i + 1}",
                     url = url,

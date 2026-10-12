@@ -107,6 +107,44 @@ fun SettingsIconBadgeRes(@DrawableRes resId: Int, size: Dp = 46.dp) {
 }
 
 /**
+ * A self-made colourful badge in the folder-badge language (navy ring,
+ * saturated disc, white glyph): for every inner settings row that has no
+ * supplied artwork. The disc colour is picked deterministically from [key]
+ * so a row keeps its colour across restarts, themes and locales — the same
+ * row is never two colours, and neighbours rarely share one.
+ */
+@Composable
+fun SettingsColorBadge(icon: ImageVector, key: String, size: Dp = 46.dp) {
+    val disc = badgeColorFor(key)
+    Box(
+        Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(disc)
+            .border(1.5.dp, androidx.compose.ui.graphics.Color(0xFF0F2540), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = androidx.compose.ui.graphics.Color.White,
+            modifier = Modifier.size(size * 0.46f),
+        )
+    }
+}
+
+/** Stable vibrant disc for [SettingsColorBadge], by row key. */
+fun badgeColorFor(key: String): androidx.compose.ui.graphics.Color {
+    val palette = listOf(
+        0xFFE5484D, 0xFFF97316, 0xFFF5A623, 0xFF22C55E, 0xFF14B8A6,
+        0xFF0EA5E9, 0xFF6366F1, 0xFFA855F7, 0xFFEC4899, 0xFF84CC16,
+        0xFF06B6D4, 0xFFEAB308, 0xFF8B5CF6, 0xFF10B981,
+    )
+    val idx = (key.hashCode() and Int.MAX_VALUE) % palette.size
+    return androidx.compose.ui.graphics.Color(palette[idx].toInt())
+}
+
+/**
  * The way out of a settings page: one circular glass button, the same size and
  * fill everywhere, so backing out of a folder, the Logs page and the
  * player-control editor are all the same gesture in the same place.

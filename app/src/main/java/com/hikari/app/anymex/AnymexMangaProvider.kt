@@ -300,34 +300,56 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
 
     /**
      * Native Webtoons pages (verified against the live site 2026-10-12): the
-     * episode's own viewer HTML carries every full-size strip inline
-     * (`webtoon-phinf` JPEGs; the `thumb_`/`?type=` variants are the toolbar
-     * thumbnails, not pages). phinf serves them with a webtoons Referer.
+     * episode's own viewer HTML carries every full-size strip in its
+     * `var imageList = [{url, sortOrder, ...}]` block — one list per episode,
+     * which is the ONLY per-episode page source on the page. A page-wide
+     * `webtoon-phinf` scan is kept strictly as a fallback (older markup):
+     * without it every episode of a preview-walled title returned the same
+     * series-level covers, i.e. identical "pages" in every chapter of every
+     * manga. An imageList block that is present but empty means the episode
+     * is locked — honest empty, never fallback covers.
      */
     private fun nativeWebtoonsPages(chapterUrl: String): List<StreamSource> {
         val u = webtoonsNormalize(chapterUrl)
         if (u.isBlank() || !u.startsWith("http") || "viewer" !in u) return emptyList()
         val html = webtoonsFetch(u)
         if (html.isBlank()) return emptyList()
-        val out = ArrayList<StreamSource>()
+        val headers = mapOf(
+            "User-Agent" to webtoonsUa,
+            "Referer" to "https://www.webtoons.com/",
+        )
+        fun toSource(img: String, n: Int) = StreamSource(
+            name = "Page $n",
+            url = img,
+            headers = headers,
+            pageUrl = u,
+            provider = "Anymex",
+            providerId = config.id,
+            providerName = config.name,
+        )
+        // Primary: the episode's own strip list, in story order.
+        val block = Regex("""var\s+imageList\s*=\s*\[(.*?)\];""", RegexOption.DOT_MATCHES_ALL)
+            .find(html)?.groupValues?.get(1)
+        if (block != null) {
+            val urls = Regex("""url\s*:\s*"([^"]+)"""").findAll(block)
+                .map { it.groupValues[1].trim() }
+                .filter { it.startsWith("http") }
+                .distinct()
+            if (urls.isNotEmpty()) {
+                return urls.take(400).mapIndexed { i, img -> toSource(img, i + 1) }
+            }
+            // Locked/preview episode: its strips are not in this HTML at all.
+            return emptyList()
+        }
+        // Fallback for older markup without an imageList block.
         val seen = HashSet<String>()
+        val out = ArrayList<StreamSource>()
         for (m in Regex("""https://webtoon-phinf\.pstatic\.net/[^"'<>\s]+""").findAll(html)) {
-            var img = m.value.trim()
+            val img = m.value.trim()
             if (img.isEmpty() || !seen.add(img)) continue
             val low = img.lowercase()
             if ("thumb" in low || "?type=" in low) continue
-            out += StreamSource(
-                name = "Page ${out.size + 1}",
-                url = img,
-                headers = mapOf(
-                    "User-Agent" to webtoonsUa,
-                    "Referer" to "https://www.webtoons.com/",
-                ),
-                pageUrl = u,
-                provider = "Anymex",
-                providerId = config.id,
-                providerName = config.name,
-            )
+            out += toSource(img, out.size + 1)
             if (out.size >= 400) break
         }
         return out
@@ -542,10 +564,17 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     is JSONObject -> {
                         val u = e.optString("url").ifBlank { e.optString("imageUrl") }.trim()
                         if (u.isBlank()) continue
+                        // Hotlink-guarded CDNs refuse a page with no Referer even
+                        // when no Cloudflare wall exists — the module often names
+                        // none, so the chapter itself stands in.
+                        val h = mapHeaders(e.optJSONObject("headers")).toMutableMap()
+                        if (h.keys.none { it.equals("Referer", ignoreCase = true) }) {
+                            h["Referer"] = chUrl
+                        }
                         out += StreamSource(
                             name = "Page ${i + 1}",
                             url = u,
-                            headers = mapHeaders(e.optJSONObject("headers")),
+                            headers = h,
                             pageUrl = chUrl,
                             provider = "Anymex",
                             providerId = config.id,
@@ -555,6 +584,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     is String -> if (e.isNotBlank()) out += StreamSource(
                         name = "Page ${i + 1}",
                         url = e.trim(),
+                        headers = mapOf("Referer" to chUrl),
                         pageUrl = chUrl,
                         provider = "Anymex",
                         providerId = config.id,
