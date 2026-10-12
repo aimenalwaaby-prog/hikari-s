@@ -25,6 +25,24 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         const val CATALOG_POPULAR = "popular"
         const val CATALOG_LATEST = "latest"
         private const val MAX_CHAPTERS = 2000
+        // Same preview set served for different chapters = not pages (the
+        // Ex-Love / My-Meddler class: the same 2 previews in every chapter of
+        // every manga). Real pages differ per chapter, so a set repeating
+        // verbatim for another chapter is previews/covers — honest empty.
+        private val previewSets = ConcurrentHashMap<String, String>()
+        fun isPreviewUrl(u: String): Boolean {
+            val low = u.lowercase()
+            return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
+        }
+        fun isPreviewSet(providerId: String, chapterUrl: String, urls: List<String>): Boolean {
+            if (urls.isEmpty()) return false
+            val h = urls.sorted().joinToString("|").hashCode().toString() + "|" + urls.size
+            val key = providerId + "|" + h
+            val first = previewSets.putIfAbsent(key, chapterUrl)
+            if (first != null && first != chapterUrl) return true
+            if (previewSets.size > 500) previewSets.clear()
+            return false
+        }
     }
 
     suspend fun preferenceDefs(): String {
@@ -570,7 +588,11 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             }
             // Native Webtoons strips (no JS module required): the viewer HTML
             // carries every full-size strip inline — see nativeWebtoonsPages.
-            if (isWebtoons()) {
+            // Universal: ANY module can hand back a webtoons.com viewer URL
+            // while its own pages() serves the same 2 previews for every
+            // chapter, so prefer the episode's own imageList whenever the
+            // chapter itself is a Webtoons viewer link, regardless of owner.
+            if (isWebtoons() || ("webtoons.com" in chUrl.lowercase() && "viewer" in chUrl.lowercase())) {
                 val pages = nativeWebtoonsPages(chUrl)
                 if (pages.isNotEmpty()) {
                     lastOutcome[config.id] = "✓ ${pages.size} pages (native)"
@@ -591,7 +613,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                         // image); repeats of one cover would paint every
                         // chapter with the same image, so they are dropped and
                         // de-duplicated here, keeping story order.
-                        if (u.isBlank() || u == chUrl || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
+                        if (u.isBlank() || u == chUrl || isPreviewUrl(u) || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
                         // Hotlink-guarded CDNs refuse a page with no Referer even
                         // when no Cloudflare wall exists — the module often names
                         // none, so the chapter itself stands in.
@@ -611,7 +633,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     }
                     is String -> {
                         val u = e.trim()
-                        if (u.isBlank() || u == chUrl || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
+                        if (u.isBlank() || u == chUrl || isPreviewUrl(u) || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
                         out += StreamSource(
                             name = "Page ${out.size + 1}",
                             url = u,
@@ -624,6 +646,13 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     }
                     else -> {}
                 }
+            }
+            // Same 2 previews for every chapter of every manga (the Ex-Love /
+            // My-Meddler class): real pages differ per chapter, so a set that
+            // repeats verbatim for a different chapter is previews, not pages.
+            if (out.isNotEmpty() && isPreviewSet(config.id, chUrl, out.map { it.url })) {
+                lastOutcome[config.id] = "✗ chapter locked or pages-walled"
+                return@withContext emptyList()
             }
             // A module answering the series covers for every chapter (the same
             // small set, matching the detail poster) is a walls/covers answer,

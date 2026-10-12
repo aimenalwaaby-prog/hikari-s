@@ -290,8 +290,12 @@ fun MangaReaderScreen(
         // reader keeps the same rule so a covers-only answer can never paint
         // the detail poster as every page of every chapter.
         val poster = posterUrl.trim()
+        fun isPreview(u: String): Boolean {
+            val low = u.lowercase()
+            return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
+        }
         val out = runCatching { p.getStreams(item, ep) }.getOrNull().orEmpty()
-            .filter { it.url.isNotBlank() && it.url != url && (poster.isBlank() || it.url != poster) }
+            .filter { it.url.isNotBlank() && it.url != url && !isPreview(it.url) && (poster.isBlank() || it.url != poster) }
             .distinctBy { it.url }
         // Every page is downloaded through the extension's OWN source (see
         // [HikariPageSource]): `getImage(page)` is what carries the extension's

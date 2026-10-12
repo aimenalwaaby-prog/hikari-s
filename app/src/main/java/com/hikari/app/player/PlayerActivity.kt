@@ -6547,7 +6547,11 @@ class PlayerActivity : ComponentActivity() {
         // why it reads as a lightweight overlay instead of a full-screen sheet.
         // The halo is added back on top so the PANEL keeps that width.
         dialog.window?.apply {
-            setLayout(panelW + 2 * halo, WindowManager.LayoutParams.WRAP_CONTENT)
+            // A full-bleed box (Sources) is exactly the window wide: growing by
+            // the halo overshoots the screen on boxes that clamp oversized
+            // windows, which reads as side gaps around a box meant to run edge
+            // to edge (the red-marked server-box report).
+            setLayout(if (edgeToEdge) panelW else panelW + 2 * halo, WindowManager.LayoutParams.WRAP_CONTENT)
             if (tvSheet) {
                 setGravity(
                     if (sideTvPanel) Gravity.START or Gravity.CENTER_VERTICAL
@@ -7628,22 +7632,24 @@ class PlayerActivity : ComponentActivity() {
                 if (chip == "All") sig.add("#" + name + "\u0001" + memberIdx.size)
                 memberIdx.forEach { sig.add(itemKey(it)) }
             }
-            // A live search keeps appending servers for a minute or two. Before
-            // this, every rebuild re-created every row, which tore down the row
-            // a finger was already pressing: the tap arrived as an ACTION_CANCEL
-            // and was silently swallowed — the chooser closed and nothing
-            // played. When the new layout only APPENDS to the rendered one, keep
-            // what is on screen and add just the new rows.
-            val grew = sig.size >= builtSig.size &&
-                builtSig.indices.all { builtSig[it] == sig[it] }
-            val keep = if (grew && builtSelected == currentIndex &&
-                builtSig.isNotEmpty()) builtSig.size else 0
-            if (keep == 0) {
+            // A live search keeps appending servers for a minute or two. The
+            // incremental append path (keep-what-is-on-screen) is REMOVED: it
+            // kept a prefix signature of rows it believed were on screen while
+            // the views were gone (a disposed list, a cleared container, a bend
+            // pass that dropped them), so every later tick skipped its headers
+            // and rows forever — the log-proven permanent blank ("24 adopted
+            // then chooser empty", sections=1, rows=0, no rowErr). A full
+            // rebuild every paint is bounded by the 750ms coalescer above and
+            // is what guarantees the rows on screen always match the session.
+            // The tap-tear concern is handled by the coalescer (no mid-press
+            // rebuild storm), not by skipping views.
+            run {
                 // The chip strip is this container's FIRST child (see above), so
                 // drop only the headers and rows — removeAllViews would take the
                 // chips with them and leave an empty strip behind.
                 while (list.childCount > 1) list.removeViewAt(list.childCount - 1)
             }
+            val keep = 0
             var pos = 0
             // Rows actually put on screen. One undrawable row (a poison label,
             // a row inflation that throws) is skipped instead of aborting the
@@ -7746,6 +7752,8 @@ class PlayerActivity : ComponentActivity() {
                         "Player",
                         "chooser empty with $sessionSize server(s) in the live session " +
                             "(sources=${sources.size}, chip=$chip, sections=${runCatching { sections().size }.getOrDefault(-1)}" +
+                            ", visible=${visible.size}/${runCatching { visible.sumOf { it.second.size } }.getOrDefault(-1)}, rendered=$rendered, onScreen=$onScreenRows, child=${list.childCount}" +
+                            ", builtSig=${builtSig.size}, sig=${sig.size}, keep=$keep" +
                             (if (firstRowError != null) ", rowErr=$firstRowError" else "") + ")",
                     )
                 }
@@ -7917,13 +7925,15 @@ class PlayerActivity : ComponentActivity() {
             // The list lives inside the panel's ScrollView: a layout-only pass
             // on the list leaves the scroller measuring the OLD content height,
             // so new rows sit at zero height until a touch scrolls (the exact
-            // invisible-until-touch shape). Remeasure the parent too.
+            // invisible-until-touch shape). Remeasure the scroller chain too.
             (list.parent as? View)?.requestLayout()
+            sv?.requestLayout()
             // And the draw to go with the layout: a touch forces a traversal
             // that paints rows a layout-only pass left undrawn, so force both
             // phases here instead of waiting for a finger.
             list.invalidate()
             (list.parent as? View)?.invalidate()
+            sv?.invalidate()
             // Television: rows/chips appended AFTER the dialog's one-time focus
             // pass are reachable but ringless without this (see [glassRow]'s
             // birth ring — this is the belt and braces for rows built before
@@ -8027,7 +8037,11 @@ class PlayerActivity : ComponentActivity() {
             // servers are a full-width result list, not a narrow side sheet.
             // Full-window on both phone and TV so the list reads as its own page.
             fillFractionX = 1.0f,
-            fillFractionY = 0.98f,
+            // Full-page length (the red-marked report asked for the box to run
+            // the marked length): the panel already spans edge-to-edge in
+            // width — this makes it use the full room in height too, so the
+            // list reads as its own page with no cut-off bottom gap.
+            fillFractionY = 1.0f,
             // The main box covers left to right (the red-marked report): no
             // floating-panel side insets on this screen.
             edgeToEdge = true,
@@ -8045,8 +8059,10 @@ class PlayerActivity : ComponentActivity() {
             rebuildList()
             list.requestLayout()
             (list.parent as? View)?.requestLayout()
+            verticalScrollerOf(list)?.requestLayout()
             list.invalidate()
             (list.parent as? View)?.invalidate()
+            verticalScrollerOf(list)?.invalidate()
         }
         // Rows added by ANY path repaint without a touch: the coalesced
         // watcher covers collector ticks, this covers the rest (a sync that

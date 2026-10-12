@@ -9,6 +9,7 @@ import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderConfig
 import com.hikari.app.data.StreamSource
+import com.hikari.app.net.Http
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.providers.ProviderGate
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -52,6 +53,22 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         const val CATALOG_POPULAR = "popular"
         const val CATALOG_LATEST = "latest"
         val lastOutcome = ConcurrentHashMap<String, String>()
+        // Same universal preview-set guard as the Anymex engine (see there):
+        // a page set repeating verbatim for another chapter is previews.
+        private val previewSets = ConcurrentHashMap<String, String>()
+        fun isPreviewUrl(u: String): Boolean {
+            val low = u.lowercase()
+            return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
+        }
+        fun isPreviewSet(providerId: String, chapterUrl: String, urls: List<String>): Boolean {
+            if (urls.isEmpty()) return false
+            val h = urls.sorted().joinToString("|").hashCode().toString() + "|" + urls.size
+            val key = providerId + "|" + h
+            val first = previewSets.putIfAbsent(key, chapterUrl)
+            if (first != null && first != chapterUrl) return true
+            if (previewSets.size > 500) previewSets.clear()
+            return false
+        }
     }
 
     private val context: Context get() = HikariApp.instance
@@ -559,6 +576,17 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         gate(ProviderGate.Lane.BACKGROUND) {
         val src = source() ?: return@gate fail(missingReason(), emptyList())
         val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
+        // Universal Webtoons strips (same class as the Anymex fix): a chapter
+        // that IS a webtoons.com viewer link carries its own imageList — prefer
+        // it over whatever the engine's page list serves (which can be the same
+        // 2 previews for every chapter). Engine path below stays as fallback.
+        if ("webtoons.com" in chapter.id.lowercase() && "viewer" in chapter.id.lowercase()) {
+            val native = nativeWebtoonsPages(chapter.id)
+            if (native.isNotEmpty()) {
+                lastOutcome[config.id] = "✓ ${native.size} page(s) (native)"
+                return@gate native
+            }
+        }
         try {
             // Mihon parity: a stale chapter entry (site moved the pages, session
             // rotated) fails getPageList with "Refresh Chapter List". Refresh the
@@ -620,8 +648,13 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 // the detail poster (a covers-only answer), keeping story order.
             }.filter { p ->
                 val poster = item.posterUrl?.trim().orEmpty()
-                p.url.isNotBlank() && p.url != chapter.id &&
+                p.url.isNotBlank() && p.url != chapter.id && !isPreviewUrl(p.url) &&
                     (poster.isBlank() || p.url != poster) && seenPageUrls.add(p.url)
+            }
+            // Same 2 previews in every chapter (universal): a set repeating
+            // verbatim for another chapter is previews, not pages.
+            if (outPages.isNotEmpty() && isPreviewSet(config.id, chapter.id, outPages.map { it.url })) {
+                return@gate fail("chapter locked or pages-walled", emptyList())
             }
             if (outPages.isEmpty()) return@gate fail("pages failed: no readable pages", emptyList())
             lastOutcome[config.id] = "✓ ${outPages.size} page(s)"
@@ -672,6 +705,69 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             if (!base.isNullOrBlank()) return base.trimEnd('/') + "/" + url.trimStart('/')
         }
         return url
+    }
+
+    /**
+     * Universal Webtoons viewer strips (mirrors the Anymex engine's own
+     * imageList reader): the episode HTML carries every full-size strip in
+     * `var imageList = [{url, ...}]` in story order. A present-but-empty list
+     * is a locked episode — honest empty, never fallback covers. The phinf scan
+     * is older-markup fallback only (thumbs/previews filtered, never served).
+     */
+    private fun nativeWebtoonsPages(chapterUrl: String): List<StreamSource> {
+        val u = chapterUrl.trim()
+            .replace("&amp;", "&")
+            .replace("https://m.webtoons.com/", "https://www.webtoons.com/")
+        if (u.isBlank() || !u.startsWith("http") || "viewer" !in u) return emptyList()
+        val html = runCatching {
+            Http.fetchStringRobust(
+                u,
+                mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                    "Accept" to "text/html",
+                    "Referer" to "https://www.webtoons.com/",
+                ),
+            ).getOrNull()
+        }.getOrNull().orEmpty()
+        if (html.isBlank()) return emptyList()
+        val headers = mapOf(
+            "User-Agent" to Http.UA,
+            "Referer" to "https://www.webtoons.com/",
+        )
+        val block = Regex("""var\s+imageList\s*=\s*\[(.*?)\];""", RegexOption.DOT_MATCHES_ALL)
+            .find(html)?.groupValues?.get(1)
+        if (block != null) {
+            val urls = Regex("""url\s*:\s*"([^"]+)"""").findAll(block)
+                .map { it.groupValues[1].trim() }
+                .filter { it.startsWith("http") && !isPreviewUrl(it) }
+                .distinct()
+                .toList()
+            if (urls.isNotEmpty()) {
+                return urls.take(400).mapIndexed { i, img ->
+                    StreamSource(
+                        name = "Page ${i + 1}",
+                        url = img,
+                        headers = headers,
+                        pageUrl = u,
+                    )
+                }
+            }
+            return emptyList()
+        }
+        val seen = HashSet<String>()
+        val out = ArrayList<StreamSource>()
+        for (m in Regex("""https://webtoon-phinf\.pstatic\.net/[^"'<>\s]+""").findAll(html)) {
+            val img = m.value.trim()
+            if (img.isEmpty() || !seen.add(img) || isPreviewUrl(img)) continue
+            out += StreamSource(
+                name = "Page ${out.size + 1}",
+                url = img,
+                headers = headers,
+                pageUrl = u,
+            )
+            if (out.size >= 400) break
+        }
+        return out
     }
 
     // ---- Mapping ----

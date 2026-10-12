@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hikari.app.i18n.tr
+import com.hikari.app.tv.tvPress
 import com.hikari.app.ui.navigation.BottomTabs
 import com.hikari.app.ui.navigation.BottomTab
 import kotlinx.coroutines.launch
@@ -280,6 +281,13 @@ private fun TvNavRailItem(
                 },
                 shape,
             )
+            // D-pad fires on Down (see tvPress): a repo opened on Down disposes
+            // its row, and the same press's Up would otherwise land on whatever
+            // the new screen focused (the rail's Home) and bounce straight back
+            // there — the reported "repo opens then I am back on Home". Down-fire
+            // consumes the press where it started, so the trailing Up can never
+            // activate the rail; touch/mouse still use the clickable below.
+            .tvPress(onClick = onClick)
             .clickable(onClick = onClick)
             // The row is what the remote walks; when it lands here the strip
             // scrolls it into view (see TvNavRail) and the row expands.

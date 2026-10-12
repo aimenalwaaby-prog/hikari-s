@@ -1,6 +1,16 @@
 ## Unreleased (continuous build only)
 
 ### Fixed
+- Sources rows blank while the footer counts servers (log-proven 24 adopted then chooser empty, sections=1, rows=0, no rowErr): the incremental append path is removed — every paint now fully rebuilds (bounded by the 750ms coalescer), so on-screen rows always match the session; blank paints carry full diagnostics (visible/rendered/onScreen/child/builtSig/sig/keep/rowErr) and remeasure the scroller chain too
+- Sources server box runs the red-marked length: full-page height (1.0, was 0.98) and a true edge-to-edge window (no halo oversize that clamped into side gaps), so the list reads as its own page
+- Manga same 2 previews in every chapter of every title, universally (Ex-Love Review / My Meddler in Love class): any webtoons.com viewer chapter now prefers its own imageList strips regardless of owner engine (Tachiyomi engine gains the same native reader), preview/thumbnail URLs filtered at all layers, and a page set repeating verbatim for another chapter reports honest empty instead of painting repeats
+- New-profile picture row clipped to a sliver (red-marked 7th tile): the tile row scrolls sideways now, so all 8 gradients + the storage tile are fully drawn on any width
+- TV repo folder bouncing straight back to Home with focus on the Home rail button: the rail now fires on Down (tvPress) instead of Up (clickable), so the opening press's trailing Up can never activate Home; folder + repo pages already park focus on Back
+- Version 286/0.11.15
+
+## Unreleased (continuous build only)
+
+### Fixed
 - Sources rows invisible until touched even with servers in hand (log-proven on the fixed build: zero chooser-empty, 23 in session, 0 drawn): the list lives in the panel's ScrollView and paints did layout-only on the list — the scroller kept the old content height so new rows sat at zero height until a touch scrolled. Every effective paint and the post-show sync now remeasure the parent too (requestLayout + invalidate, never layout-only), a blank screen bypasses the 750ms paint coalescer, and a paint whose signature matches never skips while the screen is blank
 - Playback dying on `MissingKotlinParameterException ... LoadLinksData ... missing id` (Hindi class): a cached episode payload predating the installed provider build — repaired universally before loadLinks by re-minting the missing identity from the episode/title being played (non-JSON payloads untouched, good payloads never rewritten); anything else missing still heals through the fresh re-resolve. The error panel also shows one human line now instead of raw `at …` frames (full stack stays in the log)
 - "Page parsed OK, but produced no stream links" failing the tap (TheMoviesFlix class): the clean-room retry was origin-only, so a non-origin CS3 provider answering pure empty-success never got its bounded fresh-runtime retry — non-origin CS3 now gets the same single retry on pure empty-success only (walls and deserialization failures excluded, same per-provider cooldown)
