@@ -160,7 +160,7 @@ object Routes {
      * the user picks the match to open. A destination of its own (rather than
      * a parameter on [MANGA]) so back returns to the shelf it came from.
      */
-    const val MANGA_SEARCH = "manga-search?q={q}"
+    const val MANGA_SEARCH = "manga-search?q={q}&genre={genre}&engine={engine}"
     /** Base path of [MANGA_SEARCH] — mapped back onto the Manga tab for the
      *  bottom bar, the same way the scoped video search maps onto Search. */
     const val MANGA_SEARCH_BASE = "manga-search"
@@ -232,9 +232,12 @@ object Routes {
 
     /** Opens the Manga tab with [query] already searched across every
      *  installed manga engine. Tracker manga shelves land here. */
-    fun mangaSearch(query: String): String {
+    /** [genre] arms a TAG search instead (results hold the tag — see
+     *  MangaProvider.searchByGenre), [engineId] scopes it to one engine. */
+    fun mangaSearch(query: String, genre: String = "", engineId: String = ""): String {
         val q = query.replace(Regex("[\\p{Cc}\\u2028\\u2029]"), " ").trim().take(200)
-        return "manga-search?q=${Uri.encode(q)}"
+        val g = genre.trim().take(80).filter { it.code != 0x2028 && it.code != 0x2029 && !it.isISOControl() }
+        return "manga-search?q=${Uri.encode(q)}&genre=${Uri.encode(g)}&engine=${Uri.encode(engineId.trim().take(200))}"
     }
 
     /** Opens one IPTV playlist's group list. */
@@ -1294,10 +1297,14 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                 route = Routes.MANGA_SEARCH,
                 arguments = listOf(
                     navArgument("q") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("genre") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("engine") { type = NavType.StringType; defaultValue = "" },
                 )
             ) { entry ->
                 val q = Uri.decode(entry.arguments?.getString("q").orEmpty())
-                MangaScreen(nav, initialQuery = q)
+                val g = Uri.decode(entry.arguments?.getString("genre").orEmpty())
+                val e = Uri.decode(entry.arguments?.getString("engine").orEmpty())
+                MangaScreen(nav, initialQuery = q, initialGenre = g, initialEngine = e)
             }
             composable(
                 route = Routes.MANGA_DETAIL,

@@ -431,10 +431,10 @@ fun MangaDetailScreen(
                             GenreChip(
                                 genre = g,
                                 onSearchHere = {
-                                    Routes.safeNavigate(nav, Routes.mangaSearch(g))
+                                    Routes.safeNavigate(nav, Routes.mangaSearch("", genre = g, engineId = providerId))
                                 },
                                 onSearchEverywhere = {
-                                    Routes.safeNavigate(nav, Routes.mangaSearch(g))
+                                    Routes.safeNavigate(nav, Routes.mangaSearch("", genre = g))
                                 },
                             )
                         }

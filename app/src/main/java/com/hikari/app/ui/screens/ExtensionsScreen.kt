@@ -35,10 +35,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -107,6 +109,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -114,6 +117,7 @@ import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import com.hikari.app.HikariApp
+import com.hikari.app.R
 import com.hikari.app.cs3.Cs3MainApiProvider
 import com.hikari.app.cs3.Cs3PluginManager
 import com.hikari.app.hiki.HikariPluginManager
@@ -4824,6 +4828,7 @@ private fun SourceDivider() {
 @Composable
 private fun SourceActionRow(
     icon: ImageVector,
+    iconRes: Int? = null,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
@@ -4837,7 +4842,17 @@ private fun SourceActionRow(
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
+        if (iconRes != null) {
+            // The engine's own round badge artwork: already a finished circle,
+            // drawn full-bleed with no tint (tinting would flatten the artwork).
+            Image(
+                painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+            )
+        } else Box(
             Modifier
                 .size(38.dp)
                 .clip(RoundedCornerShape(10.dp))
@@ -5296,43 +5311,43 @@ private fun RepoBrowserView(
         item {
             if (com.hikari.app.tv.TvMode.current()) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    @androidx.compose.runtime.Composable fun androidx.compose.foundation.layout.RowScope.srcCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, sub: String, onClick: () -> Unit) {
-                        com.hikari.app.tv.TvSettingsSourceCard(icon = icon, title = title, subtitle = sub, onClick = onClick, modifier = Modifier.weight(1f))
+                    @androidx.compose.runtime.Composable fun androidx.compose.foundation.layout.RowScope.srcCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, sub: String, onClick: () -> Unit, iconRes: Int? = null) {
+                        com.hikari.app.tv.TvSettingsSourceCard(icon = icon, title = title, subtitle = sub, onClick = onClick, modifier = Modifier.weight(1f), iconRes = iconRes)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Public, tr("CloudStream repos"), tr("repo.json · CloudStream extensions"), { onOpenFolder(SourceFolder.CLOUDSTREAM) })
-                        srcCard(Icons.Filled.Extension, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) })
+                        srcCard(Icons.Filled.Public, tr("CloudStream repos"), tr("repo.json · CloudStream extensions"), { onOpenFolder(SourceFolder.CLOUDSTREAM) }, R.drawable.ic_ext_cloudstream)
+                        srcCard(Icons.Filled.Extension, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) }, R.drawable.ic_ext_hikari_sakura)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.FolderOpen, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
-                        srcCard(Icons.Filled.Extension, tr("SkyStream repos"), tr("repo.json · SkyStream extensions"), { onOpenFolder(SourceFolder.SKYSTREAM) })
+                        srcCard(Icons.Filled.FolderOpen, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) }, R.drawable.ic_ext_nuvio)
+                        srcCard(Icons.Filled.Extension, tr("SkyStream repos"), tr("repo.json · SkyStream extensions"), { onOpenFolder(SourceFolder.SKYSTREAM) }, R.drawable.ic_ext_skystream)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Extension, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) })
-                        srcCard(Icons.Filled.Movie, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
+                        srcCard(Icons.Filled.Extension, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) }, R.drawable.ic_ext_aniyomi)
+                        srcCard(Icons.Filled.Movie, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) }, R.drawable.ic_ext_vega)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Extension, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
-                        srcCard(Icons.Filled.PlayArrow, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
+                        srcCard(Icons.Filled.Extension, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) }, R.drawable.ic_ext_anymex)
+                        srcCard(Icons.Filled.PlayArrow, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) }, R.drawable.ic_ext_stremio)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.LiveTv, tr("IPTV playlists"), tr("M3U / M3U8 links and files · live channels"), { onOpenFolder(SourceFolder.IPTV) })
-                        srcCard(Icons.Filled.Build, tr("Add universal scraper"), tr("JSON config · scriptable scraper"), onAddScraper)
+                        srcCard(Icons.Filled.LiveTv, tr("IPTV playlists"), tr("M3U / M3U8 links and files · live channels"), { onOpenFolder(SourceFolder.IPTV) }, R.drawable.ic_ext_iptv)
+                        srcCard(Icons.Filled.Build, tr("Add universal scraper"), tr("JSON config · scriptable scraper"), onAddScraper, R.drawable.ic_ext_universal_scraper)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Download, tr("Install .cs3 plugin"), tr("From a URL or a local file"), onAddCs3Url)
-                        srcCard(Icons.Filled.Add, tr("Install .hiki extension"), tr("From a URL or a local file"), onAddHikiUrl)
+                        srcCard(Icons.Filled.Download, tr("Install .cs3 plugin"), tr("From a URL or a local file"), onAddCs3Url, R.drawable.ic_ext_install_cs3)
+                        srcCard(Icons.Filled.Add, tr("Install .hiki extension"), tr("From a URL or a local file"), onAddHikiUrl, R.drawable.ic_ext_hiki_ext)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Add, tr("Install .sky extension"), tr("SkyStream plugin · from a URL or a local file"), onAddSkyStreamUrl)
-                        srcCard(Icons.Filled.Add, tr("Install Aniyomi extension (.apk)"), tr("Aniyomi extension · from a URL or a local file"), onAddAniyomiUrl)
+                        srcCard(Icons.Filled.Add, tr("Install .sky extension"), tr("SkyStream plugin · from a URL or a local file"), onAddSkyStreamUrl, R.drawable.ic_ext_sky_ext)
+                        srcCard(Icons.Filled.Add, tr("Install Aniyomi extension (.apk)"), tr("Aniyomi extension · from a URL or a local file"), onAddAniyomiUrl, R.drawable.ic_ext_aniyomi_ext)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Public, tr("Add website"), tr("Opens in the ad-free web view"), onAddSite)
-                        srcCard(Icons.Filled.Folder, tr("All installed repos"), tr("All repos you've added · ") + repos.size + " total", onOpenAllRepos)
+                        srcCard(Icons.Filled.Public, tr("Add website"), tr("Opens in the ad-free web view"), onAddSite, R.drawable.ic_ext_add_website)
+                        srcCard(Icons.Filled.Folder, tr("All installed repos"), tr("All repos you've added · ") + repos.size + " total", onOpenAllRepos, R.drawable.ic_ext_all_repos)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Extension, tr("Installed extensions"), tr("Manage, toggle & uninstall · ") + providers.size + " installed", onOpenInstalled)
+                        srcCard(Icons.Filled.Extension, tr("Installed extensions"), tr("Manage, toggle & uninstall · ") + providers.size + " installed", onOpenInstalled, R.drawable.ic_ext_installed_ext)
                         Spacer(Modifier.weight(1f))
                     }
                 }
@@ -5346,6 +5361,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Public,
                         title = tr("CloudStream repos"),
+                        iconRes = R.drawable.ic_ext_cloudstream,
                         subtitle = tr("repo.json · CloudStream extensions"),
                         onClick = { onOpenFolder(SourceFolder.CLOUDSTREAM) }
                     )
@@ -5353,6 +5369,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Extension,
                         title = tr("Hikari repos"),
+                        iconRes = R.drawable.ic_ext_hikari_sakura,
                         subtitle = tr("repo.json · Hikari extensions"),
                         onClick = { onOpenFolder(SourceFolder.HIKARI) }
                     )
@@ -5360,6 +5377,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.FolderOpen,
                         title = tr("Nuvio repos"),
+                        iconRes = R.drawable.ic_ext_nuvio,
                         subtitle = tr("manifest.json · Nuvio providers"),
                         onClick = { onOpenFolder(SourceFolder.NUVIO) }
                     )
@@ -5367,6 +5385,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Extension,
                         title = tr("SkyStream repos"),
+                        iconRes = R.drawable.ic_ext_skystream,
                         subtitle = tr("repo.json · SkyStream extensions"),
                         onClick = { onOpenFolder(SourceFolder.SKYSTREAM) }
                     )
@@ -5374,6 +5393,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Extension,
                         title = tr("Aniyomi repos"),
+                        iconRes = R.drawable.ic_ext_aniyomi,
                         subtitle = tr("index.min.json · Aniyomi extensions"),
                         onClick = { onOpenFolder(SourceFolder.ANIYOMI) }
                     )
@@ -5381,6 +5401,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Movie,
                         title = tr("Vega repos"),
+                        iconRes = R.drawable.ic_ext_vega,
                         subtitle = tr("manifest.json · Vega providers"),
                         onClick = { onOpenFolder(SourceFolder.VEGA) }
                     )
@@ -5388,6 +5409,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Extension,
                         title = tr("Anymex"),
+                        iconRes = R.drawable.ic_ext_anymex,
                         subtitle = tr("Sora sources · Anymex extensions"),
                         onClick = { onOpenFolder(SourceFolder.ANYMEX_HOME) }
                     )
@@ -5395,6 +5417,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.PlayArrow,
                         title = tr("Stremio addons"),
+                        iconRes = R.drawable.ic_ext_stremio,
                         subtitle = tr("manifest.json · Stremio addons"),
                         onClick = { onOpenFolder(SourceFolder.STREMIO) }
                     )
@@ -5402,6 +5425,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.LiveTv,
                         title = tr("IPTV playlists"),
+                        iconRes = R.drawable.ic_ext_iptv,
                         subtitle = tr("M3U / M3U8 links and files · live channels"),
                         onClick = { onOpenFolder(SourceFolder.IPTV) }
                     )
@@ -5409,6 +5433,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Build,
                         title = tr("Add universal scraper"),
+                        iconRes = R.drawable.ic_ext_universal_scraper,
                         subtitle = tr("JSON config · scriptable scraper"),
                         onClick = onAddScraper
                     )
@@ -5416,6 +5441,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Download,
                         title = tr("Install .cs3 plugin"),
+                        iconRes = R.drawable.ic_ext_install_cs3,
                         subtitle = tr("From a URL or a local file"),
                         onClick = onAddCs3Url,
                         trailingIcon = Icons.Filled.FolderOpen,
@@ -5425,6 +5451,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Add,
                         title = tr("Install .hiki extension"),
+                        iconRes = R.drawable.ic_ext_hiki_ext,
                         subtitle = tr("From a URL or a local file"),
                         onClick = onAddHikiUrl,
                         trailingIcon = Icons.Filled.FolderOpen,
@@ -5434,6 +5461,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Add,
                         title = tr("Install .sky extension"),
+                        iconRes = R.drawable.ic_ext_sky_ext,
                         subtitle = tr("SkyStream plugin · from a URL or a local file"),
                         onClick = onAddSkyStreamUrl,
                         trailingIcon = Icons.Filled.FolderOpen,
@@ -5443,6 +5471,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Add,
                         title = tr("Install Aniyomi extension (.apk)"),
+                        iconRes = R.drawable.ic_ext_aniyomi_ext,
                         subtitle = tr("Aniyomi extension · from a URL or a local file"),
                         onClick = onAddAniyomiUrl,
                         trailingIcon = Icons.Filled.FolderOpen,
@@ -5452,6 +5481,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Public,
                         title = tr("Add website"),
+                        iconRes = R.drawable.ic_ext_add_website,
                         subtitle = tr("Opens in the ad-free web view"),
                         onClick = onAddSite
                     )
@@ -5459,6 +5489,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Folder,
                         title = tr("All installed repos"),
+                        iconRes = R.drawable.ic_ext_all_repos,
                         subtitle = tr("All repos you've added · ") + repos.size + " total",
                         onClick = onOpenAllRepos
                     )
@@ -5466,6 +5497,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.Extension,
                         title = tr("Installed extensions"),
+                        iconRes = R.drawable.ic_ext_installed_ext,
                         subtitle = tr("Manage, toggle & uninstall · ") + providers.size + " installed",
                         onClick = onOpenInstalled
                     )
@@ -8383,11 +8415,10 @@ private fun SitesFolder(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Filled.FolderOpen,
+                    Image(
+                        painterResource(R.drawable.ic_ext_webview_sites),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
                     )
                 }
                 Spacer(Modifier.width(12.dp))

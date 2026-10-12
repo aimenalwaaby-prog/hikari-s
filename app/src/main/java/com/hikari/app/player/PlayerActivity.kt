@@ -7964,6 +7964,12 @@ class PlayerActivity : ComponentActivity() {
             override fun onChildViewRemoved(parent: View, child: View) {}
         })
         if (hintView != null) {
+            // Lock the hint's height at its 4-line cap: the tally line changes
+            // with every answering repo, and a WRAP_CONTENT hint remeasured
+            // the whole panel on each change — the list below collapsed to
+            // blank until the next touch drove a traversal (the hide / show
+            // cycle). Fixed height: text swaps never move a pixel.
+            hintView.minLines = 4
             // The hint doubles as the live status of the OTHER extensions: which
             // ones are still being asked right now, and which came back without a
             // single server (and why). A repo that carries the title but cannot be

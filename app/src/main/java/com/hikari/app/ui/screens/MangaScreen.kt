@@ -108,8 +108,24 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Like IPTV, the tab's button is OFF by default — see Settings → Taskbar
  * buttons, and [com.hikari.app.data.AppStore.mangaTabFlow].
  */
+/**
+ * Whether a search hit belongs in a TAG search: items whose known genre
+ * list lacks the tag are title-only matches and are dropped, while items
+ * with no genre info at all are kept (unknown is never a reason to hide
+ * what the engine returned).
+ */
+private fun genreMatches(itemGenres: List<String>, tag: String): Boolean {
+    val want = tag.trim().lowercase()
+    if (want.isEmpty()) return true
+    if (itemGenres.isEmpty()) return true
+    return itemGenres.any { g ->
+        val ng = g.trim().lowercase()
+        ng == want || ng.contains(want) || want.contains(ng)
+    }
+}
+
 @Composable
-fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
+fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre: String = "", initialEngine: String = "") {
     val context = LocalContext.current
     val app = context.applicationContext as HikariApp
     val all by app.providers.providers.collectAsState()
@@ -141,8 +157,18 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
     LaunchedEffect(initialQuery) {
         if (initialQuery.isNotBlank() && initialQuery != query) query = initialQuery
     }
+    // A genre-chip tap lands here with the tag armed (see Routes.mangaSearch):
+    // the grid below then holds only tag-holders, never title matches.
+    var genre by rememberSaveable(initialGenre) { mutableStateOf(initialGenre) }
+    LaunchedEffect(initialGenre) {
+        if (initialGenre.isNotBlank() && initialGenre != genre) genre = initialGenre
+    }
     // Which engine's own lists to browse / search: "" means every installed one.
-    var enginePick by rememberSaveable { mutableStateOf("") }
+    // A chip's Search entry pre-picks the title's own engine here.
+    var enginePick by rememberSaveable(initialEngine) { mutableStateOf(initialEngine) }
+    LaunchedEffect(initialEngine) {
+        if (initialEngine.isNotBlank() && initialEngine != enginePick) enginePick = initialEngine
+    }
     // The filter over the installed engines under "Browse" — separate from the
     // search box at the top of the screen (which queries the ENGINES). With a
     // hundred extensions installed, finding the one to read in is half the work
@@ -158,12 +184,15 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
 
     val scope = rememberCoroutineScope()
     val typed = query.trim()
+    // Blank here means a plain keyword search, exactly as before.
+    val genreTag = genre.trim()
 
     // Debounced cross-engine search. Runs on the text itself rather than on a
     // keyboard action because the field is a plain BasicTextField (the app's
     // shared glass search box) with no IME action to hook.
-    LaunchedEffect(typed, enginePick, engineKey) {
-        if (typed.isBlank()) {
+    LaunchedEffect(typed, genreTag, enginePick, engineKey) {
+        val tag = genreTag
+        if (typed.isBlank() && tag.isBlank()) {
             results = emptyList()
             searching = false
             return@LaunchedEffect
@@ -194,11 +223,24 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
             targets.forEach { p ->
                 launch {
                     try {
+                        // A tag tap searches the TAG, not the title: engines whose
+                        // extension declares a genre filter run it (null means no
+                        // such filter — fall back to a keyword search). Either way
+                        // only tag-holders are kept below, so title matches that
+                        // merely contain the word never leak into a tag search.
+                        val keyword = typed.ifBlank { tag }
                         val found = withTimeoutOrNull(25_000L) {
-                            runCatching { p.search(typed, 1) }.getOrDefault(emptyList())
+                            runCatching {
+                                if (tag.isNotBlank()) {
+                                    (p as? com.hikari.app.manga.MangaProvider)?.searchByGenre(tag, 1)
+                                        ?: p.search(keyword, 1)
+                                } else p.search(typed, 1)
+                            }.getOrDefault(emptyList())
                         } ?: emptyList()
-                        if (found.isNotEmpty()) {
-                            results = (results + found).distinctBy { it.uniqueId }
+                        val kept = if (tag.isNotBlank()) found.filter { genreMatches(it.genres, tag) }
+                        else found
+                        if (kept.isNotEmpty()) {
+                            results = (results + kept).distinctBy { it.uniqueId }
                         }
                     } finally {
                         // A restarted query cancels these children: their
@@ -254,6 +296,31 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
                     onValueChange = { query = it },
                     placeholder = tr("Search every manga engine"),
                 )
+                // The armed tag (see above): clearing it drops back to the
+                // plain keyword search.
+                if (genreTag.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                            ) {
+                                Text(
+                                    tr("Tag") + ": " + genreTag,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                IconButton(onClick = { genre = "" }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Filled.Close, contentDescription = tr("Clear tag"))
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -273,7 +340,7 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "") {
             return@LazyVerticalGrid
         }
 
-        if (typed.isNotBlank()) {
+        if (typed.isNotBlank() || genreTag.isNotBlank()) {
             item(key = "manga-engines", span = { GridItemSpan(maxLineSpan) }) {
                 EngineChips(
                     engines = engines.map { it.config.id to it.config.name },

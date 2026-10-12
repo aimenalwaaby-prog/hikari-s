@@ -3630,6 +3630,36 @@ fun DetailScreen(
                     
                     .onSizeChanged { headerPx = it.height }
             ) {
+                // "Full bleed and blur detail" paints the sharp art HERE, in
+                // the scrolling hero item itself: the art scrolls up and away
+                // with the header (like the reference client) and everything
+                // below moves over the fixed blurred backdrop. Painting it in
+                // the fixed backdrop instead left sharp art behind the cast
+                // forever, which is why the toggle looked like it did
+                // nothing. Off (or phone): the hero stays transparent and the
+                // fixed backdrop owns the art, exactly as before.
+                if (tvBlurDetail) {
+                    AsyncImage(
+                        model = tvHeroImage.first,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // Melt the header's bottom edge into the blur behind it
+                    // instead of ending in a seam.
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.55f),
+                                )
+                            )
+                        )
+                    )
+                }
                 // The TV hero artwork is rendered once by the fixed backdrop
                 // behind the LazyColumn. Keeping a second HeroArtwork here caused
                 // the exact duplicate-image seam visible when the episode shelf
@@ -4079,35 +4109,12 @@ fun DetailScreen(
                             Color.Black.copy(alpha = 0.45f)
                         )
                     )
-                    // Sharp art, confined to the header the hero measured
-                    // (headerPx): it melts into the blur through the bottom
-                    // fade instead of ending in a seam.
-                    val headerDp = with(density) { headerPx.toDp() }
-                    if (headerPx > 0) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(headerDp)
-                        ) {
-                            AsyncImage(
-                                model = tvHeroImage.first,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                alignment = Alignment.TopCenter,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                            Box(
-                                Modifier.fillMaxSize().background(
-                                    Brush.verticalGradient(
-                                        listOf(
-                                            Color.Transparent,
-                                            Color.Black.copy(alpha = 0.55f),
-                                        )
-                                    )
-                                )
-                            )
-                        }
-                    }
+                    // NOTE: no sharp art here. The sharp header lives INSIDE
+                    // the scrolling hero item (see heroBlock): a fixed sharp
+                    // layer would never scroll away, so the cast and details
+                    // would sit over sharp art forever and the toggle would
+                    // look like it does nothing. The fixed backdrop is blur
+                    // only, always.
                 } else {
                     // tvHeroImage.second is true only for genuinely wide art: a
                     // portrait poster gets the cinematic blurred-fill treatment

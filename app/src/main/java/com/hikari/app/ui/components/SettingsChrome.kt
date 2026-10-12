@@ -1,5 +1,7 @@
 package com.hikari.app.ui.components
 
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -82,6 +85,28 @@ fun SettingsIconBadge(icon: ImageVector, size: Dp = 46.dp) {
 }
 
 /**
+ * The same round badge, but for one of the app's own round icon artworks
+ * (see res/drawable-nodpi/ic_set_*): the artwork is already a finished circle
+ * with its own rim, so it is drawn full-bleed with no tint and no wash behind
+ * it — tinting it would repaint the whole painting one flat colour.
+ */
+@Composable
+fun SettingsIconBadgeRes(@DrawableRes resId: Int, size: Dp = 46.dp) {
+    Box(
+        Modifier
+            .size(size)
+            .clip(CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painterResource(resId),
+            contentDescription = null,
+            modifier = Modifier.size(size),
+        )
+    }
+}
+
+/**
  * The way out of a settings page: one circular glass button, the same size and
  * fill everywhere, so backing out of a folder, the Logs page and the
  * player-control editor are all the same gesture in the same place.
@@ -134,6 +159,7 @@ fun SettingsPageHeader(
     subtitle: String,
     onBack: () -> Unit,
     icon: ImageVector? = null,
+    @DrawableRes iconRes: Int? = null,
     breadcrumb: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -155,7 +181,10 @@ fun SettingsPageHeader(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             SettingsBackButton(onBack)
-            if (icon != null) {
+            if (iconRes != null) {
+                Spacer(Modifier.width(8.dp))
+                SettingsIconBadgeRes(iconRes, 40.dp)
+            } else if (icon != null) {
                 Spacer(Modifier.width(8.dp))
                 SettingsIconBadge(icon, 40.dp)
             }

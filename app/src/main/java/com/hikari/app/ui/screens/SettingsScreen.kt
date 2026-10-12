@@ -202,6 +202,7 @@ import com.hikari.app.ui.components.GlassShape
 import com.hikari.app.ui.components.HeroStyles
 import com.hikari.app.ui.components.MultiChoiceDialog
 import com.hikari.app.ui.components.SettingsIconBadge
+import com.hikari.app.ui.components.SettingsIconBadgeRes
 import com.hikari.app.ui.components.SettingsPageHeader
 import com.hikari.app.data.Profiles
 import com.hikari.app.ui.components.LocalHideHelp
@@ -261,6 +262,8 @@ private enum class SettingsFolder(
     val title: String,
     val subtitle: String,
     val icon: ImageVector,
+    /** Round badge artwork for this folder (res/drawable-nodpi/ic_set_*), or 0 for sub-folders that keep the vector. */
+    val iconRes: Int = 0,
     /** Id of the folder this one lives inside, or null for a top-level folder. */
     val parent: String? = null,
     /** A folder that only makes sense on a phone/tablet, so it is not offered at
@@ -274,12 +277,14 @@ private enum class SettingsFolder(
         "Appearance & Theme",
         "Language, theme, accent, icon & font",
         Icons.Filled.Palette,
+        R.drawable.ic_set_appearance,
     ),
     APP_LAYOUT(
         "layout",
         "App Layout",
         "UI scale, posters, ratings, taskbar & full screen",
         Icons.Filled.Dashboard,
+        R.drawable.ic_set_app_layout,
     ),
     // The one switch to reach for when the app stutters. Its own folder rather
     // than a corner of App Layout: the user looking for it is not browsing how
@@ -290,6 +295,7 @@ private enum class SettingsFolder(
         "Performance",
         "Fix lag, stutter & battery drain",
         Icons.Filled.Speed,
+        R.drawable.ic_set_performance,
     ),
     // The television half of "one APK, two layouts" (see com.hikari.app.tv.TvMode).
     // Offered on both kinds of device on purpose: a phone user can switch the TV
@@ -300,12 +306,14 @@ private enum class SettingsFolder(
         "TV & Remote",
         "Television layout, screen edges & performance",
         Icons.Filled.Tv,
+        R.drawable.ic_set_tv_remote,
     ),
     PLAYER(
         "player",
         "Player",
         "Controls, video enhancement & loading screen",
         Icons.Filled.PlayArrow,
+        R.drawable.ic_set_player,
     ),
     // Where a title's SERVERS come from — the other half of "playing a video",
     // kept apart from the Player folder (which is about the controls and the
@@ -318,18 +326,21 @@ private enum class SettingsFolder(
         "Playback & Servers",
         "Where servers come from & when playback starts",
         Icons.Filled.SmartDisplay,
+        R.drawable.ic_set_playback_servers,
     ),
     NETWORK(
         "network",
         "Network and Internet",
         "DNS mode & slow connections",
         Icons.Filled.Public,
+        R.drawable.ic_set_network_internet,
     ),
     SOURCES(
         "sources",
         "Sources & Extensions",
         "Installed extensions, userscripts & verification",
         Icons.Filled.Extension,
+        R.drawable.ic_set_sources_extensions,
     ),
     // What the app is willing to SHOW, as opposed to what it can reach: the
     // adult-content switch lives here (see NsfwGate). Its own folder rather than
@@ -341,12 +352,14 @@ private enum class SettingsFolder(
         "Content & Filters",
         "Adult content & what the app shows you",
         Icons.Filled.Visibility,
+        R.drawable.ic_set_content_filters,
     ),
     DOWNLOADS(
         "downloads",
         "Downloads",
         "Offline copies & parallel saves",
         Icons.Filled.Download,
+        R.drawable.ic_set_downloads,
     ),
     // Your watch progress on somebody else's list — AniList, MyAnimeList,
     // Kitsu, Simkl, Shikimori, Trakt (see [TrackerKind]). Its own folder rather
@@ -357,12 +370,14 @@ private enum class SettingsFolder(
         "Trackers",
         "Trakt, Simkl and watch-progress syncing",
         Icons.Filled.Sync,
+        R.drawable.ic_set_trackers,
     ),
     INTEGRATIONS(
         "integrations",
         "Integrations",
         "TMDB enrichment, MDBList ratings, anime metadata & more",
         Icons.Filled.ViewCarousel,
+        R.drawable.ic_set_integrations,
     ),
     INTEGRATIONS_TMDB(
         "integrations.tmdb",
@@ -393,30 +408,35 @@ private enum class SettingsFolder(
         "Personal Catalog creator",
         "Your own collections, folders & catalogs",
         Icons.Filled.FolderOpen,
+        R.drawable.ic_set_catalog_creator,
     ),
     PRIVACY(
         "privacy",
         "Privacy & Browsing",
         "Ad blocking, redirects & user agent",
         Icons.Filled.Shield,
+        R.drawable.ic_set_privacy_browsing,
     ),
     LOGS(
         "logs",
         "Logs & Diagnostics",
         "App logs & crash reports",
         Icons.Filled.BugReport,
+        R.drawable.ic_set_logs_diagnostics,
     ),
     BACKUP(
         "backup",
         "Backup & Restore",
         "One file with your whole setup",
         Icons.Filled.SettingsBackupRestore,
+        R.drawable.ic_set_backup_restore,
     ),
     ABOUT(
         "about",
         "About & Updates",
         "Version, links & roadmap",
         Icons.Filled.Info,
+        R.drawable.ic_set_about_updates,
     ),
     // The one irreversible action in Settings, in a folder of its own. It used
     // to be a red text link at the very foot of the index — easy to hit by
@@ -428,6 +448,7 @@ private enum class SettingsFolder(
         "Clear App data",
         "Delete everything Hikari has stored on this device",
         Icons.Filled.DeleteForever,
+        R.drawable.ic_set_clear_data,
     ),
 
     // ---- Sub-folders (never listed on the index; see [parent]) ----
@@ -1448,11 +1469,7 @@ fun SettingsScreen(nav: NavHostController) {
                 SettingsCard(top = 12.dp) {
                     ListItem(
                         leadingContent = {
-                            Icon(
-                                Icons.Filled.SwitchAccount,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            SettingsIconBadgeRes(R.drawable.ic_set_profiles, 40.dp)
                         },
                         headlineContent = { Text(tr("Profiles")) },
                         supportingContent = {
@@ -1513,6 +1530,7 @@ fun SettingsScreen(nav: NavHostController) {
                 item(key = "tv-left-stats") {
                     TvLeftRow(
                         icon = Icons.Filled.BarChart,
+                        iconRes = R.drawable.ic_set_stats,
                         title = tr("Stats"),
                         onClick = { showStats = true },
                     )
@@ -1520,6 +1538,7 @@ fun SettingsScreen(nav: NavHostController) {
                 item(key = "tv-left-profiles") {
                     TvLeftRow(
                         icon = Icons.Filled.SwitchAccount,
+                        iconRes = R.drawable.ic_set_profiles,
                         title = tr("Profiles"),
                         onClick = { showProfiles = true },
                     )
@@ -1612,6 +1631,7 @@ private fun FolderHeader(
         title = tr(folder.title),
         subtitle = tr(folder.subtitle),
         icon = folder.icon,
+        iconRes = folder.iconRes.takeIf { it != 0 },
         breadcrumb = parentTitle?.let { tr(it) + " ›" },
         onBack = onBack,
     )
@@ -1640,7 +1660,8 @@ private fun SettingsFolderRow(
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SettingsIconBadge(folder.icon)
+            if (folder.iconRes != 0) SettingsIconBadgeRes(folder.iconRes)
+            else SettingsIconBadge(folder.icon)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1674,7 +1695,7 @@ private fun SettingsFolderRow(
 /** One compact category row in the television left pane (Stats, Profiles) —
  *  the same shape as a folder row, without a folder behind it. */
 @Composable
-private fun TvLeftRow(icon: ImageVector, title: String, onClick: () -> Unit) {
+private fun TvLeftRow(icon: ImageVector, title: String, onClick: () -> Unit, iconRes: Int = 0) {
     GlassCard(
         onClick = onClick,
         modifier = Modifier
@@ -1687,7 +1708,8 @@ private fun TvLeftRow(icon: ImageVector, title: String, onClick: () -> Unit) {
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SettingsIconBadge(icon)
+            if (iconRes != 0) SettingsIconBadgeRes(iconRes)
+            else SettingsIconBadge(icon)
             Spacer(Modifier.width(16.dp))
             Text(
                 title,

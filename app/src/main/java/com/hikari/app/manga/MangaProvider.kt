@@ -13,6 +13,7 @@ import com.hikari.app.providers.ContentProvider
 import com.hikari.app.providers.ProviderGate
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.MangaSource
+import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
@@ -349,6 +350,53 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             noteWall(why)
             return@gate fail("search failed: $why", emptyList())
         }
+        lastOutcome[config.id] = "✓ ${found.size} result(s)"
+        found.map { toItem(it, src) }
+    }
+
+    /**
+     * A TAG search, not a title search: tapping a genre chip (Fantasy) must
+     * return manga that CARRY the tag, not manga with the word in the title.
+     * Runs the extension's own genre filter (the same filter list its browse
+     * page offers) with an empty keyword, so the site answers from its tag
+     * index. Returns null when the extension declares no usable genre filter
+     * (callers then fall back to a keyword search plus the client-side tag
+     * filter in MangaScreen) — null is "unsupported", never "no results".
+     */
+    suspend fun searchByGenre(genre: String, page: Int): List<MediaItem>? = gate {
+        val src = source() ?: return@gate null
+        val filters = runCatching { src.getFilterList() }.getOrDefault(FilterList())
+        if (filters.isEmpty()) return@gate null
+        val want = genre.trim().lowercase()
+        if (want.isEmpty()) return@gate null
+        var armed = false
+        for (f in filters) {
+            val field = f.name.trim().lowercase()
+            val isGenreField = field.contains("genre") || field.contains("tag") || field.contains("categor")
+            when (f) {
+                is Filter.Select<*> -> {
+                    if (!isGenreField) continue
+                    val idx = f.values.indexOfFirst { it.toString().trim().lowercase() == want }
+                    if (idx >= 0) { f.state = idx; armed = true }
+                }
+                is Filter.Group<*> -> {
+                    if (!isGenreField) continue
+                    for (child in f.state) {
+                        if (child is Filter.CheckBox && child.name.trim().lowercase() == want) { child.state = true; armed = true }
+                        if (child is Filter.TriState && child.name.trim().lowercase() == want) { child.state = Filter.TriState.STATE_INCLUDE; armed = true }
+                    }
+                }
+                is Filter.CheckBox -> {
+                    if (isGenreField && f.name.trim().lowercase() == want) { f.state = true; armed = true }
+                }
+                is Filter.TriState -> {
+                    if (isGenreField && f.name.trim().lowercase() == want) { f.state = Filter.TriState.STATE_INCLUDE; armed = true }
+                }
+                else -> {}
+            }
+        }
+        if (!armed) return@gate null
+        val found = runCatching { src.getSearchManga(page, "", filters).mangas }.getOrNull() ?: return@gate null
         lastOutcome[config.id] = "✓ ${found.size} result(s)"
         found.map { toItem(it, src) }
     }
