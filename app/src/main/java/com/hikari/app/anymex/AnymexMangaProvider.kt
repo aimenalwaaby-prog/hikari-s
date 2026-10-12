@@ -84,6 +84,21 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                 lastOutcome[config.id] = "✓ ${native.size} titles (native)"
                 return@withContext native
             }
+            // The module answered empty with no challenge to recognise (an
+            // empty 200, a site that wants a browser session first): be the
+            // browser once, offscreen, then ask the module again before the
+            // homepage fallback reports. Spaced per host inside the solver.
+            if (warmSite()) {
+                val retryRaw = when (ref.id) {
+                    CATALOG_LATEST -> AnymexRuntime.latest(mod, config.id, p)
+                    else -> AnymexRuntime.popular(mod, config.id, p)
+                }
+                val retry = mapItems(retryRaw)
+                if (retry.isNotEmpty()) {
+                    lastOutcome[config.id] = "✓ ${retry.size} titles (js, warmed)"
+                    return@withContext retry
+                }
+            }
             // Same stale-paths fallback as the video engine (see
             // AnymexHomepage) — but never for the known sites, whose native
             // API paths answer for them and whose homepage cards the native
@@ -539,6 +554,12 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
         withContext(Dispatchers.IO) {
             val chUrl = episode?.id?.takeIf { it.isNotBlank() } ?: return@withContext emptyList()
+            // A covers-only module answers the series art for every chapter —
+            // the per-page identity of a covers answer. Any page equal to the
+            // detail poster is dropped at every branch below (not only when
+            // ALL pages match it), so such a module reports honest empty
+            // instead of painting the same image in every chapter.
+            val chPoster = item.posterUrl?.trim().orEmpty()
             // Native MangaDex at-home server (no JS module required)
             if (isMangaDex()) {
                 val pages = nativeMangaDexPages(chUrl)
@@ -570,7 +591,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                         // image); repeats of one cover would paint every
                         // chapter with the same image, so they are dropped and
                         // de-duplicated here, keeping story order.
-                        if (u.isBlank() || u == chUrl || !seenAnymex.add(u)) continue
+                        if (u.isBlank() || u == chUrl || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
                         // Hotlink-guarded CDNs refuse a page with no Referer even
                         // when no Cloudflare wall exists — the module often names
                         // none, so the chapter itself stands in.
@@ -590,7 +611,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     }
                     is String -> {
                         val u = e.trim()
-                        if (u.isBlank() || u == chUrl || !seenAnymex.add(u)) continue
+                        if (u.isBlank() || u == chUrl || (chPoster.isNotBlank() && u == chPoster) || !seenAnymex.add(u)) continue
                         out += StreamSource(
                             name = "Page ${out.size + 1}",
                             url = u,
@@ -608,8 +629,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             // small set, matching the detail poster) is a walls/covers answer,
             // not pages — serving it paints identical "pages" in every chapter.
             // Report it honestly instead, like a locked Webtoons episode.
-            val poster = item.posterUrl?.trim().orEmpty()
-            if (out.isNotEmpty() && poster.isNotBlank() && out.all { it.url == poster }) {
+            if (out.isNotEmpty() && chPoster.isNotBlank() && out.all { it.url == chPoster }) {
                 lastOutcome[config.id] = "✗ chapter locked or pages-walled"
                 return@withContext emptyList()
             }
@@ -652,25 +672,37 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
 
     private fun nativeComick(catalogId: String, page: Int): List<MediaItem> {
         val sort = if (catalogId == CATALOG_LATEST) "uploaded" else "follow"
-        val url = "https://api.comick.fun/v1.0/search?sort=$sort&page=${page.coerceAtLeast(1)}&tachiyomi=true"
-        return parseComickList(url)
+        val path = "/v1.0/search?sort=$sort&page=${page.coerceAtLeast(1)}&tachiyomi=true"
+        return parseComickList(comickFetch(path))
     }
 
     private fun nativeComickSearch(query: String, page: Int): List<MediaItem> {
         val q = java.net.URLEncoder.encode(query, "UTF-8")
-        val url = "https://api.comick.fun/v1.0/search?q=$q&page=${page.coerceAtLeast(1)}&tachiyomi=true"
-        return parseComickList(url)
+        val path = "/v1.0/search?q=$q&page=${page.coerceAtLeast(1)}&tachiyomi=true"
+        return parseComickList(comickFetch(path))
     }
 
-    private fun parseComickList(url: String): List<MediaItem> {
-        val raw = Http.fetchStringRobust(
-            url,
-            mapOf(
-                "User-Agent" to "Tachiyomi Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:110.0) Gecko/20100101 Firefox/110.0",
-                "Referer" to "https://comick.io/",
-                "Accept" to "application/json",
-            ),
-        ).getOrNull().orEmpty()
+    /**
+     * Comick's API host has moved before (api.comick.fun answered, then empty):
+     * try the known hosts in order with the same path and take the first that
+     * answers JSON. One host's outage then reads as a slower catalog, never as
+     * a permanently empty one.
+     */
+    private fun comickFetch(path: String): String {
+        val headers = mapOf(
+            "User-Agent" to "Tachiyomi Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:110.0) Gecko/20100101 Firefox/110.0",
+            "Referer" to "https://comick.io/",
+            "Accept" to "application/json",
+        )
+        val bases = listOf("https://api.comick.fun", "https://api.comick.io")
+        for (base in bases) {
+            val raw = Http.fetchStringRobust(base + path, headers).getOrNull().orEmpty()
+            if (raw.isNotBlank() && !raw.trimStart().startsWith("<")) return raw
+        }
+        return ""
+    }
+
+    private fun parseComickList(raw: String): List<MediaItem> {
         if (raw.isBlank() || raw.trimStart().startsWith("<")) {
             lastOutcome[config.id] = "✗ Comick API empty"
             return emptyList()
@@ -719,15 +751,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
     private fun nativeComickChapters(item: MediaItem): List<Episode> {
         val hid = item.id.trim()
         if (hid.isBlank()) return emptyList()
-        val url = "https://api.comick.fun/comic/$hid/chapters?lang=en&limit=100&tachiyomi=true"
-        val raw = Http.fetchStringRobust(
-            url,
-            mapOf(
-                "User-Agent" to "Tachiyomi Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:110.0) Gecko/20100101 Firefox/110.0",
-                "Referer" to "https://comick.io/",
-                "Accept" to "application/json",
-            ),
-        ).getOrNull().orEmpty()
+        val raw = comickFetch("/comic/$hid/chapters?lang=en&limit=100&tachiyomi=true")
         if (raw.isBlank()) return emptyList()
         val arr = runCatching {
             val o = JSONObject(raw)
@@ -822,6 +846,22 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         if (t.isBlank() || !wallRe.containsMatchIn(t)) return
         val site = runCatching { AnymexPluginManager.siteUrlOf(config) }.getOrNull()
         if (!site.isNullOrBlank()) CloudflareVerifier.markBlocked(site)
+    }
+
+    /**
+     * Be the browser once for a module that answered empty — the Anymex half
+     * of MangaProvider.warmSite. A module that builds its own client (or a
+     * site that answers the XHR with an empty 200) leaves no challenge to
+     * recognise, so the catalog stayed blank with no Verify offered. Loads
+     * the module's own site offscreen; spaced per host inside the solver.
+     * BLOCKING — every caller is already on IO.
+     */
+    private fun warmSite(): Boolean {
+        val site = runCatching { AnymexPluginManager.siteUrlOf(config) }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: return false
+        return runCatching {
+            com.hikari.app.net.CloudflareSolver.warm(url = site, userAgent = Http.UA)
+        }.getOrDefault(false)
     }
 
     private fun mapItems(raw: String?): List<MediaItem> {

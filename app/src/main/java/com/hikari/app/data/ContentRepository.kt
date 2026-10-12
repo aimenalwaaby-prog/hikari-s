@@ -1969,10 +1969,9 @@ class ContentRepository(private val manager: ProviderManager) {
                 )
             }
             if (attempt >= maxAttempts + (if (recovered) 1 else 0)) {
-                // Clean-room retry (universal, CS3 origin only): the provider
-                // ANSWERED — no timeout, no exception — but with zero servers.
-                // That is the silent-fan-out-failure shape: a meta provider
-                // whose internal sources all died on poisoned runtime state
+                // Clean-room retry (universal, CS3): the provider ANSWERED — no
+                // timeout, no exception — but with zero servers. That is the
+                // silent-fan-out-failure shape: a meta provider whose internal sources all died on poisoned runtime state
                 // (an empty dynamic-URL table from a failed init at plugin
                 // load, a rotated domain, a transient upstream outage on the
                 // first run) reports success-with-nothing, exactly like "same
@@ -1981,9 +1980,9 @@ class ContentRepository(private val manager: ProviderManager) {
                 // input (new lock, reloaded plugin instance that re-runs the
                 // plugin's own load/init, evicted load + episode caches,
                 // re-resolved episodes for series). Cooldown-gated per
-                // provider, origin-only so a genuinely empty title costs one
-                // reload instead of one per sweep member — and a lookup that
-                // already ran fresh through here retries nothing. A site wall
+                // provider (origin or pure-empty non-origin — see the function),
+                // so a genuinely empty title costs one reload instead of one
+                // per sweep member — and a lookup that already ran fresh through here retries nothing. A site wall
                 // the provider itself reported (refused/bot-check/dead page)
                 // skips this: reloading cannot lift it, and the honest reason
                 // below already says so.
@@ -2175,6 +2174,13 @@ class ContentRepository(private val manager: ProviderManager) {
      * never for a deserialization failure (that routes to
      * [healStaleEpisodePayload]). Empty unless every step succeeds — this
      * never masks a genuine "no servers".
+     *
+     * Non-origin CS3 providers get the same single retry ONLY on the pure
+     * empty-success shape (the recorded TheMoviesFlix class: "page parsed OK,
+     * but produced no stream links" on a tapped title that plays elsewhere).
+     * Same cooldown, same bounds — a genuinely empty title still costs one
+     * reload per provider instead of one per sweep member, and walls/deser
+     * never trigger it from any seat.
      */
     private suspend fun cleanRoomRetry(
         p: ContentProvider,
@@ -2185,13 +2191,21 @@ class ContentRepository(private val manager: ProviderManager) {
         timedOut: Boolean,
         lastWhy: String?,
     ): List<StreamSource> {
-        if (!isOrigin || timedOut || lastWhy != null) return emptyList()
+        if (timedOut || lastWhy != null) return emptyList()
         if (p.config.type != ProviderType.CS3) return emptyList()
         val api = p as? Cs3MainApiProvider ?: return emptyList()
         val said = providerStreamMessage(p)
         if (isDeserializationFailure(said)) return emptyList()
         if (said != null && !isEmptySuccess(said)) return emptyList()
         if (said != null && isSiteWall(said)) return emptyList()
+        if (!isOrigin) {
+            com.hikari.app.data.Logs.log(
+                "Provider",
+                p.config.name.ifBlank { p.config.id } +
+                    " [${p.config.type.groupLabel}]" +
+                    ": non-origin empty-success — one bounded clean-room retry",
+            )
+        }
         return try {
             if (!com.hikari.app.providers.ExtensionRecovery.recoverEmpty(
                     HikariApp.instance, p.config

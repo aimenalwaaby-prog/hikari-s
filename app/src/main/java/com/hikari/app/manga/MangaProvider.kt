@@ -616,8 +616,13 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 // leaves the chapter URL itself as the image, so every page of
                 // the chapter would download the same chapter/cover bytes and
                 // the whole chapter (and every chapter like it) shows the same
-                // image. Drop those plus exact duplicates, keeping story order.
-            }.filter { p -> p.url.isNotBlank() && p.url != chapter.id && seenPageUrls.add(p.url) }
+                // image. Drop those, exact duplicates, and any page equal to
+                // the detail poster (a covers-only answer), keeping story order.
+            }.filter { p ->
+                val poster = item.posterUrl?.trim().orEmpty()
+                p.url.isNotBlank() && p.url != chapter.id &&
+                    (poster.isBlank() || p.url != poster) && seenPageUrls.add(p.url)
+            }
             if (outPages.isEmpty()) return@gate fail("pages failed: no readable pages", emptyList())
             lastOutcome[config.id] = "✓ ${outPages.size} page(s)"
             outPages

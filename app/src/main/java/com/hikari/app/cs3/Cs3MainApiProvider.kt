@@ -37,6 +37,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import org.json.JSONObject
 
 /**
  * Adapts a loaded CloudStream MainAPI to Hikari's ContentProvider contract so
@@ -898,6 +899,16 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                 streamErrors[config.id] = "No playable source found on this extension."
                 return@withContext emptyList()
             }
+            // A provider-opaque JSON payload minted by an older build can miss a
+            // field the installed build now requires (the recorded
+            // `MissingKotlinParameterException ... LoadLinksData ... missing
+            // (therefore NULL) value for creator parameter id`). The payload
+            // comes from the cached episode list or the title load, so repair
+            // the identity-shaped hole here — universally, no per-extension
+            // code — instead of letting the plugin throw on its own input.
+            // Anything else missing still heals through the fresh re-resolve
+            // (see ContentRepository), which mints the current shape.
+            val safeData = repairLoadLinksData(data, episode, item)
             // The universal fallback engine and the MovieBlast resolver scrape
             // a real page URL, never a serialized payload, so they keep using
             // the original item url.
@@ -966,12 +977,12 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                             }
                             elapsedMs += System.currentTimeMillis() - s
                         }
-                        runOnce(pluginTimeout, data)
+                        runOnce(pluginTimeout, safeData)
                         if ((completed != true || links.isEmpty()) && elapsedMs < 15_000) {
                             links.clear()
                             val retryBudget = minOf(pluginTimeout, 20_000L)
                             deadline = maxOf(deadline, System.currentTimeMillis() + retryBudget + 1_000)
-                            runOnce(retryBudget, data)
+                            runOnce(retryBudget, safeData)
                         }
                         // iStreamFlare-style providers hand loadLinks a JSON
                         // video-id payload whose "url" is null whenever their
@@ -1001,7 +1012,7 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                             } ?: data
                             if (freshData != data) {
                                 links.clear()
-                                runOnce(freshBudget, freshData)
+                                runOnce(freshBudget, repairLoadLinksData(freshData, episode, item))
                             }
                         }
                         // Same stale-data class, one step further out: the
@@ -1035,7 +1046,7 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                                 } ?: data
                                 if (freshData != data) {
                                     links.clear()
-                                    runOnce(freshBudget, freshData)
+                                    runOnce(freshBudget, repairLoadLinksData(freshData, episode, item))
                                 }
                             }
                         }
@@ -1056,7 +1067,10 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                         links.toList()
                     } catch (e: Throwable) {
                         if (e is CancellationException) throw e
-                        streamErrors[config.id] = fullCause(e)
+                        // The error screen shows this text: keep one human line
+                        // (the full stack stays in logcat + the line below).
+                        streamErrors[config.id] = shortCause(e)
+                        com.hikari.app.data.Logs.log("Provider", a.name + ": loadLinks failed: " + fullCause(e).take(1200))
                         android.util.Log.e("Cs3Streams", "loadLinks failed for $data", e)
                         emptyList()
                     }
@@ -1573,6 +1587,55 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
             depth++
         }
         return sb.toString()
+    }
+
+    /**
+     * One human line for the error screen: the exception heads without any
+     * `at …` stack frames. A plugin's own parse failure used to fill the
+     * "Playback failed" panel with raw frames; the full text is one log line
+     * away (see the catch above).
+     */
+    private fun shortCause(e: Throwable): String {
+        val heads = ArrayList<String>(3)
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 3) {
+            val one = ((t.javaClass.simpleName + ": " + (t.message ?: "")).replace(Regex("\\s+"), " ").trim())
+                .take(220)
+            if (one.isNotBlank()) heads += one
+            t = t.cause
+            depth++
+        }
+        return heads.joinToString(" — ").take(400)
+    }
+
+    /**
+     * Repairs a provider-opaque episode payload that predates the installed
+     * provider build: a JSON object missing the `id` the current build
+     * requires throws `MissingKotlinParameterException` inside the plugin's
+     * own `loadLinks`, which reads as a broken extension. The identity is
+     * re-minted from the episode (or the title) being played — the same
+     * lookup the fresh re-resolve would return — so the plugin parses and
+     * proceeds. Non-JSON payloads (page URLs) pass through untouched, and a
+     * payload that already carries an id is returned as-is: this never
+     * rewrites a good payload.
+     */
+    private fun repairLoadLinksData(
+        data: String,
+        episode: com.hikari.app.data.Episode?,
+        item: MediaItem,
+    ): String {
+        val t = data.trim()
+        if (!t.startsWith("{") || !t.endsWith("}")) return data
+        return try {
+            val o = JSONObject(t)
+            if (o.has("id") && o.optString("id").isNotBlank()) return data
+            val fallbackId = episode?.id?.takeIf { it.isNotBlank() } ?: item.id
+            o.put("id", fallbackId)
+            o.toString()
+        } catch (_: Throwable) {
+            data
+        }
     }
 
     /** iStreamFlare-style providers put a JSON video-id list in LoadResponse.url

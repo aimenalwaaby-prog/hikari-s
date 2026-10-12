@@ -1,7 +1,12 @@
 package com.hikari.app.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,15 +22,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,10 +55,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.hikari.app.HikariApp
 import com.hikari.app.data.Profiles
 import com.hikari.app.i18n.tr
@@ -106,6 +119,22 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
     var deleteTarget by remember { mutableStateOf<Profiles.Profile?>(null) }
     var typed by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
+    // Creation-sheet picture: a built-in gradient marker ("grad:N"), or a
+    // storage photo picked below (applied after the profile exists).
+    var namingAvatar by remember { mutableStateOf("") }
+    var namingPhoto by remember { mutableStateOf<Uri?>(null) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            namingPhoto = uri
+            namingAvatar = ""
+        }
+    }
+    fun openNaming(defaultName: String) {
+        typed = defaultName
+        namingAvatar = ""
+        namingPhoto = null
+        naming = true
+    }
     // The app-lock gate over this page: when an app lock is set, creating,
     // renaming, deleting or SWITCHING a profile asks for the lock's password
     // first — otherwise anyone holding the unlocked phone could open or change
@@ -266,10 +295,7 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
                             label = tr("Save this setup as a profile"),
                             enabled = !busy,
                         ) {
-                            askGate {
-                                typed = msgDefaultName
-                                naming = true
-                            }
+                            askGate { openNaming(msgDefaultName) }
                         }
                     }
                 }
@@ -304,10 +330,7 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
             item(key = "profiles-new") {
                 GlassCard(
                     onClick = {
-                        askGate {
-                            typed = ""
-                            naming = true
-                        }
+                        askGate { openNaming("") }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -388,7 +411,7 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
     }
 
     if (naming) {
-        ProfileNameDialog(
+        ProfileCreateDialog(
             title = if (profiles.isEmpty()) tr("Save this setup") else tr("New profile"),
             hint = if (profiles.isEmpty()) {
                 tr("Your current extensions, Library, history and settings become this profile.")
@@ -399,16 +422,29 @@ fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
                 )
             },
             value = typed,
-            confirmLabel = if (profiles.isEmpty()) tr("Save") else tr("Create"),
             onValueChange = { typed = it },
+            avatar = namingAvatar,
+            onAvatarChange = {
+                namingAvatar = it
+                namingPhoto = null
+            },
+            photoUri = namingPhoto,
+            onPickPhoto = { photoPicker.launch("image/*") },
+            onClearPhoto = { namingPhoto = null },
+            confirmLabel = if (profiles.isEmpty()) tr("Save") else tr("Create"),
             onConfirm = {
                 val name = typed.trim()
+                val grad = namingAvatar
+                val photo = namingPhoto
                 naming = false
+                namingPhoto = null
                 busy = true
                 scope.launch {
                     val result = runCatching {
-                        if (profiles.isEmpty()) Profiles.adopt(app, name.ifBlank { "Default" })
-                        else Profiles.createEmpty(app, name.ifBlank { "Profile" })
+                        val created = if (profiles.isEmpty()) Profiles.adopt(app, name.ifBlank { "Default" }, grad)
+                        else Profiles.createEmpty(app, name.ifBlank { "Profile" }, grad)
+                        if (photo != null) runCatching { Profiles.setAvatar(app, created.id, photo) }
+                        created
                     }
                     busy = false
                     status = if (result.isSuccess) {
@@ -729,6 +765,180 @@ private fun summaryText(summary: Profiles.Summary?): String {
     return parts.joinToString(" · ")
 }
 
+/** Built-in picture tiles: deterministic, no storage, no network. */
+private val ProfileGradients = listOf(
+    Color(0xFF7C4DFF) to Color(0xFF448AFF),
+    Color(0xFF00BFA5) to Color(0xFF64DD17),
+    Color(0xFFFF6D00) to Color(0xFFFF1744),
+    Color(0xFFD81B60) to Color(0xFF7C4DFF),
+    Color(0xFF0288D1) to Color(0xFF26C6DA),
+    Color(0xFFFFB300) to Color(0xFFFF5722),
+    Color(0xFF43A047) to Color(0xFFC0CA33),
+    Color(0xFF546E7A) to Color(0xFF303F9F),
+)
+
+private fun gradientFor(marker: String): Pair<Color, Color>? {
+    val n = marker.removePrefix("grad:").toIntOrNull() ?: return null
+    if (n !in ProfileGradients.indices) return null
+    return ProfileGradients[n]
+}
+
+/**
+ * One profile's picture: the storage photo, a gradient tile, or the initial
+ * tile. An active row keeps a thin primary ring so "in use" still reads.
+ */
+@Composable
+private fun ProfileAvatar(
+    profile: Profiles.Profile,
+    name: String,
+    active: Boolean,
+    size: Dp = 44.dp,
+    photoUri: Uri? = null,
+) {
+    val context = LocalContext.current
+    val file = remember(profile.avatar) { Profiles.avatarFile(context, profile.avatar) }
+    val grad = gradientFor(profile.avatar)
+    val initial = name.trim().firstOrNull()?.uppercase() ?: "?"
+    val ring = if (active) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+    } else Modifier
+    when {
+        photoUri != null -> AsyncImage(
+            model = photoUri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape).then(ring),
+        )
+        file != null -> AsyncImage(
+            model = file,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape).then(ring),
+        )
+        grad != null -> Box(
+            Modifier.size(size).clip(CircleShape).then(ring)
+                .background(Brush.linearGradient(listOf(grad.first, grad.second))),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(initial, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+        else -> Box(
+            Modifier.size(size).clip(CircleShape).then(ring)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (active) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            } else {
+                Text(initial, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+/**
+ * Creation sheet: name, a picture row (built-in gradients + a storage photo
+ * via the system picker — no storage permission needed), and Create. The
+ * photo is applied after the profile exists (see the caller).
+ */
+@Composable
+private fun ProfileCreateDialog(
+    title: String,
+    hint: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    avatar: String,
+    onAvatarChange: (String) -> Unit,
+    photoUri: Uri?,
+    onPickPhoto: () -> Unit,
+    onClearPhoto: () -> Unit,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ProfileAvatar(
+                        profile = Profiles.Profile(id = "", name = value.ifBlank { "?" }, createdAt = 0L, avatar = avatar),
+                        name = value.ifBlank { "?" },
+                        active = false,
+                        size = 64.dp,
+                        photoUri = photoUri,
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            tr("Pick a picture"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            tr("A tile, or a photo from storage."),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProfileGradients.forEachIndexed { i, g ->
+                        val marker = "grad:$i"
+                        val selected = photoUri == null && avatar == marker
+                        Box(
+                            Modifier.size(36.dp).clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(g.first, g.second)))
+                                .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+                                .clickable { onAvatarChange(marker) },
+                        )
+                    }
+                    Box(
+                        Modifier.size(36.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .then(if (photoUri != null) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+                            .clickable { onPickPhoto() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (photoUri != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                IconButton(onClick = onClearPhoto, modifier = Modifier.size(20.dp)) {
+                                    Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(12.dp))
+                                }
+                            }
+                        } else {
+                            Icon(Icons.Filled.PhotoLibrary, contentDescription = tr("Choose from storage"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    label = { Text(tr("Profile name")) },
+                    modifier = Modifier.fillMaxWidth().tvTextFieldKeys(value),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = value.isNotBlank(), onClick = onConfirm) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(tr("Cancel")) }
+        },
+    )
+}
+
 /** One profile: name, what it holds, and the three things to do with it. */
 @Composable
 private fun ProfileRow(
@@ -752,22 +962,12 @@ private fun ProfileRow(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .clip(GlassShape)
-                    .background(
-                        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    if (active) Icons.Filled.Check else Icons.Filled.Person,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
+            ProfileAvatar(
+                profile = profile,
+                name = profile.name,
+                active = active,
+                size = 44.dp,
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -7757,6 +7757,7 @@ class PlayerActivity : ComponentActivity() {
                     runCatching {
                         list.requestLayout()
                         list.invalidate()
+                        (list.parent as? View)?.requestLayout()
                         (list.parent as? View)?.invalidate()
                     }
                 }
@@ -7906,13 +7907,18 @@ class PlayerActivity : ComponentActivity() {
             for (s in sources) contentHash = contentHash * 31 + (s.infoHash ?: s.url).hashCode()
             val paintSig = sources.size.toString() + "|" + contentHash + "|" + chip + "|" +
                 currentIndex + "|" + playbackCommitted
-            if (paintSig == lastPaintSig && builtSig.isNotEmpty()) return
+            if (paintSig == lastPaintSig && builtSig.isNotEmpty() && (list.childCount - 1) > 0) return
             lastPaintSig = paintSig
             rebuildChips()
             rebuildList()
             // Same explicit pass for live appends (see above): servers that
             // land while the sheet is open must paint without a touch.
             list.requestLayout()
+            // The list lives inside the panel's ScrollView: a layout-only pass
+            // on the list leaves the scroller measuring the OLD content height,
+            // so new rows sit at zero height until a touch scrolls (the exact
+            // invisible-until-touch shape). Remeasure the parent too.
+            (list.parent as? View)?.requestLayout()
             // And the draw to go with the layout: a touch forces a traversal
             // that paints rows a layout-only pass left undrawn, so force both
             // phases here instead of waiting for a finger.
@@ -7938,7 +7944,13 @@ class PlayerActivity : ComponentActivity() {
         var chooserTrailingQueued = false
         val requestPaint: () -> Unit = {
             val now = android.os.SystemClock.uptimeMillis()
-            if (now - lastChooserPaintMs < 750) {
+            // A blank screen never waits for the coalescer: rows are already
+            // children (the user is looking at an empty box over found
+            // servers), so paint now instead of in 800ms.
+            if (list.childCount <= 1) {
+                lastChooserPaintMs = now
+                if (dialog.isShowing) paintChooser()
+            } else if (now - lastChooserPaintMs < 750) {
                 if (!chooserTrailingQueued) {
                     chooserTrailingQueued = true
                     list.postDelayed({
@@ -8033,6 +8045,8 @@ class PlayerActivity : ComponentActivity() {
             rebuildList()
             list.requestLayout()
             (list.parent as? View)?.requestLayout()
+            list.invalidate()
+            (list.parent as? View)?.invalidate()
         }
         // Rows added by ANY path repaint without a touch: the coalesced
         // watcher covers collector ticks, this covers the rest (a sync that

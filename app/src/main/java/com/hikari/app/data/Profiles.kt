@@ -77,6 +77,13 @@ object Profiles {
          * rather than locking its new owner out (see [unlock]).
          */
         val locked: Boolean = false,
+        /**
+         * The picker's picture: "" (the initial tile), "grad:N" (one of the
+         * built-in gradient tiles), or "file:<name>" (a picture the user
+         * picked from storage, kept under `filesDir/profiles/avatars/`).
+         * Registry-only, like the name — never inside a snapshot.
+         */
+        val avatar: String = "",
     )
 
     /** `filesDir/profiles` — the registry and one snapshot file per profile. */
@@ -210,6 +217,66 @@ object Profiles {
 
     private fun newId(): String = UUID.randomUUID().toString().replace("-", "").take(16)
 
+    // ------------------------------------------------------------ avatars --
+
+    /**
+     * Pictures picked from storage, one file per profile. The registry holds
+     * only the marker (`file:<name>`); the bytes live here, outside snapshots
+     * and backups — a picture is device-local, like the lock secret.
+     */
+    private fun avatarsDir(ctx: Context): File = File(dir(ctx), "avatars").apply { mkdirs() }
+
+    /** The stored picture for [avatar] ("file:<name>"), or null. */
+    fun avatarFile(ctx: Context, avatar: String): File? {
+        val t = avatar.trim()
+        if (!t.startsWith("file:")) return null
+        val name = t.removePrefix("file:")
+        if (name.isBlank() || "/" in name || ".." in name) return null
+        return File(avatarsDir(ctx), name).takeIf { it.isFile }
+    }
+
+    /**
+     * Stores a storage-picked picture for [id]: the content URI is copied into
+     * the avatars dir (down to a 512px bound so a camera photo cannot bloat
+     * the files dir) and the registry marker updated. Returns the marker, or
+     * "" when the picture could not be read. No permission needed: the system
+     * picker grants the read.
+     */
+    suspend fun setAvatar(app: HikariApp, id: String, uri: android.net.Uri): String =
+        withContext(Dispatchers.IO) {
+            val ctx = app
+            val marker = runCatching {
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: return@runCatching ""
+                val src = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    ?: return@runCatching ""
+                val bound = 512
+                val scale = minOf(1f, bound / maxOf(src.width, src.height).toFloat())
+                val bmp = if (scale < 1f) {
+                    android.graphics.Bitmap.createScaledBitmap(
+                        src,
+                        (src.width * scale).toInt().coerceAtLeast(1),
+                        (src.height * scale).toInt().coerceAtLeast(1),
+                        true,
+                    )
+                } else src
+                val out = File(avatarsDir(ctx), "$id.jpg")
+                out.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+                if (bmp !== src) runCatching { src.recycle() }
+                runCatching { bmp.recycle() }
+                "file:$id.jpg"
+            }.getOrDefault("")
+            if (marker.isNotBlank()) {
+                lock.withLock {
+                    val reg = readRegistry(ctx)
+                    val next = profilesOf(reg).map { p -> if (p.id == id) p.copy(avatar = marker) else p }
+                    writeRegistry(ctx, next, _activeId.value)
+                    publish(ctx, readRegistry(ctx))
+                }
+            }
+            marker
+        }
+
     // ---------------------------------------------------------- registry --
 
     private fun readRegistry(ctx: Context): JSONObject =
@@ -228,6 +295,7 @@ object Profiles {
                     name = o.optString("name").trim().ifBlank { "Profile" },
                     createdAt = o.optLong("createdAt", 0L),
                     locked = o.optBoolean("locked", false),
+                    avatar = o.optString("avatar").trim(),
                 )
             )
         }
@@ -243,6 +311,7 @@ object Profiles {
                     .put("name", p.name)
                     .put("createdAt", p.createdAt)
                     .put("locked", p.locked)
+                    .put("avatar", p.avatar)
             )
         }
         val root = JSONObject()
@@ -381,11 +450,11 @@ object Profiles {
      * the user's existing Hikari is the one they can always come back to) and
      * marks it active without touching the store.
      */
-    suspend fun adopt(app: HikariApp, name: String): Profile = lock.withLock {
+    suspend fun adopt(app: HikariApp, name: String, avatar: String = ""): Profile = lock.withLock {
         val ctx = app
         val reg = readRegistry(ctx)
         val list = profilesOf(reg)
-        val profile = Profile(newId(), name.trim().ifBlank { "Default" }, System.currentTimeMillis())
+        val profile = Profile(newId(), name.trim().ifBlank { "Default" }, System.currentTimeMillis(), avatar = avatar.trim())
         saveSnapshot(ctx, app, profile.id)
         runCatching { app.store.setProfileTag(profile.id) }
         writeRegistry(ctx, list + profile, profile.id)
@@ -399,12 +468,12 @@ object Profiles {
      * one now", and the caller is a user who has just tapped New profile. The
      * profile being left is saved on the way out, so nothing is lost.
      */
-    suspend fun createEmpty(app: HikariApp, name: String): Profile {
+    suspend fun createEmpty(app: HikariApp, name: String, avatar: String = ""): Profile {
         val profile = lock.withLock {
             val ctx = app
             val reg = readRegistry(ctx)
             val list = profilesOf(reg)
-            val created = Profile(newId(), name.trim().ifBlank { "New profile" }, System.currentTimeMillis())
+            val created = Profile(newId(), name.trim().ifBlank { "New profile" }, System.currentTimeMillis(), avatar = avatar.trim())
             // The registry keeps the OLD active id here on purpose: the switch
             // below is what saves the profile being left (see [switchLocked]).
             // Marking the new profile active first would make that save a no-op
@@ -507,6 +576,7 @@ object Profiles {
         if (wasActive && remaining.isNotEmpty()) applySnapshot(app, remaining.first().id)
         writeRegistry(ctx, remaining, remaining.firstOrNull()?.id)
         runCatching { snapshotFile(ctx, id).delete() }
+        runCatching { File(File(dir(ctx), "avatars"), "$id.jpg").delete() }
         publish(ctx, readRegistry(ctx))
         if (wasActive && remaining.isNotEmpty()) runCatching { app.store.setProfileTag(remaining.first().id) }
         Logs.log("Profiles", "deleted profile \"${list.firstOrNull { it.id == id }?.name ?: id}\"")
