@@ -223,6 +223,116 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         return out
     }
 
+    private val webtoonsUa =
+        "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/120.0.0.0 Mobile Safari/537.36"
+
+    private fun webtoonsTitleNo(idOrUrl: String): String =
+        Regex("title_no=(\\d+)").find(idOrUrl)?.groupValues?.get(1).orEmpty()
+
+    private fun webtoonsUnescape(s: String): String =
+        s.replace("&amp;", "&").replace("&#039;", "'").replace("&#034;", "\"")
+            .replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
+
+    private fun webtoonsNormalize(u: String): String =
+        webtoonsUnescape(u.trim()).replace("https://m.webtoons.com/", "https://www.webtoons.com/")
+
+    private fun webtoonsFetch(url: String): String =
+        Http.fetchStringRobust(
+            url,
+            mapOf(
+                "User-Agent" to webtoonsUa,
+                "Accept" to "text/html",
+                "Referer" to "https://www.webtoons.com/",
+            ),
+        ).getOrNull().orEmpty()
+
+    /**
+     * The viewer HTML for a title. A viewer page carries the whole episode
+     * sequence list server-rendered (the list page's own `<ul>` is filled
+     * client-side, so the list URL alone can never yield chapters), and the
+     * strip images of its own episode inline. Accepts a viewer URL (used
+     * directly) or a list URL (bootstrapped through the first episode's
+     * viewer link embedded in the list page's dto JSON). Blank when neither
+     * shape is usable — the caller falls through to the JS module path.
+     */
+    private fun webtoonsViewerHtml(idOrUrl: String): String {
+        val u = webtoonsNormalize(idOrUrl)
+        if (u.isBlank()) return ""
+        if ("viewer" in u && "episode_no=" in u) return webtoonsFetch(u)
+        if (!u.startsWith("http") || webtoonsTitleNo(u).isEmpty()) return ""
+        val listHtml = webtoonsFetch(u)
+        if (listHtml.isBlank()) return ""
+        val first = Regex(
+            """https://(?:m\.|www\.)webtoons\.com/[^"'<>\s]*?/viewer\?title_no=\d+&(?:amp;)?episode_no=\d+"""
+        ).find(listHtml)?.value?.let { webtoonsNormalize(it) }.orEmpty()
+        if (first.isBlank()) return ""
+        return webtoonsFetch(first)
+    }
+
+    /**
+     * Native Webtoons chapters (verified against the live site 2026-10-12):
+     * one viewer fetch yields every episode — `<a .../viewer?title_no=N
+     * &episode_no=M><img ... alt="Ep. M - Title">` in the toolbar sequence
+     * list. The JS module path stays as the fallback (Canvas/Discover titles
+     * the regexes below do not cover keep working exactly as before).
+     */
+    private fun nativeWebtoonsChapters(item: MediaItem): List<Episode> {
+        val html = webtoonsViewerHtml(item.id)
+        if (html.isBlank()) return emptyList()
+        val re = Regex(
+            """<a href="(https://(?:m\.|www\.)webtoons\.com/[^"]*?/viewer\?title_no=\d+&(?:amp;)?episode_no=(\d+))"[^>]*>[\s\S]{0,2500}?<img[^>]*alt="([^"]*)""""
+        )
+        val byNo = LinkedHashMap<Int, Episode>()
+        for (m in re.findAll(html)) {
+            val no = m.groupValues[2].toIntOrNull() ?: continue
+            if (no <= 0 || byNo.containsKey(no)) continue
+            val name = webtoonsUnescape(m.groupValues[3]).trim().ifBlank { "Episode $no" }
+            byNo[no] = Episode(
+                number = no,
+                id = webtoonsNormalize(m.groupValues[1]),
+                name = name,
+            )
+            if (byNo.size >= MAX_CHAPTERS) break
+        }
+        return byNo.values.sortedBy { it.number }
+    }
+
+    /**
+     * Native Webtoons pages (verified against the live site 2026-10-12): the
+     * episode's own viewer HTML carries every full-size strip inline
+     * (`webtoon-phinf` JPEGs; the `thumb_`/`?type=` variants are the toolbar
+     * thumbnails, not pages). phinf serves them with a webtoons Referer.
+     */
+    private fun nativeWebtoonsPages(chapterUrl: String): List<StreamSource> {
+        val u = webtoonsNormalize(chapterUrl)
+        if (u.isBlank() || !u.startsWith("http") || "viewer" !in u) return emptyList()
+        val html = webtoonsFetch(u)
+        if (html.isBlank()) return emptyList()
+        val out = ArrayList<StreamSource>()
+        val seen = HashSet<String>()
+        for (m in Regex("""https://webtoon-phinf\.pstatic\.net/[^"'<>\s]+""").findAll(html)) {
+            var img = m.value.trim()
+            if (img.isEmpty() || !seen.add(img)) continue
+            val low = img.lowercase()
+            if ("thumb" in low || "?type=" in low) continue
+            out += StreamSource(
+                name = "Page ${out.size + 1}",
+                url = img,
+                headers = mapOf(
+                    "User-Agent" to webtoonsUa,
+                    "Referer" to "https://www.webtoons.com/",
+                ),
+                pageUrl = u,
+                provider = "Anymex",
+                providerId = config.id,
+                providerName = config.name,
+            )
+            if (out.size >= 400) break
+        }
+        return out
+    }
+
     private fun nativeWebtoons(catalogId: String, page: Int): List<MediaItem> {
         if (page > 1) return emptyList()
         val sort = if (catalogId == CATALOG_LATEST) "?sortOrder=UPDATE" else ""
@@ -311,6 +421,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         val native = when {
             isMangaDex() -> nativeMangaDexChapters(item)
             isComick() -> nativeComickChapters(item)
+            isWebtoons() -> nativeWebtoonsChapters(item)
             else -> emptyList()
         }
         val episodes = if (native.isNotEmpty()) native else {
@@ -410,6 +521,15 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                 val pages = nativeMangaDexPages(chUrl)
                 if (pages.isNotEmpty()) {
                     lastOutcome[config.id] = "✓ ${pages.size} pages"
+                    return@withContext pages
+                }
+            }
+            // Native Webtoons strips (no JS module required): the viewer HTML
+            // carries every full-size strip inline — see nativeWebtoonsPages.
+            if (isWebtoons()) {
+                val pages = nativeWebtoonsPages(chUrl)
+                if (pages.isNotEmpty()) {
+                    lastOutcome[config.id] = "✓ ${pages.size} pages (native)"
                     return@withContext pages
                 }
             }

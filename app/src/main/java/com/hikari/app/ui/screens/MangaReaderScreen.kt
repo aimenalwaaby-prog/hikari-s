@@ -332,9 +332,17 @@ fun MangaReaderScreen(
         pages = out
         openPage = restored
         if (out.isEmpty()) {
-            error = MangaProvider.lastOutcome[providerId]
+            // A CATALOG outcome ("✓ 24 titles (js)") is about the listing,
+            // not the pages — showing it under "Couldn't load this chapter"
+            // is what put "24 titles (js)" where the page error belongs (the
+            // detail screen already filters this way; the reader did not).
+            // Only a chapter/page-shaped outcome is shown.
+            val outcome = MangaProvider.lastOutcome[providerId]
                 ?: com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[providerId]
-                ?: I18n.t("This chapter returned no pages. Tap to try again.")
+            error = if (outcome != null &&
+                (outcome.contains("chapter", ignoreCase = true) ||
+                    outcome.contains("page", ignoreCase = true))
+            ) outcome else I18n.t("This chapter returned no pages. Tap to try again.")
         }
         loading = false
     }
@@ -420,7 +428,12 @@ fun MangaReaderScreen(
             nextError = null
             val list = fetchPages(nextUrl)
             if (list.isEmpty()) {
-                nextError = MangaProvider.lastOutcome[providerId] ?: I18n.t("Couldn't load the next chapter.")
+                val outcome = MangaProvider.lastOutcome[providerId]
+                    ?: com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[providerId]
+                nextError = if (outcome != null &&
+                    (outcome.contains("chapter", ignoreCase = true) ||
+                        outcome.contains("page", ignoreCase = true))
+                ) outcome else I18n.t("Couldn't load the next chapter.")
             } else if (streamQueue.none { it.id == nextUrl }) {
                 streamQueue = streamQueue + ReaderChapter(nextUrl, labelOf(nextUrl))
                 streamSegments = streamSegments + listOf(list)

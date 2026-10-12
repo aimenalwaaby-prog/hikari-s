@@ -7827,18 +7827,28 @@ class PlayerActivity : ComponentActivity() {
         // blank until the next touch-driven traversal, even though the rows
         // are already children ("servers show only after I touch the list").
         list.requestLayout()
+        // Signature of the last paint that actually rebuilt: a paint whose
+        // inputs match it has nothing to show that is not already on screen.
+        var lastPaintSig = ""
         fun paintChooser() {
-            // A rebuild changes the content height, so put the scroll offsets
-            // back AFTER the new rows are laid out (scrollTo clamps to the new
-            // maximum) — otherwise a server landing while the user reads the
-            // list would yank them to the top, or a re-created chip row would
-            // throw away the chip they had scrolled to.
+            // Settle the live loop: during an active search every watcher tick
+            // used to run the full sync+rebuild+requestLayout+scroll-restore+
+            // rebend pass even when the rendered set had not changed at all —
+            // a permanent main-thread layout storm (a tick every ~750ms plus
+            // the 600ms hint remeasure) that never settled on slower devices,
+            // so rows sat perpetually mid-layout: blank until a touch forced
+            // a traversal, then blank again on the next tick. A paint whose
+            // inputs match the last one now returns without touching a view.
             val sv = verticalScrollerOf(list)
             // Whether the user is already reading the END of the list: servers
             // land live while the sheet is open, and blindly restoring keepY
             // after every append is what made the list feel like it "cannot
             // scroll down" — the user drags down, a server lands, the offset
             // snaps back up. At the end, follow the new rows down instead.
+            // A rebuild changes the content height, so the offsets below are
+            // restored AFTER the new rows are laid out (scrollTo clamps to
+            // the new maximum) — otherwise a server landing while the user
+            // reads the list would yank them to the top.
             val keepY = sv?.scrollY ?: 0
             val nearBottomPx = (48 * density).roundToInt()
             val wasAtBottom = sv?.let { v ->
@@ -7847,11 +7857,24 @@ class PlayerActivity : ComponentActivity() {
             } ?: false
             val keepX = chipScroll.scrollX
             syncFromSession()
+            // Nothing new to show (no adopted servers, same chip/selection)?
+            // Return before touching a single view — this is what settles the
+            // loop (see above). builtSig empty means the open-path rebuild has
+            // not run yet, so the first paint always goes through.
+            val paintSig = sources.size.toString() + "|" + chip + "|" +
+                currentIndex + "|" + playbackCommitted
+            if (paintSig == lastPaintSig && builtSig.isNotEmpty()) return
+            lastPaintSig = paintSig
             rebuildChips()
             rebuildList()
             // Same explicit pass for live appends (see above): servers that
             // land while the sheet is open must paint without a touch.
             list.requestLayout()
+            // And the draw to go with the layout: a touch forces a traversal
+            // that paints rows a layout-only pass left undrawn, so force both
+            // phases here instead of waiting for a finger.
+            list.invalidate()
+            (list.parent as? View)?.invalidate()
             // Television: rows/chips appended AFTER the dialog's one-time focus
             // pass are reachable but ringless without this (see [glassRow]'s
             // birth ring — this is the belt and braces for rows built before
@@ -8009,7 +8032,11 @@ class PlayerActivity : ComponentActivity() {
                         shown = text
                         hintView.text = text
                     }
-                    delay(600)
+                    // 1.5s, not every tick: the tally line remeasures the whole
+                    // panel on every change, and at 600ms that remeasure never
+                    // stopped during a live search. Still live — tallies move
+                    // on this cadence — but no longer a layout storm.
+                    delay(1500)
                 }
             }
         }

@@ -53,6 +53,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -155,6 +156,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -1440,11 +1442,7 @@ fun SettingsScreen(nav: NavHostController) {
                 SettingsCard(top = 12.dp) {
                     ListItem(
                         leadingContent = {
-                            Icon(
-                                Icons.Filled.BarChart,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            SettingsIconBadgeRes(R.drawable.ic_set_stats, 40.dp)
                         },
                         headlineContent = { Text(tr("Stats")) },
                         supportingContent = {
@@ -1749,15 +1747,13 @@ private fun ExtensionsShortcutCard(installed: Int, onOpen: () -> Unit) {
             Box(
                 Modifier
                     .size(44.dp)
-                    .clip(GlassShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                    .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Filled.Extension,
+                Image(
+                    painterResource(R.drawable.ic_ext_installed_ext),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(44.dp)
                 )
             }
             Spacer(Modifier.width(14.dp))

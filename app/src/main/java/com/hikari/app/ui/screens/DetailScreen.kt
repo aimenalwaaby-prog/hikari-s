@@ -3647,15 +3647,15 @@ fun DetailScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                     // Melt the header's bottom edge into the blur behind it
-                    // instead of ending in a seam.
+                    // instead of ending in a seam: the melt runs to fully
+                    // opaque black at the hero boundary, so only black meets
+                    // the darkened blur below — no sharp-vs-blur colour line.
                     Box(
                         Modifier.fillMaxSize().background(
                             Brush.verticalGradient(
-                                listOf(
-                                    Color.Transparent,
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.55f),
-                                )
+                                0.45f to Color.Transparent,
+                                0.75f to Color.Black.copy(alpha = 0.55f),
+                                1.0f to Color.Black,
                             )
                         )
                     )
@@ -4338,10 +4338,12 @@ fun DetailScreen(
                     }
                     // The episode shelf used to run straight into the release
                     // details below with no air between them (reported on a TV
-                    // screenshot): one breathing gap, TV series only.
-                    if (isTvLayout && detailIsSeries && episodePosterStyle) {
+                    // screenshot): one breathing gap, TV series only — 40dp so
+                    // the shelf and the details read as separate blocks even
+                    // on dense phone-width TV windows.
+                    if (isTvLayout && detailIsSeries) {
                         item(key = "tv-episode-details-spacer") {
-                            Spacer(Modifier.height(18.dp))
+                            Spacer(Modifier.height(40.dp))
                         }
                     }
                     if (!isTvLayout) {
