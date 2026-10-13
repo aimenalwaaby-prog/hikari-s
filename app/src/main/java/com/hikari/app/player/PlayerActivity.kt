@@ -7808,7 +7808,7 @@ class PlayerActivity : ComponentActivity() {
                         "chooser empty with $sessionSize server(s) in the live session " +
                             "(sources=${sources.size}, chip=$chip, sections=${runCatching { sections().size }.getOrDefault(-1)}" +
                             ", visible=${visible.size}/${runCatching { visible.sumOf { it.second.size } }.getOrDefault(-1)}, rendered=$rendered, onScreen=$onScreenRows, child=${list.childCount}" +
-                            ", builtSig=${builtSig.size}, sig=${sig.size}, keep=$keep" +
+                            ", builtSig=${builtSig.size}, sig=${sig.size}, want=${list.childCount - 1}" +
                             (if (firstRowError != null) ", rowErr=$firstRowError" else "") + ")",
                     )
                 }
