@@ -3,6 +3,7 @@ package com.hikari.app.tracker
 import com.hikari.app.data.AppStore
 import com.hikari.app.data.HistoryEntry
 import com.hikari.app.data.MediaType
+import com.hikari.app.manga.MangaStore
 import com.hikari.app.data.TrackerAccount
 import com.hikari.app.data.TrackerClient
 import com.hikari.app.data.TrackerMatch
@@ -298,7 +299,57 @@ object TrackerSync {
         val body = notes.distinct().take(40).joinToString("\n")
         val text = head + if (body.isBlank()) "" else "\n" + body
         runCatching { store.setTrackerLast(text) }
-        return text
+        val mangaText = runCatching { syncMangaHistory(store, limit) }.getOrDefault("")
+        return if (mangaText.isBlank()) text else text + "\n" + mangaText
+    }
+
+    /**
+     * Reports manga reading progress the same way [syncHistory] reports watched
+     * videos: the newest titles with a chapter number first, each pushed once
+     * (the per-chapter log deduplicates repeats). A title whose chapter number
+     * cannot be determined is skipped rather than guessed at.
+     */
+    suspend fun syncMangaHistory(store: AppStore, limit: Int = 12): String {
+        val accounts = runCatching { store.trackers() }.getOrDefault(emptyList())
+        if (accounts.isEmpty()) return ""
+        val progress = runCatching { MangaStore.progress() }.getOrDefault(emptyList())
+        if (progress.isEmpty()) return ""
+        val notes = ArrayList<String>()
+        var reported = 0
+        for (p in progress.take(limit)) {
+            if (p.title.isBlank()) continue
+            val num = runCatching {
+                MangaStore.chaptersFor(p.mangaKey)?.firstOrNull { it.url == p.chapterUrl }?.number?.toInt()
+            }.getOrNull()?.takeIf { it > 0 } ?: chapterNumberFromName(p.chapterName)
+            if (num <= 0) continue
+            val before = notes.size
+            notes += pushWatched(store, TrackerMedia(title = p.title, movie = false, episode = num, manga = true), "manga|" + p.mangaKey + "|" + p.chapterUrl)
+            if (notes.size > before && notes.drop(before).any { !it.endsWith("already reported") }) reported++
+        }
+        if (reported == 0 && notes.isEmpty()) return ""
+        val head = if (reported == 0) {
+            "Manga: nothing new to report."
+        } else {
+            "Manga: reported " + reported + " reading title(s):"
+        }
+        val body = notes.distinct().take(20).joinToString("\n")
+        return head + if (body.isBlank()) "" else "\n" + body
+    }
+
+    /** Chapter number out of a chapter's display name ("Chapter 12", "Ch. 12", "12"). */
+    fun chapterNumberFromName(name: String?): Int {
+        if (name.isNullOrBlank()) return 0
+        val pats = listOf(
+            Regex("(?i)\\bchapter\\s*(\\d{1,4})"),
+            Regex("(?i)\\bch\\.?\\s*(\\d{1,4})"),
+            Regex("(?i)\\bepisode\\s*(\\d{1,4})"),
+            Regex("^\\s*(\\d{1,4})\\s*$")
+        )
+        for (re in pats) {
+            val m = re.find(name)
+            if (m != null) return m.groupValues[1].toIntOrNull() ?: 0
+        }
+        return 0
     }
 
     /**

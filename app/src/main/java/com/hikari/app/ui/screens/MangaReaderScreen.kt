@@ -509,6 +509,23 @@ fun MangaReaderScreen(
             streamSegments.getOrNull(streamQueue.indexOfFirst { it.id == url }).orEmpty()
         }
         if (list.isEmpty()) return
+        // Tracker: report the open chapter as manga progress (deduped per
+        // chapter by pushWatched's own log — repeats are cheap no-ops).
+        runCatching {
+            val num = chapters.firstOrNull { it.url == url }?.number?.toInt()?.takeIf { it > 0 }
+                ?: com.hikari.app.tracker.TrackerSync.chapterNumberFromName(labelOf(url))
+            if (title.isNotBlank() && num > 0) {
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        com.hikari.app.tracker.TrackerSync.pushWatched(
+                            app.store,
+                            com.hikari.app.data.TrackerMedia(title = title, movie = false, episode = num, manga = true),
+                            "manga|" + key + "|" + url,
+                        )
+                    }
+                }
+            }
+        }
         MangaStore.setProgress(
             MangaProgress(
                 mangaKey = key,

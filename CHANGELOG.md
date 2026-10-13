@@ -11,7 +11,14 @@
 - Manga empty chapters recover (primed details+chapters retry; empty answers report honestly instead of silent 0), same-cover pages collapse by query-stripped URL at engine + reader layers (signed-query covers report locked/walled), and page headers carry Referer + Origin + UA (hotlink 403 class)
 - Anymex chapters scan deeper/wider (depth 4, 800 nodes, href/id fallbacks) so nested chapter arrays are not reported as no-chapters
 - New-profile pictures wrap into two rows (no sideways scroll/sliver) and storage photos pass through a crop sheet (pinch 1x-4x zoom, drag to fit, circular preview, center-square crop saved device-local)
-- Version 287/0.11.16
+- Sources blank at ANY depth fixed (3rd page and beyond): the list now syncs in place — rows/headers reused by stable key and moved, never torn down — so a server landing in any section cannot blank the rest; scroll is preserved by position at every depth
+- Servers surface sooner with no extra load: wider search waves (8 at once, 700ms gaps) with the same device-capped maximum and shorter head-starts only — per-provider budgets untouched — plus 500ms paint coalescing; bursts still collapse into one paint so big searches never freeze
+- Manga paid/external chapters (MangaUp Global class): external chapters open the publisher page in the WebView with an honest "external chapter (paid)" outcome instead of a dead chapter
+- Manga same heading image repeated in every chapter: at-home pages get the same single-image collapse guard as module pages, and Anymex modules accept string-URL chapters plus slug/path/endpoint/chapterId shapes so nested chapter arrays are no longer "no chapters"
+- Tachiyomi chapter fallback: an empty combined update now tries the legacy chapter list directly before reporting empty
+- Manga tracker sync: opened chapters push manga progress to AniList + MyAnimeList (other services honestly need those two), and Sync history also reports manga reading progress with chapter numbers; done lines read "chapter N"
+- Player sheets never overlap the buttons behind them: opening any dialog hides the controller + top bar instantly and restores exactly what was there on close
+- Version 288/0.11.17
 
 ## Unreleased (continuous build only)
 

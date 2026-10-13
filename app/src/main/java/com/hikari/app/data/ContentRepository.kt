@@ -1335,8 +1335,8 @@ class ContentRepository(private val manager: ProviderManager) {
      *  engine family (the other CloudStream/… repos, which start beside it) waits
      *  [SAME_ENGINE_HEAD_START_MS]. Their servers still stream in right after,
      *  so this only reorders who answers first, never removes anyone. */
-    private val ORIGIN_HEAD_START_MS = 1_200L
-    private val SAME_ENGINE_HEAD_START_MS = 2_000L
+    private val ORIGIN_HEAD_START_MS = 800L
+    private val SAME_ENGINE_HEAD_START_MS = 1_200L
 
     /** Ceiling on how long the other repos are held back while the provider the
      *  title was opened from is still working (see [awaitOriginHeadStart]). The
@@ -1465,13 +1465,13 @@ class ContentRepository(private val manager: ProviderManager) {
      *  answers are actually coming back. [crossExtensionTargets] already orders
      *  the queue by trust (origin's family, proven repos, then the rest), so
      *  the waves never cost a repo its turn — they only stagger its start. */
-    private val CROSS_EXT_WAVE_START = 5
+    private val CROSS_EXT_WAVE_START = 8
     /** Ceiling on one wave of repo searches — see [deviceFanOut]. A getter, not
      *  a value: the performance booster can be switched on while the app is
      *  running, and the NEXT lookup has to see it. */
     private val CROSS_EXT_WAVE_MAX: Int get() = deviceFanOut()
-    private val CROSS_EXT_WAVE_GAP_MS = 1_200L
-    private val CROSS_EXT_WAVE_SLOW_MS = 2_000L
+    private val CROSS_EXT_WAVE_GAP_MS = 700L
+    private val CROSS_EXT_WAVE_SLOW_MS = 1_200L
 
     /** How long the pass may go with NOTHING completing before it is called
      *  wedged and ends early, handing every repo it has no answer from to the

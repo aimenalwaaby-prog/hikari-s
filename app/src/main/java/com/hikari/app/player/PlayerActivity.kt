@@ -6552,6 +6552,25 @@ class PlayerActivity : ComponentActivity() {
         // refusal is simply "no panel" rather than a crash.
         if (isFinishing || isDestroyed) return null
         if (runCatching { dialog.show() }.isFailure) return null
+        // A sheet floats above the player buttons: hide the controller + top
+        // bar the instant anything opens (Source, Audio, Subtitles, Speed…)
+        // so the panel's own close line never overlaps them (the red-marked
+        // report). Detach restores exactly what was there — a hidden
+        // controller stays hidden — and fires for every dismiss path, so no
+        // caller can forget it.
+        val wasControllerVisible = controllerVisible
+        runCatching { playerView?.hideController() }
+        val topBarView = findViewById<View>(R.id.player_top_bar)
+        val wasTopBarVisible = topBarView?.visibility == View.VISIBLE
+        topBarView?.visibility = View.GONE
+        dialog.window?.decorView?.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+            override fun onViewDetachedFromWindow(v: View) {
+                v.removeOnAttachStateChangeListener(this)
+                if (wasControllerVisible) runCatching { playerView?.showController() }
+                if (wasTopBarVisible) topBarView?.visibility = View.VISIBLE
+            }
+        })
         // Narrower than a stock dialog: the reference panel is ~3/4 of the window
         // height wide and never spans the full width, which is a large part of
         // why it reads as a lightweight overlay instead of a full-screen sheet.
@@ -7610,11 +7629,21 @@ class PlayerActivity : ComponentActivity() {
             val s = sources[i]
             return s.name + "\u0001" + s.url
         }
+        // A row's stable identity across paints: the server plus whether it is
+        // the selected one, so a selection change rebuilds two rows instead of
+        // repainting stale rings (or tearing the list down).
+        fun rowKey(i: Int): String =
+            itemKey(i) + "\u0002" + (if (playbackCommitted && i == currentIndex) "1" else "0")
 
         // What the list holds right now (headings + rows, in order) and the
         // selection those rows were drawn with.
         var builtSig = ArrayList<String>()
         var builtSelected = -1
+        // In-place sync maps (see rebuildList): row views by stable key and
+        // headers by section name live across paints, so a live append moves
+        // views instead of tearing them down.
+        val rowViews = HashMap<String, View>()
+        val headerViews = HashMap<String, TextView>()
         // The "Searching…" placeholder is a singleton view, not a per-paint
         // one (see the empty branch below).
         var stateRowView: View? = null
@@ -7642,7 +7671,7 @@ class PlayerActivity : ComponentActivity() {
             visible.forEach { (name, memberIdx) ->
                 if (chip == "All") sig.add("#" + name)
                 sigCounts[name] = memberIdx.size
-                memberIdx.forEach { sig.add(itemKey(it)) }
+                memberIdx.forEach { sig.add(rowKey(it)) }
             }
             // Steady tick (nothing changed, views intact): touch nothing. The
             // paint-level sig guard covers most of these, but a rebuild called
@@ -7655,115 +7684,106 @@ class PlayerActivity : ComponentActivity() {
             // only inflate the tail. A full teardown on every below-fold append
             // collapsed the ScrollView measurement and, with the scroll restore
             // below, blanked the list until a touch forced a traversal.
-            val keep = if (builtSig.isNotEmpty() && sig.size > builtSig.size &&
-                sig.subList(0, builtSig.size) == builtSig &&
-                (list.childCount - 1) == builtSig.size) builtSig.size else 0
-            // A live search keeps appending servers for a minute or two. The
-            // incremental append path (keep-what-is-on-screen) is REMOVED: it
-            // kept a prefix signature of rows it believed were on screen while
-            // the views were gone (a disposed list, a cleared container, a bend
-            // pass that dropped them), so every later tick skipped its headers
-            // and rows forever — the log-proven permanent blank ("24 adopted
-            // then chooser empty", sections=1, rows=0, no rowErr). A full
-            // rebuild every paint is bounded by the 750ms coalescer above and
-            // is what guarantees the rows on screen always match the session.
-            // The tap-tear concern is handled by the coalescer (no mid-press
-            // rebuild storm), not by skipping views.
-            if (keep == 0) {
-                // The chip strip is this container's FIRST child (see above), so
-                // drop only the headers and rows — removeAllViews would take the
-                // chips with them and leave an empty strip behind.
-                while (list.childCount > 1) list.removeViewAt(list.childCount - 1)
-            } else {
-                // Tail-only growth: existing headers keep their views, but the
-                // section counts they show must follow the new totals.
-                for (i in 0 until keep) {
-                    val h = builtSig[i]
-                    if (!h.startsWith("#")) continue
-                    val name = h.removePrefix("#")
-                    val count = sigCounts[name] ?: continue
-                    runCatching { (list.getChildAt(i + 1) as? TextView)?.text = name.uppercase() + "  \u00B7  " + count }
-                }
+            // In-place sync (any depth, any section): every desired row/header
+            // is reused by stable key and MOVED to its position — nothing on
+            // screen is ever torn down, so a server landing on page 3, 5 or 50
+            // cannot blank pages 1-2 and the ScrollView's measure never
+            // collapses. Only genuinely new rows are inflated. A paint that
+            // appends nothing still verifies positions, so a dropped view (a
+            // disposed list, a cleared container) is re-seated instead of going
+            // permanently missing — the log-proven permanent blank cannot recur.
+            var slot = 1 // child index inside `list` (0 is the chip strip)
+            fun place(v: View) {
+                val cur = list.indexOfChild(v)
+                if (cur == slot) { slot++; return }
+                if (cur >= 0) list.removeViewAt(cur)
+                (v.parent as? ViewGroup)?.let { if (it !== list) it.removeView(v) }
+                val at = (if (cur >= 0 && cur < slot) slot - 1 else slot).coerceAtMost(list.childCount)
+                list.addView(v, at)
+                slot = at + 1
             }
-            var pos = 0
-            // Rows actually put on screen. One undrawable row (a poison label,
-            // a row inflation that throws) is skipped instead of aborting the
-            // list — an aborted rebuild used to leave an empty box with no
-            // spinner and no rows, while the cover kept counting found servers.
+            fun headerView(name: String, count: Int, first: Boolean): TextView {
+                val hv = headerViews.getOrPut(name) {
+                    TextView(this).apply {
+                        dpText(9f)
+                        includeFontPadding = false
+                        isSingleLine = true
+                        ellipsize = TextUtils.TruncateAt.END
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        setTextColor(withAlpha(accentMidColor, 0.95f))
+                    }
+                }
+                hv.text = name.uppercase() + "  \u00B7  " + count
+                hv.layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    val topMargin = if (first) (2 * density).toInt() else (7 * density).toInt()
+                    setMargins((4 * density).toInt(), topMargin, (4 * density).toInt(), (4 * density).toInt())
+                }
+                return hv
+            }
+            // Rows actually on screen. One undrawable row (a poison label, a row
+            // inflation that throws) is skipped instead of aborting the list —
+            // an aborted rebuild used to leave an empty box with no spinner and
+            // no rows, while the cover kept counting found servers. A skipped
+            // key stays out of the built signature, so the next paint retries it.
             var rendered = 0
             var firstRowError: String? = null
+            val newSig = ArrayList<String>()
+            fun rowView(i: Int, key: String): View? {
+                rowViews[key]?.let { return it }
+                return runCatching {
+                    val src = sources[i]
+                    val opt = serverOption(src, i)
+                    val tvMenu = PlayerSkins.normalize(skin) == PlayerSkins.TV && playerTvRemote()
+                    val v = glassRow(opt) {
+                        startChoicePending = false
+                        serverPickActed = true
+                        dialog.dismiss()
+                        if (forDownload) {
+                            currentIndex = i
+                            pickedByUser = true
+                            showDownloadDialog()
+                        } else if (i != currentIndex || !playbackCommitted) {
+                            noSubsRetry = false
+                            playSource(i)
+                            pickedByUser = true
+                        }
+                    }
+                    v.layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        bottomMargin = if (opt.labelMaxLines >= 3 || tvMenu) (6 * density).toInt() else (3 * density).toInt()
+                    }
+                    rowViews[key] = v
+                    v
+                }.onFailure { ex ->
+                    if (firstRowError == null) firstRowError = (ex.message ?: ex.javaClass.simpleName).take(160)
+                }.getOrNull()
+            }
             visible.forEach { (name, memberIdx) ->
                 if (chip == "All") {
-                    val isNew = pos >= keep
-                    pos++
-                    if (isNew) {
-                        // The header names the engine and counts its servers;
-                        // it is skipped for a single-chip view (the chip
-                        // already says it).
-                        val first = list.childCount == 1
-                        list.addView(TextView(this).apply {
-                            text = name.uppercase() + "  \u00B7  " + memberIdx.size
-                            dpText(9f)
-                            includeFontPadding = false
-                            isSingleLine = true
-                            ellipsize = TextUtils.TruncateAt.END
-                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                            setTextColor(withAlpha(accentMidColor, 0.95f))
-                        }, LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply {
-                            val topMargin = if (first) (2 * density).toInt() else (7 * density).toInt()
-                            setMargins(
-                                (4 * density).toInt(),
-                                topMargin,
-                                (4 * density).toInt(),
-                                (4 * density).toInt()
-                            )
-                        })
-                    }
+                    newSig.add("#" + name)
+                    place(headerView(name, memberIdx.size, slot == 1))
                 }
                 memberIdx.forEach { i ->
-                    val isNew = pos >= keep
-                    pos++
-                    if (isNew && runCatching {
-                        val src = sources[i]
-                        addOptionRow(list, serverOption(src, i)) {
-                            // The tap IS the answer: never let the
-                            // dismiss-induced fallback start a different server
-                            // on the way out, and never let it finish the player
-                            // out from under the download flow (see
-                            // [serverPickActed]).
-                            startChoicePending = false
-                            serverPickActed = true
-                            dialog.dismiss()
-                            if (forDownload) {
-                                // Download step 1: remember the chosen server and
-                                // move to the destination/quality steps. Nothing
-                                // is prepared or played.
-                                currentIndex = i
-                                pickedByUser = true
-                                showDownloadDialog()
-                            } else if (i != currentIndex || !playbackCommitted) {
-                                // Before anything has played, `currentIndex` is
-                                // still its 0 default, so a tap on the first row
-                                // must play it like any other row rather than being
-                                // treated as "already on this one".
-                                noSubsRetry = false
-                                playSource(i)
-                                // A tap here IS the user's choice: if this
-                                // server dies, offer a way out instead of
-                                // sliding onto another one silently.
-                                pickedByUser = true
-                            }
-                        }
-                    }.onFailure { e ->
-                        if (firstRowError == null) {
-                            firstRowError = (e.message ?: e.javaClass.simpleName).take(160)
-                        }
-                    }.isSuccess) rendered++
-                    }
+                    val key = rowKey(i)
+                    val v = rowView(i, key) ?: return@forEach
+                    newSig.add(key)
+                    place(v)
+                    rendered++
                 }
+            }
+            // Trailing children past the desired set (a chip switch narrowing
+            // the list) are detached; their views stay cached for reuse.
+            while (list.childCount - 1 > newSig.size) list.removeViewAt(list.childCount - 1)
+            if (rowViews.size > sources.size + 24) {
+                val keepSet = newSig.toHashSet()
+                rowViews.keys.retainAll(keepSet)
+            }
+            sig.clear()
+            sig.addAll(newSig)
             // Rows already on screen from an earlier paint (the incremental path
             // above only counts NEW rows): a paint that appends nothing must not
             // read as an empty chooser, or every steady-state tick logs a false
@@ -8005,7 +8025,7 @@ class PlayerActivity : ComponentActivity() {
         // rapid ticks — at most one paint per 750ms, with a trailing paint so
         // the last servers still land.
         var lastChooserPaintMs = 0L
-        var chooserTrailingQueued = false
+        var chooserTrailingQueued = false // 500ms window + 550ms trailing (was 750/800): servers surface sooner, bursts still coalesce
         val requestPaint: () -> Unit = {
             val now = android.os.SystemClock.uptimeMillis()
             // A blank screen never waits for the coalescer: rows are already
@@ -8014,14 +8034,14 @@ class PlayerActivity : ComponentActivity() {
             if (list.childCount <= 1) {
                 lastChooserPaintMs = now
                 if (dialog.isShowing) paintChooser()
-            } else if (now - lastChooserPaintMs < 750) {
+            } else if (now - lastChooserPaintMs < 500) {
                 if (!chooserTrailingQueued) {
                     chooserTrailingQueued = true
                     list.postDelayed({
                         chooserTrailingQueued = false
                         lastChooserPaintMs = android.os.SystemClock.uptimeMillis()
                         if (dialog.isShowing) paintChooser()
-                    }, 800)
+                    }, 550)
                 }
             } else {
                 lastChooserPaintMs = now

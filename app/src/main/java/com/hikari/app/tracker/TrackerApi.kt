@@ -782,10 +782,10 @@ object TrackerApi {
             when (client.kind) {
                 TrackerKind.ANILIST -> Result.success(anilistSearch(token, title, media))
                 TrackerKind.MAL -> Result.success(malSearch(token, title, media))
-                TrackerKind.KITSU -> Result.success(kitsuSearch(token, title, media))
-                TrackerKind.SHIKIMORI -> Result.success(shikimoriSearch(title, media))
-                TrackerKind.SIMKL -> Result.success(simklSearch(client.id, title, media))
-                TrackerKind.TRAKT -> Result.success(traktSearch(client.id, token, title, media))
+                TrackerKind.KITSU -> Result.success(if (media.manga) emptyList() else kitsuSearch(token, title, media))
+                TrackerKind.SHIKIMORI -> Result.success(if (media.manga) emptyList() else shikimoriSearch(title, media))
+                TrackerKind.SIMKL -> Result.success(if (media.manga) emptyList() else simklSearch(client.id, title, media))
+                TrackerKind.TRAKT -> Result.success(if (media.manga) emptyList() else traktSearch(client.id, token, title, media))
             }
         } catch (e: Exception) {
             Result.failure(Exception("${client.kind.label} search failed: ${e.message ?: e.javaClass.simpleName}"))
@@ -809,20 +809,21 @@ object TrackerApi {
         when (client.kind) {
             TrackerKind.ANILIST -> anilistPush(account.token, match, media)
             TrackerKind.MAL -> malPush(account.token, match, media)
-            TrackerKind.KITSU -> kitsuPush(client, account, match, media)
-            TrackerKind.SHIKIMORI -> shikimoriPush(account.token, account.userId, match, media)
-            TrackerKind.SIMKL -> simklPush(client.id, account.token, match, media)
-            TrackerKind.TRAKT -> traktPush(client.id, account.token, match, media)
+            TrackerKind.KITSU -> if (media.manga) Result.failure(Exception("Kitsu: manga sync needs AniList or MyAnimeList.")) else kitsuPush(client, account, match, media)
+            TrackerKind.SHIKIMORI -> if (media.manga) Result.failure(Exception("Shikimori: manga sync needs AniList or MyAnimeList.")) else shikimoriPush(account.token, account.userId, match, media)
+            TrackerKind.SIMKL -> if (media.manga) Result.failure(Exception("Simkl: manga sync needs AniList or MyAnimeList.")) else simklPush(client.id, account.token, match, media)
+            TrackerKind.TRAKT -> if (media.manga) Result.failure(Exception("Trakt: manga sync needs AniList or MyAnimeList.")) else traktPush(client.id, account.token, match, media)
         }
     } catch (e: Exception) {
         Result.failure(Exception("${client.kind.label}: ${e.message ?: e.javaClass.simpleName}"))
     }
 
     /** "episode 12 of 220" / "watched" — the tail of a push sentence. */
+    private fun unitNote(media: TrackerMedia): String = if (media.manga) "chapter" else "episode"
     private fun doneNote(media: TrackerMedia, total: Int): String = when {
         media.movie || media.episode <= 0 -> "watched"
-        total > 0 -> "episode ${media.episode} of $total"
-        else -> "episode ${media.episode}"
+        total > 0 -> unitNote(media) + " ${media.episode} of $total"
+        else -> unitNote(media) + " ${media.episode}"
     }
 
     private fun completed(media: TrackerMedia, total: Int): Boolean = when {
@@ -877,12 +878,14 @@ object TrackerApi {
     }
 
     private suspend fun anilistSearch(token: String, title: String, media: TrackerMedia): List<TrackerMatch> {
+        val mediaType = if (media.manga) "MANGA" else "ANIME"
         val query = """
             query (${'$'}search: String) {
               Page(perPage: 12) {
-                media(search: ${'$'}search, type: ANIME, sort: SEARCH_MATCH) {
+                media(search: ${'$'}search, type: $mediaType, sort: SEARCH_MATCH) {
                   id
                   episodes
+                  chapters
                   format
                   seasonYear
                   title { romaji english native }
@@ -915,7 +918,7 @@ object TrackerApi {
                     TrackerMatch(
                         id = id.toString(),
                         title = names.firstOrNull().orEmpty(),
-                        total = m.optInt("episodes", 0),
+                        total = if (media.manga) m.optInt("chapters", 0) else m.optInt("episodes", 0),
                         category = m.optString("format"),
                         score = best.second,
                         year = m.optInt("seasonYear", 0),
@@ -974,9 +977,10 @@ object TrackerApi {
         val out = ArrayList<TrackerMatch>()
         val seen = HashSet<Int>()
         for (q in searchQueries(title)) {
-            val url = "https://api.myanimelist.net/v2/anime" +
+            val malKind = if (media.manga) "manga" else "anime"
+            val url = "https://api.myanimelist.net/v2/" + malKind +
                 "?q=${enc(q)}&limit=12&nsfw=true" +
-                "&fields=id,title,alternative_titles,num_episodes,start_date,media_type"
+                "&fields=id,title,alternative_titles," + (if (media.manga) "num_chapters" else "num_episodes") + ",start_date,media_type"
             val reply = get(url, malHeaders(token))
             val arr = reply.json()?.optJSONArray("data") ?: continue
             for (i in 0 until arr.length()) {
@@ -993,7 +997,7 @@ object TrackerApi {
                     TrackerMatch(
                         id = nid.toString(),
                         title = name,
-                        total = node.optInt("num_episodes", 0),
+                        total = node.optInt(if (media.manga) "num_chapters" else "num_episodes", 0),
                         category = node.optString("media_type"),
                         score = best?.second ?: 0.0,
                         year = year,
@@ -1015,14 +1019,15 @@ object TrackerApi {
             ?: return Result.failure(Exception("MyAnimeList: bad title id."))
         val watched = if (media.movie) 1 else media.episode.coerceAtLeast(1)
         val status = if (completed(media, match.total)) "completed" else "watching"
+        val malField = if (media.manga) "num_chapters_read" else "num_watched_episodes"
         val body = form(
-            "num_watched_episodes" to watched.toString(),
+            malField to watched.toString(),
             "status" to status,
         )
         val headers = malHeaders(token) + ("Content-Type" to FORM)
         val reply = sendAny(
             listOf("PATCH", "PUT"),
-            "https://api.myanimelist.net/v2/anime/$id/my_list_status",
+            "https://api.myanimelist.net/v2/" + (if (media.manga) "manga/" else "anime/") + "$id/my_list_status",
             body,
             headers,
             FORM,

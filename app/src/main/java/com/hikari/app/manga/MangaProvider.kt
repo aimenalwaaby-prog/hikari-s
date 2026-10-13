@@ -541,6 +541,12 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             val retry = runCatching { ask() }.getOrNull()
             if (!retry.isNullOrEmpty()) raw = retry
         }
+        // Legacy-source bridge: some extensions answer getChapterList but leave
+        // the combined update call empty — ask it directly before giving up.
+        if (raw.isEmpty()) {
+            val direct = runCatching { src.getChapterList(sm(item)) }.getOrNull()
+            if (!direct.isNullOrEmpty()) raw = direct
+        }
         if (raw.isEmpty()) return@gate failEpisodes("no chapters in this answer")
         val sorted = sortChapters(raw)
         MangaStore.putChapters(item.providerId + "|" + item.id, sorted.map { it.toChapter() })

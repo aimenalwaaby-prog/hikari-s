@@ -2006,7 +2006,7 @@ private fun RoadmapCard() {
                 I18n.t("✓ Downloads — offline copies, export to phone storage, concurrent limit\n") +
                 I18n.t("✓ SkyStream .sky extensions (scriptable JS providers)\n") +
                 I18n.t("✓ Trackers — AniList, MyAnimeList, Kitsu, Simkl, Shikimori & Trakt\n") +
-                I18n.t("• Manga reading progress on your tracker (planned)"),
+                I18n.t("• Manga reading progress on your tracker (AniList + MyAnimeList)"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

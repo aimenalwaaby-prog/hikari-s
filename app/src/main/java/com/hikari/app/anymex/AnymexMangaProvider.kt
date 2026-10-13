@@ -498,8 +498,15 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                 ?: return@withContext null
             val out = ArrayList<Episode>()
             for (i in 0 until minOf(arr.length(), MAX_CHAPTERS)) {
-                val o = arr.optJSONObject(i) ?: continue
-                val url = o.optString("url").ifBlank { o.optString("link") }.ifBlank { o.optString("href") }.ifBlank { o.optString("id") }.trim()
+                val rawEntry = arr.opt(i)
+                if (rawEntry is String) {
+                    val u = rawEntry.trim()
+                    if (u.isBlank()) continue
+                    out += Episode(number = out.size + 1, id = u, name = "Chapter " + (out.size + 1))
+                    continue
+                }
+                val o = rawEntry as? JSONObject ?: continue
+                val url = o.optString("url").ifBlank { o.optString("link") }.ifBlank { o.optString("href") }.ifBlank { o.optString("id") }.ifBlank { o.optString("slug") }.ifBlank { o.optString("path") }.ifBlank { o.optString("endpoint") }.ifBlank { o.optString("chapterId") }.trim()
                 if (url.isBlank()) continue
                 val name = o.optString("name").ifBlank { o.optString("title") }.ifBlank { o.optString("label") }
                     .trim().ifBlank { null }
@@ -564,8 +571,10 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
     /** True when [arr] holds at least one object with a chapter link. */
     private fun isChapterArray(arr: JSONArray): Boolean {
         for (i in 0 until minOf(arr.length(), 8)) {
-            val o = arr.optJSONObject(i) ?: continue
-            if (o.optString("url").isNotBlank() || o.optString("link").isNotBlank() || o.optString("href").isNotBlank() || o.optString("id").isNotBlank()) return true
+            val rawEntry = arr.opt(i)
+            if (rawEntry is String && rawEntry.trim().isNotBlank()) return true
+            val o = rawEntry as? JSONObject ?: continue
+            if (o.optString("url").isNotBlank() || o.optString("link").isNotBlank() || o.optString("href").isNotBlank() || o.optString("id").isNotBlank() || o.optString("slug").isNotBlank() || o.optString("path").isNotBlank() || o.optString("endpoint").isNotBlank() || o.optString("chapterId").isNotBlank()) return true
         }
         return false
     }
@@ -681,6 +690,10 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         }
 
     private fun nativeMangaDexPages(chapterId: String): List<StreamSource> {
+        if (chapterId.startsWith("http") && chapterId.indexOf("mangadex.org") < 0) {
+            lastOutcome[config.id] = "external chapter (paid) — open in WebView"
+            return emptyList()
+        }
         val id = chapterId.substringAfterLast("/").substringBefore("?").trim()
         if (id.length < 30) return emptyList()
         val raw = Http.fetchStringRobust(
@@ -694,6 +707,14 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         val hash = chap.optString("hash")
         val data = chap.optJSONArray("data") ?: chap.optJSONArray("dataSaver") ?: return emptyList()
         if (base.isBlank() || hash.isBlank()) return emptyList()
+        if (data.length() >= 2) {
+            val seenDex = HashSet<String>()
+            for (i in 0 until data.length()) seenDex.add(normImg(data.optString(i)))
+            if (seenDex.size == 1) {
+                lastOutcome[config.id] = "chapter locked or pages-walled"
+                return emptyList()
+            }
+        }
         val out = ArrayList<StreamSource>()
         for (i in 0 until data.length()) {
             val file = data.optString(i)
@@ -833,6 +854,12 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             val id = c.optString("id").trim()
             if (id.isBlank()) continue
             val attrs = c.optJSONObject("attributes") ?: JSONObject()
+            val ext = attrs.optString("externalUrl").trim()
+            if (ext.startsWith("http")) {
+                val chap = attrs.optString("chapter")
+                out += Episode(number = chap.toFloatOrNull()?.toInt() ?: (i + 1), id = ext, name = if (chap.isNotBlank()) "Chapter " + chap + " · External" else "External chapter")
+                continue
+            }
             val chap = attrs.optString("chapter")
             val title = attrs.optString("title")
             val name = when {

@@ -194,6 +194,8 @@ data class TrackerMedia(
     val movie: Boolean = false,
     /** Episode number being watched (0 for a film or an unknown episode). */
     val episode: Int = 0,
+    /** True for manga chapters (searched/pushed as manga, not anime). */
+    val manga: Boolean = false,
     /** Season number, when the extension knows it (0 = unknown). */
     val season: Int = 0,
 )
