@@ -1,3 +1,12 @@
+## 0.11.18 (continuous build only)
+
+### Fixed
+- Sources invisible-until-touch at fast loads and first overflow (PlayIMDb class): engine chips restyle in place instead of a full strip teardown per tick, scroll restores skip no-op targets and follow only after the taller layout lands — same fast waves (8 parallel, 500/550ms paints), no slowdown, blank-again at any depth impossible
+- Press-and-hold speed badge: new Settings → Player → "Show speed on player" toggle (ON by default); while the finger stays down a small pill (2x–4x + arrows) sits at the right edge above the centre, hides on lift; the manual speed pill never shows it
+- Mangayomi/Anymex manga parity from the real module sources: detail envelope unwrapped ({ok,data}, nested list/data wrappers), warm + one retry before 0-chapters, scheme/site-relative page URLs resolved, document/inline/split-junk URLs dropped, and header/divider images repeating across 3+ chapters filtered as chrome — same pages as the Mangayomi app
+- Glass episode UI is ON by default (toggle in Settings → App Layout → Episode UI still switches all three layouts)
+- Backup speed on big sets ("Backing up… 112/1303" class): 16-wide parallel encode, transient/hidden files skipped, bigger stream buffer — same format, same restore
+
 ## Unreleased (continuous build only)
 
 ### Fixed

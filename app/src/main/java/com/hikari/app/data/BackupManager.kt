@@ -153,7 +153,7 @@ object BackupManager {
         dest: OutputStream,
         onProgress: ((done: Int, total: Int) -> Unit)? = null,
     ): Long = withContext(Dispatchers.IO) {
-        val counting = CountingOutputStream(dest.buffered(32 * 1024))
+        val counting = CountingOutputStream(dest.buffered(64 * 1024))
         counting.use { writeBackupJson(app, it, onProgress) }
         counting.count
     }
@@ -257,9 +257,11 @@ object BackupManager {
     }
 
     /** How many extension files are read + base64-encoded at once (see
-     *  [writeBackupFiles]): enough to keep every core busy, few enough that
-     *  the peak stays at a few files even at the [MAX_FILE_BYTES] cap. */
-    private const val BACKUP_ENCODE_PARALLEL = 4
+     *  [writeBackupFiles]): a 1300-file set (596 extensions × module +
+     *  meta + prefs) backed up at 4-wide took minutes of "Backing up…
+     *  112/1303". 16-wide keeps every core busy while the peak stays at a
+     *  few files even at the [MAX_FILE_BYTES] cap. */
+    private const val BACKUP_ENCODE_PARALLEL = 16
 
     /**
      * The `files` array of the backup: one object per extension file, emitted
@@ -367,6 +369,16 @@ object BackupManager {
      */
     /** Extension-file paths (relative) for the backup walk — names only, so the
      *  writer can stream one file at a time (see [exportToFile]). */
+    /** File names that are never user data: partial writes, logs and hidden
+     *  bookkeeping that only cost backup time (a 1300-file walk is dominated
+     *  by these, not by extensions). Skipped, never restored. */
+    private fun isBackupTransient(name: String): Boolean {
+        if (name.startsWith(".")) return true
+        val low = name.lowercase()
+        return low.endsWith(".tmp") || low.endsWith(".part") || low.endsWith(".bak") ||
+            low.endsWith(".log") || low.endsWith(".temp") || name == "kv.json-journal"
+    }
+
     private fun collectFileRels(filesDir: File): List<String> {
         val out = ArrayList<String>()
         for (relRoot in FILE_ROOTS) {
@@ -379,14 +391,18 @@ object BackupManager {
                 val children = runCatching { d.listFiles() }.getOrNull() ?: continue
                 for (child in children) {
                     if (child.isDirectory) {
+                        val dn = child.name
+                        if (dn.startsWith(".") || dn == "__pycache__") continue
                         walk.addLast(child)
                         continue
                     }
+                    if (isBackupTransient(child.name)) continue
                     if (child.length() <= 0L || child.length() > MAX_FILE_BYTES) continue
                     out.add(child.relativeTo(filesDir).invariantSeparatorsPath)
                 }
             }
         }
+        out.sort()
         return out
     }
 

@@ -1411,6 +1411,11 @@ class PlayerActivity : ComponentActivity() {
     private val speedHandler = Handler(Looper.getMainLooper())
     private var holdSpeedTimer: Runnable? = null
     private var holdingFast = false
+    /** Small side badge shown only while press-and-hold fast-play is active. */
+    private var holdSpeedBadge: View? = null
+    private var holdSpeedText: TextView? = null
+    /** Settings → Player → "Show speed on player" (ON by default). */
+    private var showHoldSpeedBadge = true
 
     /** True right after a ≥2s hold is released — the ensuing single-tap must
      *  NOT toggle the controls (the lift is part of the hold, not a tap). */
@@ -1482,6 +1487,7 @@ class PlayerActivity : ComponentActivity() {
                 if (holdingFast) {
                     holdingFast = false
                     applySpeed(SPEEDS[speedIndex])
+                    hideHoldSpeedBadge()
                 }
                 if (horizontalMode) {
                     horizontalMode = false
@@ -1707,6 +1713,8 @@ class PlayerActivity : ComponentActivity() {
         seekFeedback = findViewById(R.id.seek_feedback)
         seekIcon = findViewById(R.id.seek_icon)
         seekText = findViewById(R.id.seek_text)
+        holdSpeedBadge = findViewById(R.id.hold_speed_badge)
+        holdSpeedText = findViewById(R.id.hold_speed_text)
         gestureHud = findViewById(R.id.gesture_hud)
         hudBright = findViewById(R.id.hud_bright)
         hudVol = findViewById(R.id.hud_vol)
@@ -2072,6 +2080,11 @@ class PlayerActivity : ComponentActivity() {
             }.getOrDefault(2f).coerceIn(2f, 4f)
         }
         lifecycleScope.launch {
+            showHoldSpeedBadge = runCatching {
+                (applicationContext as HikariApp).store.playerShowHoldSpeed()
+            }.getOrDefault(true)
+        }
+        lifecycleScope.launch {
             externalPlayerRow = runCatching {
                 (applicationContext as HikariApp).store.playerExternalButton()
             }.getOrDefault(true)
@@ -2228,6 +2241,7 @@ class PlayerActivity : ComponentActivity() {
                         if (controlsLocked) return@Runnable
                         holdingFast = true
                         applySpeed(holdFastSpeed)
+                        showHoldSpeedBadge()
                     }
                     holdSpeedTimer = task
                     speedHandler.postDelayed(task, 1000)
@@ -2253,6 +2267,7 @@ class PlayerActivity : ComponentActivity() {
                             if (holdingFast) {
                                 holdingFast = false
                                 applySpeed(SPEEDS[speedIndex])
+                                hideHoldSpeedBadge()
                             }
                             suppressNextTap = true
                             // The controller STAYS up for the whole scrub (it
@@ -2273,6 +2288,7 @@ class PlayerActivity : ComponentActivity() {
                             if (holdingFast) {
                                 holdingFast = false
                                 applySpeed(SPEEDS[speedIndex])
+                                hideHoldSpeedBadge()
                             }
                             suppressNextTap = true
                             playerView?.hideController()
@@ -2318,6 +2334,7 @@ class PlayerActivity : ComponentActivity() {
                         holdingFast = false
                         suppressNextTap = true
                         applySpeed(SPEEDS[speedIndex])
+                        hideHoldSpeedBadge()
                     }
                     if (horizontalMode) {
                         horizontalMode = false
@@ -3883,6 +3900,30 @@ class PlayerActivity : ComponentActivity() {
                 }.start()
             }, 450)
         }.start()
+    }
+
+    /**
+     * Shows the small hold-to-fast badge at the side of the video (see
+     * R.id.hold_speed_badge). Hold path ONLY: it is called from the
+     * press-and-hold timer and hidden on every lift/cancel, so the manual
+     * speed pill below the player never shows it. Gated by Settings →
+     * Player → "Show speed on player".
+     */
+    private fun showHoldSpeedBadge() {
+        if (!showHoldSpeedBadge) return
+        val v = holdSpeedBadge ?: return
+        val label = holdFastSpeed.toString().trimEnd('0').trimEnd('.') + "x"
+        holdSpeedText?.text = if (label == "x") holdFastSpeed.toString() + "x" else label
+        v.visibility = View.VISIBLE
+        v.alpha = 1f
+        v.animate().cancel()
+    }
+
+    /** Hides the hold-to-fast badge the moment the finger lifts. */
+    private fun hideHoldSpeedBadge() {
+        val v = holdSpeedBadge ?: return
+        v.animate().cancel()
+        v.visibility = View.GONE
     }
 
     /** Parks the scrub preview (see [showScrubFeedback]) after the finger lifts. */
@@ -7566,7 +7607,14 @@ class PlayerActivity : ComponentActivity() {
          * was doing. A width taken from the glyphs cannot collapse: the pill is
          * always at least its label plus the side pads.
          */
-        fun chipPill(label: String, selected: Boolean, onClick: () -> Unit): TextView {
+        /**
+         * Styles an engine chip pill in place: label, measured box, selected
+         * ring and text colour. Mutates the view WITHOUT detaching it, so
+         * live count ticks restyle the strip instead of tearing it down — a
+         * full removeAllViews on every tick remeasured the whole panel
+         * mid-search and blanked the list until a touch forced a traversal.
+         */
+        fun styleChipPill(tv: TextView, label: String, selected: Boolean) {
             val bg = if (selected) {
                 GradientDrawable(
                     GradientDrawable.Orientation.LEFT_RIGHT,
@@ -7594,15 +7642,21 @@ class PlayerActivity : ComponentActivity() {
             val textW = ceil(probe.paint.measureText(label)).toInt()
             val w = (textW + padX * 2).coerceAtLeast((28 * density).roundToInt())
             val h = ((if (tvMenu) 40 else 21) * density).roundToInt()
-            return TextView(this).apply {
+            tv.apply {
                 text = label
-                dpText(if (tvMenu) 13f else 9.5f)
                 isSingleLine = true
                 includeFontPadding = false
                 gravity = Gravity.CENTER
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFC9D2E0.toInt())
                 background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, null)
+                layoutParams = LinearLayout.LayoutParams(w, h).apply {
+                    marginEnd = ((if (tvMenu) 8 else 5) * density).roundToInt()
+                }
+            }
+        }
+        fun chipPill(label: String, selected: Boolean, onClick: () -> Unit): TextView {
+            return TextView(this).apply {
                 isClickable = true
                 // Reachable AND ringed on a television: the chooser's rows are
                 // rebuilt live while servers land (see the watcher below), long
@@ -7617,9 +7671,7 @@ class PlayerActivity : ComponentActivity() {
                 isFocusableInTouchMode = tvChip
                 if (playerTvRemote() && foreground == null) foreground = tvFocusRing()
                 setOnClickListener { onClick() }
-                layoutParams = LinearLayout.LayoutParams(w, h).apply {
-                    marginEnd = ((if (tvMenu) 8 else 5) * density).roundToInt()
-                }
+                styleChipPill(this, label, selected)
             }
         }
 
@@ -7898,22 +7950,41 @@ class PlayerActivity : ComponentActivity() {
             if (sig == builtChips && chip + "|" + totalCount == builtChipSelection) return
             builtChips = sig
             builtChipSelection = chip + "|" + totalCount
-            chipRow.removeAllViews()
             // Provider chips carry their server counts, like the reference
             // Sources screen ("All 74", "HdHub 23"): the counts come from the
             // same sections the list below renders, so they always agree.
-            names.forEach { name ->
+            fun pillLabel(name: String): String {
                 val count = if (name == "All") totalCount else (chipCounts[name] ?: 0)
-                val pillLabel = if (count > 0) "$name  $count" else name
+                return if (count > 0) "$name  $count" else name
+            }
+            // Fast path (the live-search case: same engines, counts growing):
+            // restyle the pills in place — no detach, no strip teardown, no
+            // panel-wide remeasure storm. A full rebuild happens only when the
+            // engine SET changes or the user taps a chip (both rare).
+            if (chipRow.childCount == names.size) {
+                var match = true
+                for (i in names.indices) {
+                    val tv = chipRow.getChildAt(i) as? TextView
+                    if (tv == null || tv.tag as? String != names[i]) { match = false; break }
+                }
+                if (match) {
+                    for (i in names.indices) {
+                        styleChipPill(chipRow.getChildAt(i) as TextView, pillLabel(names[i]), names[i] == chip)
+                    }
+                    return
+                }
+            }
+            chipRow.removeAllViews()
+            names.forEach { name ->
                 // The pill carries its own measured LayoutParams (see chipPill),
                 // so it is added bare — it can neither collapse nor be squeezed.
-                chipRow.addView(
-                    chipPill(pillLabel, name == chip) {
-                        chip = name
-                        rebuildChips()
-                        rebuildList()
-                    }
-                )
+                val tv = chipPill(pillLabel(name), name == chip) {
+                    chip = name
+                    rebuildChips()
+                    rebuildList()
+                }
+                tv.tag = name
+                chipRow.addView(tv)
             }
         }
 
@@ -8014,9 +8085,21 @@ class PlayerActivity : ComponentActivity() {
             list.post {
                 sv?.post {
                     if (!dialog.isShowing) return@post
-                    if (wasAtBottom) sv.scrollTo(0, Int.MAX_VALUE) else sv.scrollTo(0, keepY)
+                    if (wasAtBottom) {
+                        // Follow ONLY when the taller layout actually landed:
+                        // a post racing the measure used to clamp to the old
+                        // max (half-cut bottom row, blank rows until a touch).
+                        val content = if (sv.childCount > 0) sv.getChildAt(0) else null
+                        if (content != null && content.height > sv.height) {
+                            sv.scrollTo(0, Int.MAX_VALUE)
+                        }
+                    } else if (keepY != sv.scrollY) {
+                        // A no-op scrollTo(0, 0) still trips the panel's
+                        // scroll listener (rebend + remeasure) — skip it.
+                        sv.scrollTo(0, keepY)
+                    }
                 }
-                chipScroll.post { if (dialog.isShowing) chipScroll.scrollTo(keepX, 0) }
+                chipScroll.post { if (dialog.isShowing && chipScroll.scrollX != keepX) chipScroll.scrollTo(keepX, 0) }
             }
         }
         // Live servers land in bursts (hundreds for big titles): running the

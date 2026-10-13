@@ -3763,6 +3763,8 @@ private fun HoldToFastForwardCard(app: HikariApp) {
     val speed by flow.collectAsState(initial = 2f)
     var pickerOpen by remember { mutableStateOf(false) }
     val values = remember { (200..400 step 25).map { it / 100f } }
+    val badgeFlow = remember { app.store.playerShowHoldSpeedFlow() }
+    val badgeOn by badgeFlow.collectAsState(initial = true)
 
     Column(Modifier.padding(16.dp)) {
         SettingsCardHeading(Icons.Filled.Speed, tr("Press-and-hold speed"))
@@ -3771,6 +3773,15 @@ private fun HoldToFastForwardCard(app: HikariApp) {
             supporting = tr("Hold your finger on the video for 1 second to play faster. Choose 2x through 4x."),
             leadingIcon = Icons.Filled.Speed,
             onClick = { pickerOpen = true },
+        )
+        Spacer(Modifier.height(4.dp))
+        SettingsToggle(
+            label = tr("Show speed on player"),
+            supporting = tr("While your finger is down, show a small badge (like 2x) at the side of the video. It hides when you lift."),
+            checked = badgeOn,
+            onCheckedChange = { value ->
+                scope.launch { runCatching { app.store.setPlayerShowHoldSpeed(value) } }
+            },
         )
     }
     if (pickerOpen) {

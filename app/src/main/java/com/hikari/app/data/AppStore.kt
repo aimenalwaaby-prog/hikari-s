@@ -372,6 +372,8 @@ class AppStore(private val ctx: Context) {
         val PLAYER_DECODER_MODE = stringPreferencesKey("playerDecoderMode")
         /** Speed used while the viewer keeps a finger down on the video. */
         val PLAYER_HOLD_SPEED = intPreferencesKey("playerHoldSpeed")
+        /** Show the small speed badge while press-and-hold fast-play is active. */
+        val PLAYER_SHOW_HOLD_SPEED = booleanPreferencesKey("playerShowHoldSpeed")
         /** Show player pills as icons without their text labels. */
         val PLAYER_ICON_ONLY = booleanPreferencesKey("playerIconOnly")
         /** The "Play in external player" row in the player's options menu
@@ -3537,6 +3539,17 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
         write("PLAYER_HOLD_SPEED") { it[K.PLAYER_HOLD_SPEED] = stored }
     }
 
+    /** Whether the small speed badge shows while press-and-hold fast-play is
+     *  active (ON by default; Settings → Player → Press-and-hold speed). */
+    fun playerShowHoldSpeedFlow(): Flow<Boolean> =
+        store.data.map { it[K.PLAYER_SHOW_HOLD_SPEED] ?: true }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun playerShowHoldSpeed(): Boolean = playerShowHoldSpeedFlow().first()
+
+    suspend fun setPlayerShowHoldSpeed(on: Boolean) {
+        write("PLAYER_SHOW_HOLD_SPEED") { it[K.PLAYER_SHOW_HOLD_SPEED] = on }
+    }
+
     /** Whether the playback pills should show icons only. */
     fun playerIconOnlyFlow(): Flow<Boolean> =
         store.data.map { it[K.PLAYER_ICON_ONLY] ?: true }.distinctUntilChanged().flowOn(Dispatchers.Default)
@@ -3636,11 +3649,11 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
         write("EPISODE_DESCRIPTION") { it[K.EPISODE_DESCRIPTION] = on }
     }
 
-    /** Whether episodes draw as frosted-glass cards (OFF by default). One
+    /** Whether episodes draw as frosted-glass cards (ON by default). One
      *  switch for all three layouts — list, poster grid and cinematic big
      *  cards each have a glass variant. */
     fun episodeGlassFlow(): Flow<Boolean> =
-        store.data.map { it[K.EPISODE_GLASS] ?: false }.distinctUntilChanged().flowOn(Dispatchers.Default)
+        store.data.map { it[K.EPISODE_GLASS] ?: true }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     suspend fun episodeGlass(): Boolean = episodeGlassFlow().first()
 
