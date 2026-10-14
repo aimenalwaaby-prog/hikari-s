@@ -1,3 +1,10 @@
+## 0.11.20 (continuous build only)
+
+### Fixed
+- Sources never blank while servers exist (bottom-append class: rows on screen, a server lands, the box emptied while the footer kept counting): a paint that would leave zero rows over a non-empty list recovers on the same frame, and blank paints bypass the coalescer — the box holds its rows no matter what lands while scrolled last
+- Hold-speed badge at the top-center (reference 2x pill): centered pill just inside the top edge; hold-path only, hides on lift
+- PiP close kills everything: the ✕ silences + finishes the player, so video and audio both die with the window on both callback orders; expand-back and plain backgrounding untouched
+
 ## 0.11.18 (continuous build only)
 
 ### Fixed

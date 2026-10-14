@@ -298,17 +298,16 @@
             android:layout_marginTop="2dp" />
     </LinearLayout>
 
-    <!-- Press-and-hold speed badge: a small pill pinned to the right edge,
-         above the centre (never in the middle of the video). Shown only while
-         the hold-to-fast gesture is active, hidden the moment the finger
-         lifts. Driven by PlayerActivity (holdSpeedBadge). -->
+    <!-- Press-and-hold speed badge: a small pill at the top-center of the
+         video (reference 2x pill), just inside the top edge. Shown only
+         while the hold-to-fast gesture is active, hidden the moment the
+         finger lifts. Driven by PlayerActivity (holdSpeedBadge). -->
     <LinearLayout
         android:id="@+id/hold_speed_badge"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="150dp"
-        android:layout_marginEnd="14dp"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="12dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingStart="10dp"

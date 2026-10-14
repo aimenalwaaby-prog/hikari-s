@@ -984,6 +984,17 @@ class PlayerActivity : ComponentActivity() {
      *  so background audio stays a feature. */
     private var pipExitSilenceArmed = false
 
+    /** Set when the PiP window closes without a return to fullscreen (the ✕):
+     *  [onResume] (an expand back to the player) clears it before [onStop]
+     *  ever sees it, so only a real dismiss reaches the stop path — which
+     *  then silences AND finishes, so video and audio both die with the
+     *  window. Covers both callback orders (exit-before-stop and
+     *  stop-before-exit differ by device): the exit branch posts a deferred
+     *  finish for the stop-first case, the stop branch finishes inline for
+     *  the exit-first case. Plain backgrounding never sets it, so background
+     *  audio stays a feature. */
+    private var pipExitPending = false
+
     /** "Server too slow" dialog: a 3s auto-switch countdown with Wait/Switch.
      *  Wait re-arms the watchdog for 30 more seconds, then re-prompts. */
     private var slowDialog: Dialog? = null
@@ -3035,7 +3046,29 @@ class PlayerActivity : ComponentActivity() {
         inPip = isInPictureInPictureMode
         // Arm the dismiss guard (see [pipExitSilenceArmed]); the exit branch
         // below leaves it armed until onResume clears it.
-        if (isInPictureInPictureMode) pipExitSilenceArmed = true
+        if (isInPictureInPictureMode) {
+            pipExitSilenceArmed = true
+            pipExitPending = false
+        } else if (pipExitSilenceArmed) {
+            // The PiP window went away without a resume (the ✕ close path
+            // starts here on most devices; a tap-to-expand also passes
+            // through, but [onResume] clears the flags first). Mark the
+            // dismiss and post a deferred finish: on devices where onStop
+            // already ran (stop-first order) this runnable is the only thing
+            // that kills the player; on exit-first devices onStop finishes
+            // inline and this no-ops.
+            pipExitPending = true
+            window?.decorView?.post {
+                runCatching {
+                    if (pipExitPending && !isFinishing) {
+                        silencePlaybackForExit()
+                        finish()
+                    }
+                    pipExitPending = false
+                    pipExitSilenceArmed = false
+                }
+            }
+        }
         val pv = playerView ?: return
         if (isInPictureInPictureMode) {
             hideLoadingBanner(immediate = true)
@@ -3903,7 +3936,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * Shows the small hold-to-fast badge at the side of the video (see
+     * Shows the small hold-to-fast badge at the top-center of the video (see
      * R.id.hold_speed_badge). Hold path ONLY: it is called from the
      * press-and-hold timer and hidden on every lift/cancel, so the manual
      * speed pill below the player never shows it. Gated by Settings →
@@ -8115,6 +8148,43 @@ class PlayerActivity : ComponentActivity() {
             list.invalidate()
             (list.parent as? View)?.invalidate()
             sv?.invalidate()
+            // Never-blank invariant (the bottom-append report: rows on screen,
+            // a server lands, the box shows nothing while the footer counts
+            // on): a paint that leaves zero rows on screen over a non-empty
+            // list recovers on the same frame — re-converge + rebuild + lay
+            // out + draw once more — instead of waiting for a finger. Bounded:
+            // a single recovery pass; the trailing post below fires only when
+            // the recovery actually grew the list (settle pass, which early-
+            // returns on identical input), so a poisoned list cannot loop.
+            val beforeRecover = list.childCount
+            if (dialog.isShowing && sources.isNotEmpty() && (list.childCount - 1) <= 0) {
+                com.hikari.app.data.Logs.log(
+                    "Player",
+                    "chooser paint left zero rows over ${sources.size} server(s); recovering in place",
+                )
+                syncFromSession()
+                rebuildChips()
+                rebuildList()
+                if (sv != null && sv.width > 0) {
+                    runCatching {
+                        list.measure(
+                            View.MeasureSpec.makeMeasureSpec(sv.width, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                        )
+                        list.layout(0, 0, list.measuredWidth, list.measuredHeight)
+                    }
+                } else {
+                    list.requestLayout()
+                }
+                list.invalidate()
+                (list.parent as? View)?.invalidate()
+                sv?.invalidate()
+                if (list.childCount > beforeRecover) {
+                    list.post {
+                        runCatching { if (dialog.isShowing) paintChooser() }
+                    }
+                }
+            }
             // Television: rows/chips appended AFTER the dialog's one-time focus
             // pass are reachable but ringless without this (see [glassRow]'s
             // birth ring — this is the belt and braces for rows built before
@@ -8162,8 +8232,13 @@ class PlayerActivity : ComponentActivity() {
             val now = android.os.SystemClock.uptimeMillis()
             // A blank screen never waits for the coalescer: rows are already
             // children (the user is looking at an empty box over found
-            // servers), so paint now instead of in 800ms.
-            if (list.childCount <= 1) {
+            // servers), so paint now instead of in 800ms. The invariant is
+            // "no blank while servers exist": zero on-screen rows over a
+            // non-empty list paints NOW, however many children the container
+            // holds (a mid-list collapse has >1 children yet shows nothing —
+            // the reported bottom-append blank).
+            val onScreenNow = (list.childCount - 1).coerceAtLeast(0)
+            if (list.childCount <= 1 || (sources.isNotEmpty() && onScreenNow == 0)) {
                 lastChooserPaintMs = now
                 if (dialog.isShowing) paintChooser()
             } else if (now - lastChooserPaintMs < 500) {
@@ -15188,6 +15263,7 @@ class PlayerActivity : ComponentActivity() {
         // Back on the full screen (including a tap on the PiP window) — a
         // later stop is a plain backgrounding, never a PiP dismiss.
         pipExitSilenceArmed = false
+        pipExitPending = false
         hideSystemUi()
         // The remote's targets are set up once the whole window exists (see
         // [applyTvFocus]); a no-op on every device that is not a television.
@@ -15252,12 +15328,18 @@ class PlayerActivity : ComponentActivity() {
         // that leaving the player must not throw away.
         flushWatchSeconds()
         // A dismissed PiP window lands here with the dismiss guard still armed
-        // (no resume in between): silence the main and dual-audio players —
-        // otherwise the sound keeps coming with no window anywhere. A plain
-        // backgrounding never arms the guard, and onDestroy (when it follows)
-        // releases everything anyway.
-        if (pipExitSilenceArmed && !inPip) silencePlaybackForExit()
-        pipExitSilenceArmed = false
+        // (no resume in between): silence the main and dual-audio players AND
+        // finish, so video and audio both die with the window (the "PiP ✕ cut
+        // the video but the sound kept coming until the app was swiped away"
+        // report: the activity was merely stopped, never destroyed, so the
+        // player lived on). The silence runs however the flags read — the exit
+        // callback may not have run yet on stop-first devices (inPip still
+        // true) — while finish needs the explicit dismiss mark, so a plain
+        // backgrounding (never armed) still keeps background audio working.
+        if (pipExitSilenceArmed || pipExitPending) silencePlaybackForExit()
+        if (pipExitPending && !isFinishing) finish()
+        pipExitPending = false
+        if (isFinishing || !inPip) pipExitSilenceArmed = false
         if (com.lagradost.cloudstream3.CommonActivity.activity === this) {
             com.lagradost.cloudstream3.CommonActivity.setActivityInstance(null)
         }
