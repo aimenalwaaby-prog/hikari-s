@@ -171,6 +171,144 @@
     };
   }
 
+  // ---- more ES gaps modules assume (same class as replaceAll/at/hasOwn
+  //  above: the embedded engine predates them while the Mangayomi app
+  //  ships a full Hermes/V8, so a module using one dies with "not a
+  //  function" here and the engine reports no chapters/pages). Guarded, so
+  //  a newer engine keeps its own.
+  if (typeof String.prototype.matchAll !== 'function') {
+    String.prototype.matchAll = function (regexp) {
+      var s = String(this);
+      if (!(regexp instanceof RegExp)) regexp = new RegExp(String(regexp), 'g');
+      if (!regexp.global) throw new TypeError('matchAll requires a global RegExp');
+      var flags = 'g' + (regexp.ignoreCase ? 'i' : '') + (regexp.multiline ? 'm' : '') +
+        (regexp.unicode ? 'u' : '') + (regexp.sticky ? 'y' : '') + (regexp.dotAll ? 's' : '');
+      var re = new RegExp(regexp.source, flags);
+      re.lastIndex = regexp.lastIndex >>> 0;
+      var out = [];
+      var m;
+      while ((m = re.exec(s)) !== null) {
+        out.push(m);
+        if (m[0] === '') re.lastIndex++;
+      }
+      return out;
+    };
+  }
+  if (typeof Array.prototype.flat !== 'function') {
+    Array.prototype.flat = function (depth) {
+      var d = depth === undefined ? 1 : Number(depth) || 0;
+      var out = [];
+      (function rec(a, n) {
+        for (var i = 0; i < a.length; i++) {
+          if (i in a && Array.isArray(a[i]) && n > 0) rec(a[i], n - 1);
+          else if (i in a) out.push(a[i]);
+        }
+      })(Object(this), d);
+      return out;
+    };
+  }
+  if (typeof Array.prototype.flatMap !== 'function') {
+    Array.prototype.flatMap = function (fn, thisArg) {
+      var out = [];
+      var a = Object(this);
+      var len = a.length >>> 0;
+      for (var i = 0; i < len; i++) {
+        if (!(i in a)) continue;
+        var v = fn.call(thisArg, a[i], i, a);
+        if (Array.isArray(v)) { for (var j = 0; j < v.length; j++) out.push(v[j]); }
+        else out.push(v);
+      }
+      return out;
+    };
+  }
+  if (typeof Object.fromEntries !== 'function') {
+    Object.fromEntries = function (entries) {
+      var o = {};
+      try {
+        for (var e of entries) o[e[0]] = e[1];
+      } catch (err) {}
+      return o;
+    };
+  }
+  if (typeof String.prototype.padStart !== 'function') {
+    String.prototype.padStart = function (len, ch) {
+      var s = String(this);
+      var target = Number(len) || 0;
+      var pad = ch === undefined ? ' ' : String(ch);
+      if (s.length >= target || pad === '') return s;
+      var full = '';
+      while (full.length < target - s.length) full += pad;
+      return full.slice(0, target - s.length) + s;
+    };
+  }
+  if (typeof String.prototype.padEnd !== 'function') {
+    String.prototype.padEnd = function (len, ch) {
+      var s = String(this);
+      var target = Number(len) || 0;
+      var pad = ch === undefined ? ' ' : String(ch);
+      if (s.length >= target || pad === '') return s;
+      var full = s;
+      while (full.length < target) full += pad;
+      return full.slice(0, target);
+    };
+  }
+  if (typeof Promise.allSettled !== 'function') {
+    Promise.allSettled = function (promises) {
+      return Promise.all(Array.prototype.map.call(promises, function (p) {
+        return Promise.resolve(p).then(
+          function (v) { return { status: 'fulfilled', value: v }; },
+          function (r) { return { status: 'rejected', reason: r }; }
+        );
+      }));
+    };
+  }
+  if (typeof Promise.any !== 'function') {
+    Promise.any = function (promises) {
+      return new Promise(function (resolve, reject) {
+        var errs = [];
+        var left = 1;
+        function one(i, p) {
+          left++;
+          Promise.resolve(p).then(resolve, function (e) {
+            errs[i] = e;
+            if (--left === 0) {
+              var err = new Error('All promises were rejected');
+              err.errors = errs;
+              reject(err);
+            }
+          });
+        }
+        var idx = 0;
+        try {
+          for (var p of promises) one(idx++, p);
+        } catch (e) { reject(e); return; }
+        if (--left === 0) reject(new Error('All promises were rejected'));
+      });
+    };
+  }
+  if (typeof g.queueMicrotask !== 'function') {
+    g.queueMicrotask = function (fn) { Promise.resolve().then(fn); };
+  }
+  if (typeof g.localStorage === 'undefined' || typeof g.localStorage.getItem !== 'function') {
+    (function () {
+      var store = {};
+      g.localStorage = {
+        getItem: function (k) {
+          k = String(k);
+          return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null;
+        },
+        setItem: function (k, v) { store[String(k)] = String(v); },
+        removeItem: function (k) { delete store[String(k)]; },
+        clear: function () { store = {}; },
+        key: function (i) { var ks = Object.keys(store); return ks[i] || null; },
+        get length() { return Object.keys(store).length; }
+      };
+    })();
+  }
+  if (typeof g.structuredClone !== 'function') {
+    g.structuredClone = function (v) { return JSON.parse(JSON.stringify(v)); };
+  }
+
   // ---- cheerio ----
   var cheerio = null;
   try {

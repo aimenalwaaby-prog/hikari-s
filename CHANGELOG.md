@@ -1,3 +1,9 @@
+## 0.11.21 (continuous build only)
+
+### Fixed
+- Sources blank at the bottom-append for real (scrolled last, a server lands, box emptied): every scroll restore is clamped to the height just laid out (no blind Int.MAX_VALUE/stale keepY past the content), and engine chips sync in place instead of a removeAllViews strip teardown + full panel remeasure on every new-engine arrival — scrolling/loading freely can no longer blank the box
+- Mangayomi chapters + pages: site-relative page URLs resolve against the chapter's own origin when the install carries no site base (relative pages dropped while absolute headers survived — the same-header-everywhere class), page arrays prefer page-shaped keys over header/cover arrays at every level, page items accept image/src/originalUrl shapes, bare top-level chapter arrays count as chapters, and the engine gains matchAll/flat/flatMap/fromEntries/padStart/padEnd/allSettled/any/queueMicrotask/localStorage/structuredClone (same missing-builtin engine-failure class as replaceAll/at/hasOwn)
+
 ## 0.11.20 (continuous build only)
 
 ### Fixed

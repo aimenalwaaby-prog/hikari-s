@@ -7980,6 +7980,9 @@ class PlayerActivity : ComponentActivity() {
          *  chip row (and throw away the strip's scroll offset) for nothing. */
         var builtChips = ""
         var builtChipSelection = ""
+        // Engine pills by name, living across paints like the rows below:
+        // a new engine arriving mid-search must not tear the strip down.
+        val chipViews = HashMap<String, TextView>()
         fun rebuildChips() {
             // sections() walks provider metadata; a poison entry must degrade
             // to the bare "All" strip instead of throwing out of the watcher
@@ -8021,18 +8024,39 @@ class PlayerActivity : ComponentActivity() {
                     return
                 }
             }
-            chipRow.removeAllViews()
-            names.forEach { name ->
-                // The pill carries its own measured LayoutParams (see chipPill),
-                // so it is added bare — it can neither collapse nor be squeezed.
-                val tv = chipPill(pillLabel(name), name == chip) {
-                    chip = name
-                    rebuildChips()
-                    rebuildList()
+            // New engine set (a server from another extension lands): sync
+            // the pills in place exactly like the rows below — reuse by
+            // engine name, move to order, inflate only the genuinely new,
+            // detach the departed. The old removeAllViews tore the strip
+            // down on every new-engine arrival and remeasured the whole
+            // panel mid-search (the reported bottom-append blank).
+            var cslot = 0
+            for (name in names) {
+                var tv = chipViews[name]
+                if (tv == null) {
+                    // The pill carries its own measured LayoutParams (see
+                    // chipPill), so it is added bare — it can neither
+                    // collapse nor be squeezed.
+                    tv = chipPill(pillLabel(name), name == chip) {
+                        chip = name
+                        rebuildChips()
+                        rebuildList()
+                    }
+                    tv.tag = name
+                    chipViews[name] = tv
+                } else {
+                    styleChipPill(tv, pillLabel(name), name == chip)
                 }
-                tv.tag = name
-                chipRow.addView(tv)
+                val cur = chipRow.indexOfChild(tv)
+                if (cur != cslot) {
+                    if (cur >= 0) chipRow.removeViewAt(cur)
+                    (tv.parent as? ViewGroup)?.let { if (it !== chipRow) it.removeView(tv) }
+                    chipRow.addView(tv, cslot.coerceAtMost(chipRow.childCount))
+                }
+                cslot++
             }
+            while (chipRow.childCount > names.size) chipRow.removeViewAt(chipRow.childCount - 1)
+            chipViews.keys.retainAll(names.toSet())
         }
 
         rebuildChips()
@@ -8196,27 +8220,38 @@ class PlayerActivity : ComponentActivity() {
             // Restore against the laid-out content (no posts, nothing to
             // race): the anchor row returns to its exact offset, the bottom
             // follows new rows only when already there, and a no-op scroll
-            // never trips the panel's scroll listener.
+            // never trips the panel's scroll listener. Every target is
+            // clamped to the height just laid out — a restore past the
+            // content shows an empty viewport (the blank box over counted
+            // servers), and blind Int.MAX_VALUE / stale keepY trusts the
+            // device to clamp for us.
             if (dialog.isShowing && sv != null) {
-                if (wasAtBottom) {
-                    val content = if (sv.childCount > 0) sv.getChildAt(0) else null
-                    if (content != null && content.height > sv.height) {
-                        sv.scrollTo(0, Int.MAX_VALUE)
-                    }
-                } else {
-                    val tag = anchorTag
-                    var seated = false
-                    if (tag != null) {
-                        for (ai in 1 until list.childCount) {
-                            val c = list.getChildAt(ai) ?: continue
-                            if (c.tag as? String == tag) {
-                                sv.scrollTo(0, (c.top - anchorOff).coerceAtLeast(0))
-                                seated = true
-                                break
+                val contentH = (if (sv.childCount > 0) sv.getChildAt(0) else null)?.height ?: 0
+                val maxY = maxOf(contentH, if (laidOut) list.measuredHeight else 0)
+                    .minus(sv.height).coerceAtLeast(0)
+                // Nothing laid out yet (first paint before the window exists):
+                // touching scroll now can only yank — leave it alone.
+                if (contentH > 0 || laidOut) {
+                    if (wasAtBottom) {
+                        val content = if (sv.childCount > 0) sv.getChildAt(0) else null
+                        if (content != null && content.height > sv.height) {
+                            sv.scrollTo(0, maxY)
+                        }
+                    } else {
+                        val tag = anchorTag
+                        var seated = false
+                        if (tag != null) {
+                            for (ai in 1 until list.childCount) {
+                                val c = list.getChildAt(ai) ?: continue
+                                if (c.tag as? String == tag) {
+                                    sv.scrollTo(0, (c.top - anchorOff).coerceIn(0, maxY))
+                                    seated = true
+                                    break
+                                }
                             }
                         }
+                        if (!seated && keepY != sv.scrollY) sv.scrollTo(0, keepY.coerceIn(0, maxY))
                     }
-                    if (!seated && keepY != sv.scrollY) sv.scrollTo(0, keepY)
                 }
             }
             if (dialog.isShowing && chipScroll.scrollX != keepX) chipScroll.scrollTo(keepX, 0)

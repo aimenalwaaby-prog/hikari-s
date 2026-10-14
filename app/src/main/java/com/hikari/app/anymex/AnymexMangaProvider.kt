@@ -538,6 +538,14 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                 ?: dd.optJSONObject("data")?.optJSONArray("episodes")
                 ?: dd.optJSONArray("list") ?: dd.optJSONArray("data")
                 ?: findChapterArray(dd)
+            // A module answering the chapter list bare (a top-level array of
+            // chapter links, no detail object around it): digDetail kept the
+            // first entry as the "detail", so no chapters were found above —
+            // read the raw answer itself before reporting none.
+            if (arr == null) {
+                arr = runCatching { JSONArray(raw?.trim().orEmpty()) }.getOrNull()
+                    ?.takeIf { it.length() > 0 && isChapterArray(it) }
+            }
             if (arr == null) {
                 lastOutcome[config.id] = "✗ no chapters in detail answer"
                 return@withContext null
@@ -673,8 +681,12 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
             for (i in 0 until arr.length()) {
                 when (val e = arr.opt(i)) {
                     is JSONObject -> {
-                        val u = normPageUrl(e.optString("url").ifBlank { e.optString("imageUrl") }, pageBase, chUrl)
-                            ?: continue
+                        val u = normPageUrl(
+                            e.optString("url").ifBlank { e.optString("imageUrl") }
+                                .ifBlank { e.optString("image") }.ifBlank { e.optString("src") }
+                                .ifBlank { e.optString("originalUrl") },
+                            pageBase, chUrl,
+                        ) ?: continue
                         // The chapter URL itself is not a page (the fallback
                         // leaves the chapter behind as the image); repeats of
                         // one cover would paint every chapter with the same
@@ -989,17 +1001,34 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
     private fun normPageUrl(raw: String, base: String, chUrl: String): String? {
         var u = raw.trim()
         if (u.isBlank() || u.contains(" ") || u.contains("{") || u.contains("}")) return null
+        // The module's own site is the authority for site-relative art, but
+        // old installs may carry no base (no meta.json baseUrl, no source
+        // URL): the chapter itself was fetched from that same site, so its
+        // origin stands in — otherwise every relative page drops and only
+        // absolute header images survive (the same-header-everywhere report).
+        var b = base.trim().trimEnd('/')
+        val absCh = when {
+            chUrl.startsWith("http", ignoreCase = true) -> chUrl
+            b.isNotBlank() -> b + "/" + chUrl.trimStart('/')
+            else -> chUrl
+        }
+        if (b.isBlank()) {
+            b = runCatching {
+                val uu = java.net.URI(absCh)
+                if (!uu.scheme.isNullOrBlank() && !uu.host.isNullOrBlank()) uu.scheme + "://" + uu.host else ""
+            }.getOrNull().orEmpty()
+        }
         if (u.startsWith("//")) u = "https:" + u
-        else if (u.startsWith("/") && base.isNotBlank()) u = base + u
-        else if (!u.startsWith("http", ignoreCase = true) && base.isNotBlank() &&
-            u.contains("/") && !u.contains(":")) u = base + "/" + u.trimStart('/')
+        else if (u.startsWith("/") && b.isNotBlank()) u = b + u
+        else if (!u.startsWith("http", ignoreCase = true) && b.isNotBlank() &&
+            u.contains("/") && !u.contains(":")) u = b + "/" + u.trimStart('/')
         if (!u.startsWith("http", ignoreCase = true)) return null
         val low = u.lowercase()
         if (low.startsWith("data:") || low.startsWith("javascript:") || low.startsWith("blob:")) return null
         val path = low.substringBefore("?").substringBefore("#")
         if (path.endsWith(".html") || path.endsWith(".htm") || path.endsWith(".php") ||
             path.endsWith(".asp") || path.endsWith(".aspx")) return null
-        if (u.length < 12 || u == chUrl) return null
+        if (u.length < 12 || u == chUrl || u == absCh) return null
         return u
     }
 
@@ -1135,7 +1164,18 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         // reporting no pages over an answer that has them. Object items must
         // carry a page link; bare-string arrays only count under a page-ish
         // key, so a genres/tags array is never mistaken for pages.
-        val pageKeys = setOf("pages", "list", "data", "images", "imgs", "urls", "sources", "files")
+        // Two passes: page-shaped keys first (pages/list/pageList/imageList),
+        // generic art keys second (images/imgs/urls/sources/files/data) — a
+        // header/cover array sitting beside the real pages must never win
+        // (the same-header-in-every-chapter report).
+        scanPages(o, narrow = true)?.let { return it }
+        return scanPages(o, narrow = false)
+    }
+
+    private fun scanPages(o: JSONObject, narrow: Boolean): JSONArray? {
+        val narrowKeys = setOf("pages", "list", "pagelist", "imagelist")
+        val wideKeys = setOf("pages", "list", "data", "images", "imgs", "urls", "sources", "files", "pagelist", "imagelist")
+        val pageKeys = if (narrow) narrowKeys else wideKeys
         val queue = ArrayDeque<JSONObject>()
         queue += o
         var seen = 0
@@ -1151,8 +1191,13 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                         when (val first = v.opt(0)) {
                             is JSONObject ->
                                 if (first.optString("url").isNotBlank() ||
-                                    first.optString("imageUrl").isNotBlank()
-                                ) return v
+                                    first.optString("imageUrl").isNotBlank() ||
+                                    first.optString("image").isNotBlank() ||
+                                    first.optString("src").isNotBlank() ||
+                                    first.optString("originalUrl").isNotBlank()
+                                ) {
+                                    if (!narrow || k.lowercase() in pageKeys) return v
+                                }
                             is String ->
                                 if (k.lowercase() in pageKeys) return v
                             else -> {}
