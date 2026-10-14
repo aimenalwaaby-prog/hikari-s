@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -787,7 +788,29 @@ fun CatalogScreen(
                             })
                         }
                     } else {
-                    CatalogCard(item, style) {
+                    CatalogCard(
+                        item,
+                        style,
+                        onQuickPlay = { quick ->
+                            // Manga rows open the reader's detail (no video to
+                            // autoplay); video rows arrive already wanting
+                            // playback (see DetailScreen autoplay).
+                            Routes.safeNavigate(
+                                nav,
+                                if (rawType == "manga") {
+                                    Routes.mangaDetail(
+                                        quick.providerId, quick.id, quick.title, quick.posterUrl
+                                    )
+                                } else {
+                                    Routes.detail(
+                                        quick.providerId, quick.type, quick.id,
+                                        quick.title, quick.posterUrl, quick.rawType,
+                                        autoplay = true,
+                                    )
+                                }
+                            )
+                        },
+                    ) {
                         // A manga engine's "catalog" is its Popular/Latest list
                         // and its items are manga, not video: those open the
                         // manga detail page (the provider tags its catalogs with
@@ -871,7 +894,13 @@ private fun CatalogTab(label: String, selected: Boolean, onClick: () -> Unit) {
  * Layout), so a user who asked for label-free artwork keeps it.
  */
 @Composable
-private fun CatalogCard(item: MediaItem, style: PosterStyle, onClick: () -> Unit) {
+private fun CatalogCard(
+    item: MediaItem,
+    style: PosterStyle,
+    onClick: () -> Unit,
+    /** Hold-menu play action (detail autoplay for video); plain open when null. */
+    onQuickPlay: ((MediaItem) -> Unit)? = null,
+) {
     // The score badge, when Settings → App Layout has it on: warm the ratings
     // cache for this title and print whatever is known (see
     // rememberPosterScore). Null when the switch is off, so an old device that
@@ -880,6 +909,11 @@ private fun CatalogCard(item: MediaItem, style: PosterStyle, onClick: () -> Unit
     val shape = RoundedCornerShape(style.corner.dp)
     val cinema = style.isCinema(com.hikari.app.tv.TvMode.current())
     val hero = if (cinema) Artwork.heroModel(item) else null
+    // 1-second-hold quick menu (info / play / library) — see PosterQuickMenu.
+    val quickMenu = com.hikari.app.ui.components.rememberQuickMenuState()
+    val quickScope = rememberCoroutineScope()
+    val latestClick by rememberUpdatedState(onClick)
+    val latestPlay by rememberUpdatedState(onQuickPlay)
     // No clip on the outer Column: the artwork's own rounding used to extend
     // over the title/year lines and cut their edges. Only the image Box below
     // is rounded.
@@ -892,7 +926,26 @@ private fun CatalogCard(item: MediaItem, style: PosterStyle, onClick: () -> Unit
                 .fillMaxWidth()
                 .aspectRatio(if (cinema) 16f / 9f else 2f / 3f)
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .com.hikari.app.ui.components.quickMenuGesture(quickMenu) { slot ->
+                    when (slot) {
+                        0 -> latestClick()
+                        1 -> {
+                            val play = latestPlay
+                            if (play != null) play(item) else latestClick()
+                        }
+                        else -> quickScope.launch {
+                            runCatching { com.hikari.app.HikariApp.instance.store.addFavorite(item) }
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    com.hikari.app.HikariApp.instance,
+                                    tr("Added to library"),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             // Behind the artwork: a poster that 403s/404s (or an item with no
@@ -936,6 +989,7 @@ private fun CatalogCard(item: MediaItem, style: PosterStyle, onClick: () -> Unit
                         .padding(4.dp),
                 )
             }
+            if (quickMenu.visible) com.hikari.app.ui.components.QuickMenuOverlay(quickMenu.selected)
         }
         if (style.showTitles) {
             Text(

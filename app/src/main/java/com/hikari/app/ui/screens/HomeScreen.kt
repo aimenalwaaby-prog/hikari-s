@@ -1177,6 +1177,15 @@ fun HomeScreen(nav: NavHostController) {
                                 Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
                             )
                         },
+                        // Poster hold-menu play: open the detail page already
+                        // wanting playback, so it starts the instant the first
+                        // server lands (see DetailScreen autoplay).
+                        onQuickPlay = { item ->
+                            Routes.safeNavigate(
+                                nav,
+                                Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType, autoplay = true)
+                            )
+                        },
                         onShowAll = {
                             // A row of the picked collection's OWN shelves shows
                             // the WHOLE collection (every folder and every

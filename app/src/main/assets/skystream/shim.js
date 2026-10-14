@@ -69,8 +69,12 @@
   function StreamResult(o) {
     o = o || {};
     this.url = o.url;
-    this.source = o.source || 'Auto';
+    this.source = o.source || o.name || 'Auto';
+    this.name = o.name || o.source;
     this.quality = o.quality;
+    this.size = o.size;
+    this.type = o.type;
+    this.isM3U8 = o.isM3U8;
     this.headers = o.headers;
     this.subtitles = o.subtitles;
     this.drmKid = o.drmKid;

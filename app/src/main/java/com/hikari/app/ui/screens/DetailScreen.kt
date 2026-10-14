@@ -1644,6 +1644,8 @@ fun DetailScreen(
     episodeId: String = "",
     /** Resume position (ms) from history — forwarded to the player. */
     startPositionMs: Long = 0L,
+    /** Poster hold-menu play: fire the primary action once it has settled. */
+    autoplay: Boolean = false,
 ) {
     val vm: DetailViewModel = viewModel()
     val meta by vm.meta.collectAsState()
@@ -3063,6 +3065,17 @@ fun DetailScreen(
     val detailBtnEp = if (detailCanPlay) null else (resumeEp
         ?: sortedEps.firstOrNull { !isEpisodeUnaired(it.released) }
         ?: sortedEps.firstOrNull())
+    // Poster hold-menu play arrives already wanting playback: fire the primary
+    // action ONCE, as soon as the episode lookup has settled (movies settle
+    // with no episodes — see the view-model) — exactly as if Play was tapped.
+    // Unaired picks toast and stop here, like a manual tap.
+    var autoplayFired by remember(autoplay) { mutableStateOf(false) }
+    LaunchedEffect(autoplay, episodesLoaded, detailBtnEp) {
+        if (!autoplay || autoplayFired) return@LaunchedEffect
+        if (!episodesLoaded) return@LaunchedEffect
+        autoplayFired = true
+        if (!playBlocked(detailBtnEp)) tryPlay(detailBtnEp)
+    }
     val detailActionLabel = if (scraperImageMode) I18n.t("Read") else when {
         resumeEp != null ->
             I18n.t("Resume") + if (resumeEp.season > 1)

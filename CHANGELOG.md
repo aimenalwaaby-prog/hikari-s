@@ -1,3 +1,12 @@
+## 0.11.22 (continuous build only)
+
+### Added
+- Poster hold menu: holding any poster for 1 second fans out a semicircle with info / play / add-to-library — slide left-right without lifting to pick, release to fire. Play opens the detail page in autoplay so playback starts the instant the first server lands (existing live feed); info opens the detail page; library saves the title. On Home shelves, catalog grids and detail shelves; manga rows open the manga detail instead of video autoplay.
+
+### Fixed
+- Tracker "no confident match" for later seasons: extensions that number a season's episodes absolutely (donghua season 5 as episode ~130) excluded every season entry by total, so nothing could match. Season-known watches skip the total guard and prefer the candidate carrying the season marker. Manga pushed to a service without manga lists now says it doesn't track manga instead of "no confident match".
+- SkyStream origins answering empty in under a second: episode links resolve against the plugin's own episode list first (exact id, then same season+number, then same number inside the same title — anime sites listing a split season as their own season 1), with the plugin's load error and episode count in the log; a title link that yields nothing gets one bounded origin re-search (strict normalised-title equality only) before "no playable sources". StreamResult also carries the plugin's own name/size/isM3U8 flag through.
+
 ## 0.11.21 (continuous build only)
 
 ### Fixed

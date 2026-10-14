@@ -319,10 +319,24 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
         if (!res.optBoolean("ok", false)) {
             val err = res.optString("error")
             if (err.isNotBlank()) streamErrors[config.id] = "✗ $err"
+            // The origin "answering nothing" for a title starts here: without
+            // the plugin's own words in the log there is no telling a walled
+            // site from a changed page from a crashed call.
+            com.hikari.app.data.Logs.log(
+                "Provider",
+                "${config.name} [SkyStream]: details failed for \"${item.title}\" — " +
+                    (err.ifBlank { lastFailure ?: "no reason given" }),
+            )
             return@withContext item
         }
         val d = res.opt("data") as? JSONObject ?: return@withContext item
         val episodes = toEpisodes(item.id, d.optJSONArray("episodes"))
+        com.hikari.app.data.Logs.log(
+            "Provider",
+            "${config.name} [SkyStream]: details for \"${item.title}\" — " +
+                "${episodes.size} episode(s)" +
+                if (episodes.isEmpty()) " (episode picks fall back to the title link)" else "",
+        )
         if (episodes.isNotEmpty()) {
             loadedEpisodes[item.id] = episodes
             seedInstant(d, item.id)
@@ -388,6 +402,37 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
         if (streams.isNotEmpty()) instantStreams[token] = streams
     }
 
+    /**
+     * Which plugin link `loadStreams` is actually asked for.
+     *
+     * The requested episode id is only usable when the plugin's own episode
+     * list contains it. Anime sites commonly list a split season as its OWN
+     * season 1 (or renumber it), while the detail page asks with the TMDB
+     * season — handing that foreign id to `loadStreams` answers empty in
+     * under a second (the log-proven "answered nothing" class). So: exact id
+     * first, then the same season+number, then the same number inside THIS
+     * title (never another show), and only then the title link itself.
+     */
+    private fun resolveToken(item: MediaItem, episode: Episode?): String {
+        val eps = loadedEpisodes[item.id].orEmpty()
+        val wanted = episode?.id?.takeIf { it.isNotBlank() }
+        if (wanted != null && (eps.isEmpty() || eps.any { it.id == wanted })) return wanted
+        if (episode != null && eps.isNotEmpty()) {
+            eps.firstOrNull { it.season == episode.season && it.number == episode.number }?.let {
+                return it.id
+            }
+            eps.firstOrNull { it.number == episode.number }?.let {
+                com.hikari.app.data.Logs.log(
+                    "Provider",
+                    "${config.name} [SkyStream]: S${episode.season}E${episode.number} " +
+                        "is S${it.season}E${it.number} on this site — resolving there",
+                )
+                return it.id
+            }
+        }
+        return wanted ?: item.id
+    }
+
     // ---- Streams ----
 
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
@@ -396,42 +441,116 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
             if (!scriptFile.exists()) {
                 return@withContext fail("✗ Extension file missing — reinstall this extension.")
             }
-            val token = episode?.id?.takeIf { it.isNotBlank() } ?: item.id
+            // The episode list is what the token is resolved against: make
+            // sure one load has run before resolving, so a cold cache does
+            // not resolve every series tap to the title link.
+            if (loadedEpisodes[item.id] == null && loadedMeta[item.id] == null) {
+                getMeta(item)
+            }
+            val token = resolveToken(item, episode)
             instantStreams[token]?.takeIf { it.isNotEmpty() }?.let { instant ->
                 streamErrors.remove(config.id)
                 lastOutcome[config.id] = "✓ ${instant.size} source${if (instant.size == 1) "" else "s"} (instant)"
                 com.hikari.app.net.StreamProbe.warmAsync(instant)
                 return@withContext instant
             }
-            val res = invoke("loadStreams", listOf(token))
-            if (res == null) {
-                return@withContext fail("✗ Extension did not answer — check Logs.")
+            val direct = streamsForToken(token)
+            if (direct.isNotEmpty()) {
+                streamErrors.remove(config.id)
+                lastOutcome[config.id] = "✓ ${direct.size} source${if (direct.size == 1) "" else "s"} in " +
+                    "${(System.currentTimeMillis() - startedAt) / 1000}s"
+                instantStreams[token] = direct
+                val distinct = direct.distinctBy { it.url }
+                com.hikari.app.net.StreamProbe.warmAsync(distinct)
+                return@withContext distinct
             }
-            if (!res.optBoolean("ok", false)) {
-                val err = res.optString("error").ifBlank { "no sources found" }
-                return@withContext fail("✗ $err")
+            // The title link itself answered nothing and there was no usable
+            // episode: one bounded re-search INSIDE this origin (strict
+            // normalised-title equality only — never a neighbouring show),
+            // then load + episode match + one more extraction. Covers a
+            // detail page that was opened from a catalogue row whose link the
+            // site has since rotated.
+            if (token == item.id) {
+                val via = searchFallback(item, episode)
+                if (via.isNotEmpty()) {
+                    streamErrors.remove(config.id)
+                    lastOutcome[config.id] = "✓ ${via.size} source${if (via.size == 1) "" else "s"} in " +
+                        "${(System.currentTimeMillis() - startedAt) / 1000}s (re-matched)"
+                    val distinct = via.distinctBy { it.url }
+                    com.hikari.app.net.StreamProbe.warmAsync(distinct)
+                    return@withContext distinct
+                }
             }
-            val data = res.opt("data")
-            val arr = when (data) {
-                is JSONArray -> data
-                is JSONObject -> data.optJSONArray("streams") ?: data.optJSONArray("sources")
-                else -> null
-            }
-            if (arr == null || arr.length() == 0) {
-                return@withContext fail("✗ No playable sources for this title.")
-            }
-            val out = mapStreams(arr)
-            if (out.isEmpty()) {
-                return@withContext fail("✗ Returned ${arr.length()} links but none playable.")
-            }
-            streamErrors.remove(config.id)
-            lastOutcome[config.id] = "✓ ${out.size} source${if (out.size == 1) "" else "s"} in " +
-                "${(System.currentTimeMillis() - startedAt) / 1000}s"
-            instantStreams[token] = out
-            val distinct = out.distinctBy { it.url }
-            com.hikari.app.net.StreamProbe.warmAsync(distinct)
-            distinct
+            return@withContext fail(
+                // The plugin's own last words when it gave any (a refused
+                // episode, a dead call) — otherwise the generic verdict.
+                streamErrors[config.id]?.takeIf {
+                    it.startsWith("✗ ") && it != "✗ no sources found"
+                } ?: "✗ No playable sources for this title."
+            )
         }
+
+    /** One `loadStreams` round-trip with no bookkeeping (see [getStreams]). */
+    private suspend fun streamsForToken(token: String): List<StreamSource> {
+        val res = invoke("loadStreams", listOf(token))
+        if (res == null) {
+            streamErrors[config.id] = "✗ Extension did not answer — check Logs."
+            return emptyList()
+        }
+        if (!res.optBoolean("ok", false)) {
+            val err = res.optString("error").ifBlank { "no sources found" }
+            streamErrors[config.id] = "✗ $err"
+            return emptyList()
+        }
+        val data = res.opt("data")
+        val arr = when (data) {
+            is JSONArray -> data
+            is JSONObject -> data.optJSONArray("streams") ?: data.optJSONArray("sources")
+            else -> null
+        } ?: return emptyList()
+        return mapStreams(arr)
+    }
+
+    /**
+     * Origin-only re-search for a title whose own link yields nothing: tries
+     * the title and its sequel-stripped base, accepts ONLY a result whose
+     * normalised title equals the query (same show, never a neighbour), loads
+     * it, matches the wanted episode inside it and extracts once.
+     */
+    private suspend fun searchFallback(item: MediaItem, episode: Episode?): List<StreamSource> {
+        val queries = LinkedHashSet<String>()
+        if (item.title.isNotBlank()) queries.add(item.title)
+        val base = com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(item.title))
+        if (base.isNotBlank()) queries.add(base)
+        for (q in queries) {
+            val hits = search(q, 1)
+            val strict = com.hikari.app.data.normalizeTitle(q)
+            val found = hits.firstOrNull {
+                com.hikari.app.data.normalizeTitle(it.title) == strict
+            } ?: continue
+            getMeta(found)
+            val eps = loadedEpisodes[found.id].orEmpty()
+            val ep = if (episode == null) {
+                eps.firstOrNull()
+            } else {
+                eps.firstOrNull { it.season == episode.season && it.number == episode.number }
+                    ?: eps.firstOrNull { it.number == episode.number }
+            }
+            val token = ep?.id?.takeIf { it.isNotBlank() } ?: found.id
+            instantStreams[token]?.takeIf { it.isNotEmpty() }?.let { return it }
+            val out = streamsForToken(token)
+            if (out.isNotEmpty()) {
+                com.hikari.app.data.Logs.log(
+                    "Provider",
+                    "${config.name} [SkyStream]: re-matched \"${item.title}\" " +
+                        "to \"${found.title}\" — ${out.size} source(s)",
+                )
+                instantStreams[token] = out
+                return out
+            }
+        }
+        return emptyList()
+    }
 
     private fun mapStreams(arr: JSONArray?): List<StreamSource> {
         arr ?: return emptyList()
@@ -461,8 +580,12 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
 
         url = decodeMagic(url, headers)
 
+        // SkyStream's own StreamResult carries `name` (not `source`), an
+        // optional `size` ("1.7 GB") and an explicit `isM3U8` flag — read all
+        // three instead of guessing from the URL alone (see shim.js).
         val source = o.optString("source").ifBlank { o.optString("name") }
         val quality = o.optString("quality")
+        val size = o.optString("size")
         val base = source.ifBlank { config.name }
         val displayName = if (quality.isNotBlank() && !base.contains(quality, true)) "$base $quality" else base
 
@@ -491,7 +614,8 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
         }
 
         val isTorrent = url.startsWith("magnet:", true) || url.startsWith("torrent:", true)
-        val isM3u8 = url.startsWith("data:application/vnd.apple.mpegurl") || url.contains(".m3u8", true)
+        val isM3u8 = o.optBoolean("isM3U8", false) ||
+            url.startsWith("data:application/vnd.apple.mpegurl") || url.contains(".m3u8", true)
         val isMpd = url.contains(".mpd", true)
         return StreamSource(
             name = displayName,
@@ -501,6 +625,7 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
             isTorrent = isTorrent,
             isM3u8 = isM3u8,
             isMpd = isMpd,
+            details = size,
         )
     }
 

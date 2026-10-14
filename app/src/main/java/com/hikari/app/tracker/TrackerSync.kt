@@ -71,6 +71,15 @@ object TrackerSync {
                 notes += "${kind.label}: the app id is missing — open Trackers and add it"
                 continue
             }
+            // Only AniList and MAL keep manga lists: the others can never
+            // match a manga title, so say that instead of "no confident
+            // match" (which reads as a bug rather than a scope limit).
+            if (media.manga && kind != com.hikari.app.data.TrackerKind.ANILIST &&
+                kind != com.hikari.app.data.TrackerKind.MAL
+            ) {
+                notes += "${kind.label}: doesn't track manga — skipped"
+                continue
+            }
             val doneKey = kind.key + "|" + historyKey + "|" + media.episode
             if (!force && done.containsKey(doneKey)) {
                 notes += "${kind.label}: ${media.title} — already reported"
@@ -199,6 +208,7 @@ object TrackerSync {
             val ranked = pool.sortedWith(
                 compareByDescending<TrackerMatch> { it.score }
                     .thenByDescending { com.hikari.app.data.matchScore(media.title, it.title, media.year, it.year) }
+                    .thenByDescending { seasonMarkerScore(media, it) }
                     .thenByDescending { coversEpisode(media, it) },
             )
             val winner = ranked.first()
@@ -215,9 +225,25 @@ object TrackerSync {
     /** True when the candidate's episode total proves it is a DIFFERENT season:
      *  the watched episode number cannot exist inside it (e.g. episode 697 of
      *  a 272-episode entry). Reporting that as a match marks the wrong show
-     *  watched, so it is excluded before any scoring. */
+     *  watched, so it is excluded before any scoring.
+     *
+     *  Season-aware: extensions often number a later season's episodes
+     *  ABSOLUTELY (donghua season 5 reading "episode 130"), which no single
+     *  season entry's total can contain — so when the watched season is known
+     *  (> 1) the total comparison is skipped instead of excluding every
+     *  season entry and reporting "no confident match". */
     private fun seasonMismatch(media: TrackerMedia, c: TrackerMatch): Boolean =
-        !media.movie && media.episode > 0 && c.total > 0 && media.episode > c.total
+        !media.movie && media.episode > 0 && c.total > 0 && media.episode > c.total &&
+        media.season <= 1
+
+    /** 1 when the candidate's own title carries the watched season's marker
+     *  ("Season 5", "Part 2", "S3"), else 0 — the tie-break that picks the
+     *  right season entry when every season strips to the same base. */
+    private fun seasonMarkerScore(media: TrackerMedia, c: TrackerMatch): Int {
+        val s = media.season
+        if (s <= 1) return 0
+        return if (Regex("""(?i)\b(s|season|part|cour)\s*0?$s\b""").containsMatchIn(c.title)) 1 else 0
+    }
 
     /** True when the watched episode fits inside the candidate's total. */
     private fun coversEpisode(media: TrackerMedia, c: TrackerMatch): Boolean =

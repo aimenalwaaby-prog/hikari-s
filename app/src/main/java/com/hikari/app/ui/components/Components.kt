@@ -55,8 +55,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import com.hikari.app.HikariApp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
@@ -110,6 +112,8 @@ fun MediaRow(
     items: List<MediaItem>,
     onClick: (MediaItem) -> Unit,
     onShowAll: (() -> Unit)? = null,
+    /** Poster hold-menu play target (detail autoplay); plain detail open when null. */
+    onQuickPlay: ((MediaItem) -> Unit)? = null,
 ) {
     val style = rememberPosterStyle()
     if (TvMode.current()) {
@@ -184,7 +188,7 @@ fun MediaRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(uniqueItems, key = { it.uniqueId }) { item ->
-                PosterCard(item, style, onClick = { onClick(item) })
+                PosterCard(item, style, onClick = { onClick(item) }, onQuickPlay = onQuickPlay)
             }
         }
     }
@@ -313,6 +317,8 @@ fun PosterCard(
     item: MediaItem,
     style: PosterStyle,
     onClick: () -> Unit,
+    /** Hold-menu play action (opens detail with autoplay); plain open when null. */
+    onQuickPlay: ((MediaItem) -> Unit)? = null,
 ) {
     // With the score badge switched on this warms the ratings cache for the
     // title and repaints the cell when the answer lands (see
@@ -322,6 +328,13 @@ fun PosterCard(
     // height rather than a constant (see TvUi.posterWidth) so several rows fit
     // on one screen instead of one row covering it.
     val cardWidth = if (TvMode.current()) TvUi.posterWidth() else 120.dp
+    // 1-second-hold quick menu (info / play / library) — see PosterQuickMenu.
+    // The lambdas are hoisted into refs so the gesture (keyed on Unit, never
+    // restarted) can never close over a stale item after recomposition.
+    val quickMenu = rememberQuickMenuState()
+    val scope = rememberCoroutineScope()
+    val latestClick by rememberUpdatedState(onClick)
+    val latestPlay by rememberUpdatedState(onQuickPlay)
     Column(
         Modifier
             .width(cardWidth)
@@ -331,17 +344,41 @@ fun PosterCard(
             // the rounding to itself (see PosterArt).
             .clickable(onClick = onClick)
     ) {
-        PosterArt(
-            model = Artwork.model(item),
-            contentDescription = item.title,
-            style = style,
-            rating = item.rating,
-            imdb = badge,
-            item = item,
-            modifier = Modifier
+        Box(
+            Modifier
                 .fillMaxWidth()
-                .aspectRatio(2f / 3f),
-        )
+                .aspectRatio(2f / 3f)
+                .quickMenuGesture(quickMenu) { slot ->
+                    when (slot) {
+                        0 -> latestClick()
+                        1 -> {
+                            val play = latestPlay
+                            if (play != null) play(item) else latestClick()
+                        }
+                        else -> scope.launch {
+                            runCatching { HikariApp.instance.store.addFavorite(item) }
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    HikariApp.instance,
+                                    tr("Added to library"),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    }
+                }
+        ) {
+            PosterArt(
+                model = Artwork.model(item),
+                contentDescription = item.title,
+                style = style,
+                rating = item.rating,
+                imdb = badge,
+                item = item,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (quickMenu.visible) QuickMenuOverlay(quickMenu.selected)
+        }
         if (style.showTitles) {
             Text(
                 item.title,

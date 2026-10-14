@@ -262,7 +262,7 @@ object Routes {
     const val SEARCH_QUERY_BASE = "provider-search"
     // All args live in the query string: mediaIds are URLs (slashes would break
     // a path segment) and posters can be megabytes of base64 (see detail()).
-    const val DETAIL = "detail?providerId={providerId}&type={type}&mediaId={mediaId}&title={title}&poster={poster}&rawType={rawType}&episodeId={episodeId}&startPos={startPos}"
+    const val DETAIL = "detail?providerId={providerId}&type={type}&mediaId={mediaId}&title={title}&poster={poster}&rawType={rawType}&episodeId={episodeId}&startPos={startPos}&autoplay={autoplay}"
     // "Show All" catalog browser: every item of one provider catalog, paged.
     const val CATALOG = "catalog?providerId={providerId}&catalogId={catalogId}&title={title}&providerName={providerName}&type={type}&rawType={rawType}"
     /**
@@ -318,6 +318,8 @@ object Routes {
         episodeId: String = "",
         /** Watch-history resume: playback position in milliseconds. */
         startPositionMs: Long = 0L,
+        /** Poster hold-menu play: start playback as soon as a server lands. */
+        autoplay: Boolean = false,
     ): String {
         // Free-text titles are sanitized: some extensions return junk (control
         // chars, the literal "null") that can trip up the route parser and
@@ -333,6 +335,7 @@ object Routes {
         if (rawType.isNotBlank()) s += "&rawType=${Uri.encode(rawType)}"
         if (episodeId.isNotBlank()) s += "&episodeId=${Uri.encode(episodeId)}"
         if (startPositionMs > 0L) s += "&startPos=$startPositionMs"
+        if (autoplay) s += "&autoplay=1"
         return s
     }
 
@@ -1439,6 +1442,7 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                     navArgument("rawType") { type = NavType.StringType; defaultValue = "" },
                     navArgument("episodeId") { type = NavType.StringType; defaultValue = "" },
                     navArgument("startPos") { type = NavType.StringType; defaultValue = "0" },
+                    navArgument("autoplay") { type = NavType.StringType; defaultValue = "0" },
                 )
             ) { entry ->
                 val providerId = entry.arguments?.getString("providerId").orEmpty()
@@ -1451,7 +1455,8 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                 val rawType = Uri.decode(entry.arguments?.getString("rawType").orEmpty())
                 val episodeId = Uri.decode(entry.arguments?.getString("episodeId").orEmpty())
                 val startPos = entry.arguments?.getString("startPos")?.toLongOrNull() ?: 0L
-                DetailScreen(nav, providerId, type, mediaId, title, poster, rawType, episodeId, startPos)
+                val autoplay = entry.arguments?.getString("autoplay") == "1"
+                DetailScreen(nav, providerId, type, mediaId, title, poster, rawType, episodeId, startPos, autoplay)
             }
                 }
             }
