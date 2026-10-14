@@ -42,6 +42,19 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         // different chapters of one provider is site chrome, dropped going
         // forward. Sets (not counts) so reopening one chapter never trips it.
         private val chromeChapters = ConcurrentHashMap<String, MutableSet<String>>()
+        // Headers open the chapter (page 1): the same exact image leading 2+
+        // chapters is a title card, even before the 3-chapter general rule
+        // trips. Position-gated (first page only) so shared covers mid-chapter
+        // are never caught by it.
+        private val chromeFirsts = ConcurrentHashMap<String, MutableSet<String>>()
+        fun isChromeFirst(providerId: String, normUrl: String, chapterUrl: String): Boolean {
+            if (normUrl.isBlank() || chapterUrl.isBlank()) return false
+            val key = providerId + "|1|" + normUrl
+            val set = chromeFirsts.getOrPut(key) { ConcurrentHashMap.newKeySet() }
+            set.add(chapterUrl)
+            if (chromeFirsts.size > 2000) chromeFirsts.clear()
+            return set.size >= 2
+        }
         fun isChromeImage(providerId: String, normUrl: String, chapterUrl: String): Boolean {
             if (normUrl.isBlank() || chapterUrl.isBlank()) return false
             val key = providerId + "|" + normUrl
@@ -643,8 +656,16 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                 }
             }
             val mod = module() ?: return@withContext emptyList()
-            val raw = AnymexRuntime.pages(mod, config.id, chUrl) ?: return@withContext emptyList()
-            val arr = pageArray(raw) ?: return@withContext emptyList()
+            val raw = AnymexRuntime.pages(mod, config.id, chUrl)
+            if (raw.isNullOrBlank()) {
+                lastOutcome[config.id] = "✗ empty pages answer"
+                return@withContext emptyList()
+            }
+            val arr = pageArray(raw)
+            if (arr == null) {
+                lastOutcome[config.id] = "✗ " + pageError(raw).take(160)
+                return@withContext emptyList()
+            }
             val seenAnymex = HashSet<String>()
             val seenAnymexNorm = HashSet<String>()
             val pageBase = siteBase()
@@ -661,7 +682,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                         // keeping story order. Cross-chapter chrome (headers,
                         // dividers) goes too — see isChromeImage.
                         val nu = normImg(u)
-                        if (isPreviewUrl(u) || (chPoster.isNotBlank() && (u == chPoster || nu == normImg(chPoster))) || !seenAnymex.add(u) || !seenAnymexNorm.add(nu) || isChromeImage(config.id, nu, chUrl)) continue
+                        if (isPreviewUrl(u) || (chPoster.isNotBlank() && (u == chPoster || nu == normImg(chPoster))) || !seenAnymex.add(u) || !seenAnymexNorm.add(nu) || isChromeImage(config.id, nu, chUrl) || (out.isEmpty() && isChromeFirst(config.id, nu, chUrl))) continue
                         // Hotlink-guarded CDNs refuse a page with no Referer even
                         // when no Cloudflare wall exists — the module often names
                         // none, so the chapter itself stands in (plus Origin/UA).
@@ -690,7 +711,7 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
                     is String -> {
                         val u = normPageUrl(e, pageBase, chUrl) ?: continue
                         val nu = normImg(u)
-                        if (isPreviewUrl(u) || (chPoster.isNotBlank() && (u == chPoster || nu == normImg(chPoster))) || !seenAnymex.add(u) || !seenAnymexNorm.add(nu) || isChromeImage(config.id, nu, chUrl)) continue
+                        if (isPreviewUrl(u) || (chPoster.isNotBlank() && (u == chPoster || nu == normImg(chPoster))) || !seenAnymex.add(u) || !seenAnymexNorm.add(nu) || isChromeImage(config.id, nu, chUrl) || (out.isEmpty() && isChromeFirst(config.id, nu, chUrl))) continue
                         out += StreamSource(
                             name = "Page ${out.size + 1}",
                             url = u,
@@ -931,6 +952,18 @@ class AnymexMangaProvider(override val config: ProviderConfig) : ContentProvider
         val arr = o.optJSONArray("data")
         if (arr != null && arr.length() > 0) arr.optJSONObject(0)?.let { return it }
         return o
+    }
+
+    /** The honest one-line reason a pages answer carried no pages (a JS
+     *  throw inside getPageList used to surface as a silent empty chapter). */
+    private fun pageError(raw: String?): String {
+        if (raw.isNullOrBlank()) return "empty pages answer"
+        val txt = raw.trim()
+        val o = runCatching { JSONObject(txt) }.getOrNull()
+        if (o != null && o.has("ok") && !o.optBoolean("ok", true)) {
+            return o.optString("error").ifBlank { "pages error" }
+        }
+        return "no pages in answer"
     }
 
     /** The honest one-line reason a detail answer carried no chapters. */

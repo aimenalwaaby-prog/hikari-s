@@ -130,6 +130,7 @@ import com.hikari.app.R
 import com.hikari.app.data.ContentRepository
 import com.hikari.app.data.ContentRepository.StreamLookup
 import com.hikari.app.data.AppStore
+import com.hikari.app.data.CatalogRef
 import com.hikari.app.data.CastMember
 import com.hikari.app.data.CompanyRef
 import com.hikari.app.data.Episode
@@ -156,6 +157,7 @@ import com.hikari.app.net.StreamProbe
 import com.hikari.app.player.PlayerActivity
 import com.hikari.app.player.StreamsLive
 import com.hikari.app.providers.ContentProvider
+import com.hikari.app.providers.IptvProvider
 import com.hikari.app.ui.Artwork
 import com.hikari.app.ui.LoadingStyles
 import com.hikari.app.ui.PosterArt
@@ -1679,6 +1681,32 @@ fun DetailScreen(
     val activeProviderId by vm.activeProviderId.collectAsState()
     val livePid = activeProviderId.ifBlank { providerId }
     val isVegaPage = livePid.startsWith("vega|")
+    val isIptvPage = remember(livePid) { com.hikari.app.data.IptvMark.isIptvProvider(livePid) }
+    // Siblings from the same playlist (the reference app's channel grid under
+    // its player): same group first, the open channel excluded, capped at 24.
+    // Loaded once per channel — a playlist parse is cached by the provider.
+    var iptvSiblings by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    LaunchedEffect(livePid, mediaId, isIptvPage) {
+        iptvSiblings = emptyList()
+        if (!isIptvPage) return@LaunchedEffect
+        iptvSiblings = withContext(Dispatchers.IO) {
+            runCatching {
+                val prov = providers.firstOrNull { it.config.id == livePid }
+                    as? IptvProvider ?: return@runCatching emptyList()
+                val ref = CatalogRef(
+                    prov.config.id, MediaType.MOVIE,
+                    IptvProvider.CATALOG_ALL, "All channels"
+                )
+                val page1 = prov.getCatalog(ref, 1)
+                val all = if (page1.size >= 240) page1 + prov.getCatalog(ref, 2) else page1
+                if (all.isEmpty()) return@runCatching emptyList<MediaItem>()
+                val group = all.firstOrNull { it.id == mediaId }?.overview
+                all.filter { it.id != mediaId }
+                    .sortedWith(compareBy({ it.overview != group }, { it.title.lowercase() }))
+                    .take(24)
+            }.getOrDefault(emptyList())
+        }
+    }
 
     /**
      * The name the PLAYER's artwork card prints (and the detail page's own
@@ -5011,6 +5039,26 @@ fun DetailScreen(
                                 }
                             }
                         }
+                    }
+                }
+                // Live channels carry no TMDB shelves — no Related/Similar, no
+                // collection — so the page below the mark strip was empty. The
+                // reference app answers that space with the playlist itself:
+                // more channels from the same list, same group first, so the
+                // next channel is one tap away.
+                if (isIptvPage && iptvSiblings.isNotEmpty()) {
+                    item {
+                        ShelfRow(
+                            heading = tr("More from this playlist"),
+                            shelf = iptvSiblings,
+                            onClick = { openShelfItem(it) },
+                            onSearchHere = {
+                                Routes.safeNavigate(nav, Routes.searchInProvider(livePid, it.title))
+                            },
+                            onGlobalSearch = {
+                                Routes.safeNavigate(nav, Routes.searchQuery(it.title))
+                            },
+                        )
                     }
                 }
                 // The franchise this title belongs to — TMDB's own

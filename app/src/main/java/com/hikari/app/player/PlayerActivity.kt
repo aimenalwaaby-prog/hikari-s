@@ -6250,6 +6250,9 @@ class PlayerActivity : ComponentActivity() {
          *  by the halo around it so the glow spills past the screen edges;
          *  the box itself covers left to right. */
         edgeToEdge: Boolean = false,
+        /** Full-page screens (Sources): shrink the halo the geometry keeps
+         *  around the silhouette, so the box reads big instead of floating. */
+        tightHalo: Boolean = false,
         /** How much the video behind the panel is dimmed (the custom-preset
          *  editor passes a light one so the live picture stays judgeable). */
         dimAmount: Float = 0.65f,
@@ -6266,7 +6269,8 @@ class PlayerActivity : ComponentActivity() {
         val tvSheet = (PlayerSkins.normalize(skin) == PlayerSkins.TV || sideTvPanel)
         val panelSkin = if (sideTvPanel) PlayerSkins.TV else skin
         val flatPanel = PlayerSkins.isFlat(panelSkin)
-        val halo = if (flatPanel) (10 * density).toInt() else glassHaloPx
+        val halo = if (tightHalo) (6 * density).toInt()
+        else if (flatPanel) (10 * density).toInt() else glassHaloPx
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         // A dialog with no hint of its own still gets a line up here: the title
@@ -7638,9 +7642,17 @@ class PlayerActivity : ComponentActivity() {
             }
             val tvMenu = PlayerSkins.normalize(skin) == PlayerSkins.TV && playerTvRemote()
             val padX = ((if (tvMenu) 14 else 8) * density).roundToInt()
-            val probe = TextView(this).apply { dpText(if (tvMenu) 13f else 9.5f) }
+            // Measured with the SAME typeface + padding flags the pill draws
+            // with (medium is wider than regular — the old probe under-measured
+            // and "Nuvio 65" came out sliced), plus a 4dp safety so a count
+            // tick can never clip the pill it lands in.
+            val probe = TextView(this).apply {
+                dpText(if (tvMenu) 13f else 9.5f)
+                includeFontPadding = false
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }
             val textW = ceil(probe.paint.measureText(label)).toInt()
-            val w = (textW + padX * 2).coerceAtLeast((28 * density).roundToInt())
+            val w = (textW + padX * 2 + (4 * density)).toInt().coerceAtLeast((28 * density).roundToInt())
             val h = ((if (tvMenu) 40 else 21) * density).roundToInt()
             tv.apply {
                 text = label
@@ -7766,6 +7778,7 @@ class PlayerActivity : ComponentActivity() {
                     }
                 }
                 hv.text = name.uppercase() + "  \u00B7  " + count
+                hv.tag = "#" + name
                 hv.layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
@@ -7809,6 +7822,7 @@ class PlayerActivity : ComponentActivity() {
                         bottomMargin = if (opt.labelMaxLines >= 3 || tvMenu) (6 * density).toInt() else (3 * density).toInt()
                     }
                     rowViews[key] = v
+                    v.tag = key
                     v
                 }.onFailure { ex ->
                     if (firstRowError == null) firstRowError = (ex.message ?: ex.javaClass.simpleName).take(160)
@@ -8036,6 +8050,24 @@ class PlayerActivity : ComponentActivity() {
                 content != null && content.bottom - (v.scrollY + v.height) <= nearBottomPx
             } ?: false)
             val keepX = chipScroll.scrollX
+            // Content anchor: the first visible row below the chip strip and
+            // its offset from the viewport top. Raw pixel offsets go stale the
+            // moment rows land (a server above shifts everything; a collapsed
+            // measure clamps scrollY to 0 = "jumped to top"); an anchor
+            // re-seats the exact row being read.
+            var anchorTag: String? = null
+            var anchorOff = 0
+            sv?.let { v ->
+                val y = v.scrollY
+                for (ai in 1 until list.childCount) {
+                    val c = list.getChildAt(ai) ?: continue
+                    if (c.bottom > y + 4) {
+                        anchorTag = c.tag as? String
+                        anchorOff = c.top - y
+                        break
+                    }
+                }
+            }
             syncFromSession()
             // Nothing new to show (no adopted servers, same chip/selection)?
             // Return before touching a single view — this is what settles the
@@ -8055,15 +8087,28 @@ class PlayerActivity : ComponentActivity() {
             lastPaintSig = paintSig
             rebuildChips()
             rebuildList()
-            // Same explicit pass for live appends (see above): servers that
-            // land while the sheet is open must paint without a touch.
-            list.requestLayout()
-            // The list lives inside the panel's ScrollView: a layout-only pass
-            // on the list leaves the scroller measuring the OLD content height,
-            // so new rows sit at zero height until a touch scrolls (the exact
-            // invisible-until-touch shape). Remeasure the scroller chain too.
-            (list.parent as? View)?.requestLayout()
-            sv?.requestLayout()
+            // Synchronous measure + layout: positions are set HERE, on this
+            // frame, instead of in a posted traversal that the restore below
+            // could race (that race was BOTH symptoms: rows at zero height
+            // until a touch, and scrollY clamped to 0 = "jumped to top").
+            // The list is the ScrollView's child: full viewport width,
+            // unconstrained height — exactly what the scroller would measure.
+            var laidOut = false
+            if (sv != null && sv.width > 0) {
+                runCatching {
+                    list.measure(
+                        View.MeasureSpec.makeMeasureSpec(sv.width, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                    )
+                    list.layout(0, 0, list.measuredWidth, list.measuredHeight)
+                    laidOut = true
+                }
+            }
+            if (!laidOut) {
+                list.requestLayout()
+                (list.parent as? View)?.requestLayout()
+                sv?.requestLayout()
+            }
             // And the draw to go with the layout: a touch forces a traversal
             // that paints rows a layout-only pass left undrawn, so force both
             // phases here instead of waiting for a finger.
@@ -8078,29 +8123,33 @@ class PlayerActivity : ComponentActivity() {
             if (playerTvRemote()) {
                 runCatching { dialog.window?.decorView?.tvFocusableTree() }
             }
-            // Restore AFTER the new measure: scrollTo clamps to the scroller's
-            // current max, so a post that runs before the taller layout lands
-            // mid-measure (half-cut bottom row, blank rows until a touch
-            // finishes the traversal). Double-posted, it runs after it.
-            list.post {
-                sv?.post {
-                    if (!dialog.isShowing) return@post
-                    if (wasAtBottom) {
-                        // Follow ONLY when the taller layout actually landed:
-                        // a post racing the measure used to clamp to the old
-                        // max (half-cut bottom row, blank rows until a touch).
-                        val content = if (sv.childCount > 0) sv.getChildAt(0) else null
-                        if (content != null && content.height > sv.height) {
-                            sv.scrollTo(0, Int.MAX_VALUE)
-                        }
-                    } else if (keepY != sv.scrollY) {
-                        // A no-op scrollTo(0, 0) still trips the panel's
-                        // scroll listener (rebend + remeasure) — skip it.
-                        sv.scrollTo(0, keepY)
+            // Restore against the laid-out content (no posts, nothing to
+            // race): the anchor row returns to its exact offset, the bottom
+            // follows new rows only when already there, and a no-op scroll
+            // never trips the panel's scroll listener.
+            if (dialog.isShowing && sv != null) {
+                if (wasAtBottom) {
+                    val content = if (sv.childCount > 0) sv.getChildAt(0) else null
+                    if (content != null && content.height > sv.height) {
+                        sv.scrollTo(0, Int.MAX_VALUE)
                     }
+                } else {
+                    val tag = anchorTag
+                    var seated = false
+                    if (tag != null) {
+                        for (ai in 1 until list.childCount) {
+                            val c = list.getChildAt(ai) ?: continue
+                            if (c.tag as? String == tag) {
+                                sv.scrollTo(0, (c.top - anchorOff).coerceAtLeast(0))
+                                seated = true
+                                break
+                            }
+                        }
+                    }
+                    if (!seated && keepY != sv.scrollY) sv.scrollTo(0, keepY)
                 }
-                chipScroll.post { if (dialog.isShowing && chipScroll.scrollX != keepX) chipScroll.scrollTo(keepX, 0) }
             }
+            if (dialog.isShowing && chipScroll.scrollX != keepX) chipScroll.scrollTo(keepX, 0)
         }
         // Live servers land in bursts (hundreds for big titles): running the
         // full sync+sections+rebuild+layout pass on EVERY tick saturates the
@@ -8200,8 +8249,10 @@ class PlayerActivity : ComponentActivity() {
             // list reads as its own page with no cut-off bottom gap.
             fillFractionY = 1.0f,
             // The main box covers left to right (the red-marked report): no
-            // floating-panel side insets on this screen.
+            // floating-panel side insets on this screen, and a tight halo so
+            // the vertical box reads big.
             edgeToEdge = true,
+            tightHalo = true,
         )
         // The dialog is on screen from here: converge the list on the live
         // session one more time, on the window's own message queue. The open

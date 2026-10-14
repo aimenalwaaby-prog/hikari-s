@@ -7,6 +7,16 @@
 - Glass episode UI is ON by default (toggle in Settings → App Layout → Episode UI still switches all three layouts)
 - Backup speed on big sets ("Backing up… 112/1303" class): 16-wide parallel encode, transient/hidden files skipped, bigger stream buffer — same format, same restore
 
+## 0.11.19 (continuous build only)
+
+### Fixed
+- Sources blank at the bottom + jump-to-top when a server lands while scrolled last (15-instant class): paints now measure + lay out synchronously (no post-vs-measure race) and restore an content anchor (the row being read re-seats exactly); bottom follows only when already there
+- Engine chips never clip ("Nuvio 65" sliced class): pill width is measured with the drawn typeface + flags plus safety
+- Sources box reads big (red-marked): tight halo geometry on the full-page panel
+- Hold-speed badge sits middle-up at the right edge (was low); hold-path only, hides on lift
+- Mangayomi runtime parity: replaceAll/at/hasOwn polyfills (missing built-ins killed catalog/detail/pages while working in the Mangayomi app), honest JS-error outcomes on pages, title-card chrome filtered from page 1
+- IPTV channel pages gain "More from this playlist" (same group first, 24 max) like the reference app
+
 ## Unreleased (continuous build only)
 
 ### Fixed

@@ -137,6 +137,40 @@
     };
   }
 
+  // ---- modern built-ins some extensions assume (the embedded QuickJS is
+  //  ES2020-grade: String.replaceAll (ES2021) and Array.at (ES2022) throw
+  //  "not a function" there while working in the Mangayomi app, killing
+  //  catalog/detail/page calls that use them — an "engine" failure that is
+  //  really a missing polyfill). Guarded, so a newer engine keeps its own.
+  if (typeof String.prototype.replaceAll !== 'function') {
+    String.prototype.replaceAll = function (search, replacement) {
+      var s = String(this);
+      if (search instanceof RegExp) {
+        if (!search.global) throw new TypeError('replaceAll requires a global RegExp');
+        return s.replace(search, replacement);
+      }
+      var needle = String(search);
+      if (needle === '') return s;
+      return s.split(needle).join(String(replacement));
+    };
+  }
+  if (typeof Array.prototype.at !== 'function') {
+    Array.prototype.at = function (index) {
+      var a = this == null ? [] : Object(this);
+      var len = a.length >>> 0;
+      var i = Number(index) || 0;
+      if (i < 0) i = len + i;
+      if (i < 0 || i >= len) return undefined;
+      return a[i];
+    };
+  }
+  if (typeof Object.hasOwn !== 'function') {
+    Object.hasOwn = function (o, k) {
+      if (o == null) return false;
+      return Object.prototype.hasOwnProperty.call(Object(o), k);
+    };
+  }
+
   // ---- cheerio ----
   var cheerio = null;
   try {
