@@ -29,7 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -40,15 +43,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hikari.app.i18n.tr
+import com.hikari.app.ui.theme.rememberGlassTokens
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Press-and-hold quick menu for poster cards.
  *
- * Hold a poster for 1 second and a semicircle with three actions fans out over
- * it — info (opens the detail page), play (starts playback) and add-to-library —
- * and sliding left/right WITHOUT lifting the finger moves the selection; the
- * highlighted action fires on release.
+ * Hold a poster for 1 second and a glass stadium ring with three actions
+ * fans out over it — info (opens the detail page), play (starts playback)
+ * and add-to-library — and sliding left/right WITHOUT lifting the finger
+ * moves the selection; the highlighted action fires on release.
  *
  * Why custom instead of `combinedClickable`: the platform long-press fires at
  * ~500ms (too eager for a grid that also scrolls) and offers no drag-to-pick.
@@ -126,8 +130,12 @@ fun Modifier.quickMenuGesture(
     }
 }
 
-/** The fan overlay: a dark-glass arc rising from the poster's bottom edge with
- *  three labelled round actions — Details, Play, Library — and a slide hint.
+/** The fan overlay: a glass stadium ring enclosing the hint and the three
+ *  labelled round actions — Details, Play, Library. The ring is a stadium
+ *  (upper semicircle + lower semicircle) painted from the taskbar floating-bar
+ *  recipe ([rememberGlassTokens]): theme surface at near-full strength with
+ *  the top-light falloff and the 1px hairline, so menu and taskbar read as one
+ *  material over any poster art.
  *  Every disc is sized from the poster's own width so all three always fit,
  *  even on narrow shelf posters (the old fixed 44/52dp discs overflowed and
  *  the Library button was cut off). Sliding left/centre/right without lifting
@@ -135,6 +143,7 @@ fun Modifier.quickMenuGesture(
 @Composable
 fun BoxScope.QuickMenuOverlay(selected: Int) {
     val scheme = MaterialTheme.colorScheme
+    val glass = rememberGlassTokens()
     val detailsLabel = tr("Details")
     val playLabel = tr("Play")
     val libraryLabel = tr("Library")
@@ -150,33 +159,64 @@ fun BoxScope.QuickMenuOverlay(selected: Int) {
             val h = size.height
             // Dim the art so the icons read on any poster.
             drawRect(Color.Black.copy(alpha = 0.30f))
-            // The fan: a disc whose centre sits below the card's bottom edge,
-            // so only its top cap shows — an arc rising from the bottom.
-            val r = w * 0.85f
+            // The ring: a stadium around hint + discs, measured from the same
+            // disc/spacing/bottom-pad the Column below lays out with, so the
+            // glass always encloses the buttons on every poster width.
+            val discPx = disc.toPx()
+            val spacingPx = spacing.toPx()
+            val rowW = discPx * 3f + spacingPx * 2f
+            val padX = 14.dp.toPx()
+            val padT = 10.dp.toPx()
+            val padB = 12.dp.toPx()
+            val bottomPad = 8.dp.toPx()
+            val hintPx = 15.dp.toPx()
+            val labelPx = 16.dp.toPx()
+            val raisedPx = 7.dp.toPx()
             val cx = w / 2f
-            val cy = h + r * 0.30f
-            drawCircle(
-                color = Color.Black.copy(alpha = 0.66f),
-                radius = r,
-                center = Offset(cx, cy),
+            val contentBottom = h - bottomPad
+            val contentTop = contentBottom - labelPx - discPx - raisedPx - 3.dp.toPx() - hintPx
+            val top = contentTop - padT
+            val bottom = (contentBottom + padB).coerceAtMost(h - 2.dp.toPx())
+            val left = cx - rowW / 2f - padX
+            val right = cx + rowW / 2f + padX
+            val stadiumW = right - left
+            val stadiumH = (bottom - top).coerceAtLeast(2.dp.toPx())
+            val corner = CornerRadius(stadiumH / 2f, stadiumH / 2f)
+            val topLeft = Offset(left, top)
+            val stadiumSize = Size(stadiumW, stadiumH)
+            // Taskbar floating-bar fill: theme surface at near-full strength
+            // (a whisper would drown on a bright poster), then the glass
+            // top-light falloff, then the 1px hairline.
+            drawRoundRect(
+                color = scheme.surface.copy(alpha = if (glass.dark) 0.92f else 0.95f),
+                topLeft = topLeft,
+                size = stadiumSize,
+                cornerRadius = corner,
             )
-            drawCircle(
-                color = scheme.primary.copy(alpha = 0.90f),
-                radius = r,
-                center = Offset(cx, cy),
-                style = Stroke(width = 2.5.dp.toPx()),
+            drawRoundRect(
+                brush = Brush.verticalGradient(listOf(glass.fillTop, glass.fillBottom)),
+                topLeft = topLeft,
+                size = stadiumSize,
+                cornerRadius = corner,
             )
-            // The glow at the arc's crown.
+            drawRoundRect(
+                color = glass.border,
+                topLeft = topLeft,
+                size = stadiumSize,
+                cornerRadius = corner,
+                style = Stroke(width = 1.dp.toPx()),
+            )
+            // The glow, kept at the ring's crown.
             val glowR = 5.dp.toPx()
             drawCircle(
                 color = Color(0xFFFF5252).copy(alpha = 0.35f),
                 radius = glowR * 2.2f,
-                center = Offset(cx, cy - r),
+                center = Offset(cx, top),
             )
             drawCircle(
                 color = Color(0xFFFF5252),
                 radius = glowR,
-                center = Offset(cx, cy - r),
+                center = Offset(cx, top),
             )
         }
         Column(

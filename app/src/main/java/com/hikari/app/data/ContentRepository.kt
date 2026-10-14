@@ -1884,6 +1884,18 @@ class ContentRepository(private val manager: ProviderManager) {
         // StreamsLive.settleOrigin and the pass's onOriginSettled), and the one
         // worth a log line of its own whatever it costs.
         val isOrigin = p.config.id == item.providerId
+        // Own-credential play (universal, site-scrapers only — Nuvio/Stremio
+        // untouched): a series tap can carry a FOREIGN episode id (a
+        // TMDB-synthetic "<id>#sNeM" row or another engine's borrowed list),
+        // which the extension then feeds its own loadLinks/getVideoList as if
+        // it were its own credential — and finds no videos ("no playable
+        // sources" while movies from the same extension play, because movies
+        // discard the passed id and re-resolve their own first episode).
+        // Re-resolve the ORIGIN's own list once, match by season/number, and
+        // play the owned credential. Falls back to the tapped id when the
+        // list is unreachable or carries no match, so this can never make a
+        // playable title unplayable.
+        val playEp = resolveOwnEpisode(p, item, episode, isOrigin)
         // Aniyomi extensions pay a cold APK class load before their first
         // answer (see the Aniyomi budgets above) — 45s cut them off.
         // Nuvio engines get at least their own call budget (60s
@@ -1928,7 +1940,7 @@ class ContentRepository(private val manager: ProviderManager) {
             var timedOut = false
             val at = System.currentTimeMillis()
             val got = cancellableCatching {
-                val r = withTimeoutOrNull(attemptBudgetMs) { p.getStreams(item, episode) }
+                val r = withTimeoutOrNull(attemptBudgetMs) { p.getStreams(item, playEp) }
                 if (r == null) timedOut = true
                 r.orEmpty()
             }.getOrElse { t ->
@@ -1937,7 +1949,7 @@ class ContentRepository(private val manager: ProviderManager) {
             }
             val took = (System.currentTimeMillis() - at) / 1000
             if (got.isNotEmpty()) {
-                val combined = supplementDubSubVariants(p, item, episode, got, attemptBudgetMs)
+                val combined = supplementDubSubVariants(p, item, playEp, got, attemptBudgetMs)
                 providerOutcome.remove(p.config.id)
                 if (passSeq >= 0L) providerOutcomeSeq.remove(p.config.id)
                 // It answered — whatever it is, the wedge (if any) is over.
@@ -2001,10 +2013,10 @@ class ContentRepository(private val manager: ProviderManager) {
                 // the provider itself reported (refused/bot-check/dead page)
                 // skips this: reloading cannot lift it, and the honest reason
                 // below already says so.
-                val cleanRoomed = cleanRoomRetry(p, item, episode, attemptBudgetMs, isOrigin, timedOut, lastWhy)
+                val cleanRoomed = cleanRoomRetry(p, item, playEp, attemptBudgetMs, isOrigin, timedOut, lastWhy)
                 if (cleanRoomed.isNotEmpty()) {
                     val combined =
-                        supplementDubSubVariants(p, item, episode, cleanRoomed, attemptBudgetMs)
+                        supplementDubSubVariants(p, item, playEp, cleanRoomed, attemptBudgetMs)
                     providerOutcome.remove(p.config.id)
                     if (passSeq >= 0L) providerOutcomeSeq.remove(p.config.id)
                     com.hikari.app.providers.ExtensionRecovery.noteSuccess(p.config.id)
@@ -2027,10 +2039,10 @@ class ContentRepository(private val manager: ProviderManager) {
                 // at all). Fires on a deserialization-shaped provider error OR
                 // when a cache actually fed this lookup — never for a lookup
                 // that already ran fresh, and never for genuine empties.
-                val healed = healStaleEpisodePayload(p, item, episode, attemptBudgetMs)
+                val healed = healStaleEpisodePayload(p, item, playEp, attemptBudgetMs)
                 if (healed.isNotEmpty()) {
                     val combined =
-                        supplementDubSubVariants(p, item, episode, healed, attemptBudgetMs)
+                        supplementDubSubVariants(p, item, playEp, healed, attemptBudgetMs)
                     providerOutcome.remove(p.config.id)
                     if (passSeq >= 0L) providerOutcomeSeq.remove(p.config.id)
                     com.hikari.app.providers.ExtensionRecovery.noteSuccess(p.config.id)
@@ -6468,6 +6480,53 @@ class ContentRepository(private val manager: ProviderManager) {
         val tmdbLayout = runCatching { tmdbSeasonLayout(item) }.getOrDefault(emptyList())
         splitFlatEpisodes(episodes, tmdbLayout)?.let { return it }
         return episodes
+    }
+
+    /**
+     * The ORIGIN's own episode for this tap (universal, site-scrapers only —
+     * Nuvio/Stremio deliberately excluded: their addons need the TMDB-shaped
+     * season/episode they were asked for).
+     *
+     * Site-scraper engines (CS3/HIKARI/UNIVERSAL/SKYSTREAM/ANIYOMI/VEGA/SORA/
+     * ANYMEX) treat the episode id as their own playback credential, so a tap
+     * carrying a foreign id — a TMDB-synthetic "<item>#sNeM" row or a list
+     * borrowed from another engine — plays nowhere on them. The re-resolved
+     * list is matched by season+number (number-only fallback covers absolute
+     * anime numbering) and only a DIFFERENT id swaps; an unreachable list, an
+     * empty list, a synthetic-looking own list, or no match all keep the
+     * tapped episode, so this can only rescue taps, never break them.
+     */
+    private suspend fun resolveOwnEpisode(
+        p: ContentProvider,
+        item: MediaItem,
+        episode: Episode?,
+        isOrigin: Boolean,
+    ): Episode? {
+        if (episode == null || !isOrigin) return episode
+        if (!isSiteScraperOrigin(item)) return episode
+        return try {
+            val own = withTimeoutOrNull(20_000L) { p.getEpisodes(item) }.orEmpty()
+            if (own.isEmpty()) return episode
+            if (isTmdbSyntheticList(item, own)) return episode
+            val match = own.firstOrNull { it.season == episode.season && it.number == episode.number }
+                ?: own.firstOrNull { it.number == episode.number }
+                ?: return episode
+            if (match.id == episode.id) {
+                episode
+            } else {
+                com.hikari.app.data.Logs.log(
+                    "Provider",
+                    p.config.name.ifBlank { p.config.id } +
+                        " [${p.config.type.groupLabel}]" +
+                        ": series tap carried a foreign episode id — " +
+                        "playing the origin's own S${match.season}E${match.number} credential",
+                )
+                match
+            }
+        } catch (e: Throwable) {
+            currentCoroutineContext().ensureActive()
+            episode
+        }
     }
 
     /**

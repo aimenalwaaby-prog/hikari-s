@@ -1,3 +1,9 @@
+## 0.11.24 (continuous build only)
+
+### Fixed
+- Series "no playable sources" on site-scraper extensions while movies from the same extension play (universal, no per-extension code): a series tap could carry a foreign episode id (TMDB-synthetic row or another engine's borrowed list) that the extension fed its own loadLinks/getVideoList as its playback credential and found nothing on. The origin's own episode list is now re-resolved once at play time and matched by season+number (number-only fallback for absolute anime numbering) — only a different id swaps, an unreachable list or no match keeps the tapped id, so this only rescues taps. Nuvio/Stremio untouched (their addons need the TMDB-shaped request)
+- Poster hold-menu ring: the single upper arc is now a full glass stadium (upper + lower semicircle) enclosing hint + discs, painted from the taskbar floating-bar recipe (theme surface at near-full strength, top-light falloff, 1px hairline) with the crown glow kept — menu and taskbar read as one material on any poster
+
 ## 0.11.23 (continuous build only)
 
 ### Fixed
