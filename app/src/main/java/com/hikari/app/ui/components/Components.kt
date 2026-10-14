@@ -335,6 +335,8 @@ fun PosterCard(
     val scope = rememberCoroutineScope()
     val latestClick by rememberUpdatedState(onClick)
     val latestPlay by rememberUpdatedState(onQuickPlay)
+    // Hoisted: `tr` is @Composable and must not run inside `runCatching`.
+    val addedToLibrary = tr("Added to library")
     Column(
         Modifier
             .width(cardWidth)
@@ -360,7 +362,7 @@ fun PosterCard(
                             runCatching {
                                 android.widget.Toast.makeText(
                                     HikariApp.instance,
-                                    tr("Added to library"),
+                                    addedToLibrary,
                                     android.widget.Toast.LENGTH_SHORT,
                                 ).show()
                             }

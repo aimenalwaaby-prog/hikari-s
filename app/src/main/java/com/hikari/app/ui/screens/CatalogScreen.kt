@@ -791,6 +791,25 @@ fun CatalogScreen(
                     CatalogCard(
                         item,
                         style,
+                        onClick = {
+                            // A manga engine's "catalog" is its Popular/Latest list
+                            // and its items are manga, not video: those open the
+                            // manga detail page (the provider tags its catalogs with
+                            // rawType "manga" — see MangaProvider.catalogs).
+                            Routes.safeNavigate(
+                                nav,
+                                if (rawType == "manga") {
+                                    Routes.mangaDetail(
+                                        item.providerId, item.id, item.title, item.posterUrl
+                                    )
+                                } else {
+                                    Routes.detail(
+                                        item.providerId, item.type, item.id,
+                                        item.title, item.posterUrl, item.rawType
+                                    )
+                                }
+                            )
+                        },
                         onQuickPlay = { quick ->
                             // Manga rows open the reader's detail (no video to
                             // autoplay); video rows arrive already wanting
@@ -810,25 +829,7 @@ fun CatalogScreen(
                                 }
                             )
                         },
-                    ) {
-                        // A manga engine's "catalog" is its Popular/Latest list
-                        // and its items are manga, not video: those open the
-                        // manga detail page (the provider tags its catalogs with
-                        // rawType "manga" — see MangaProvider.catalogs).
-                        Routes.safeNavigate(
-                            nav,
-                            if (rawType == "manga") {
-                                Routes.mangaDetail(
-                                    item.providerId, item.id, item.title, item.posterUrl
-                                )
-                            } else {
-                                Routes.detail(
-                                    item.providerId, item.type, item.id,
-                                    item.title, item.posterUrl, item.rawType
-                                )
-                            }
-                        )
-                    }
+                    )
                     }
                 }
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
@@ -914,6 +915,8 @@ private fun CatalogCard(
     val quickScope = rememberCoroutineScope()
     val latestClick by rememberUpdatedState(onClick)
     val latestPlay by rememberUpdatedState(onQuickPlay)
+    // Hoisted: `tr` is @Composable and must not run inside `runCatching`.
+    val addedToLibrary = tr("Added to library")
     // No clip on the outer Column: the artwork's own rounding used to extend
     // over the title/year lines and cut their edges. Only the image Box below
     // is rounded.
@@ -939,7 +942,7 @@ private fun CatalogCard(
                             runCatching {
                                 android.widget.Toast.makeText(
                                     com.hikari.app.HikariApp.instance,
-                                    tr("Added to library"),
+                                    addedToLibrary,
                                     android.widget.Toast.LENGTH_SHORT,
                                 ).show()
                             }
