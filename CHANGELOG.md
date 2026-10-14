@@ -1,3 +1,11 @@
+## 0.11.23 (continuous build only)
+
+### Fixed
+- SkyStream parity with the reference app (universal, no per-extension code): one plugin call waits the reference 90s (a slow token+playlist+key extraction that plays there was cut here at 45s and read as "no playable sources"), origin attempts get the full 90s budget, per-call stream cap 200 like the reference, protected-stream DRM grants carried to the player instead of a black screen, bundle plugins (one JS, many feeds) install one row per feed with manifest.providerId injected plus a headless reconcile of older installs, mirror-domain picker in the extension's settings gear stored as a manifest.baseUrl override, cold detail/episode budgets 30s for the engine
+- Poster hold-menu slider rebuilt toward the reference arc: labelled Details / Play / Library discs on a dark-glass fan with a crown glow and a "Slide to explore" hint, all three always visible (discs are sized from the poster's own width — the Library button can no longer collapse off narrow shelf posters); Play starts playback directly through autoplay, Details opens the page
+- Tracker manga (AniList / MAL / Kitsu / Shikimori / Simkl shelves): manga opens in the Manga tab searched across every installed manga engine — never as a movie/series page stuck on Episodes (0), never "This manga engine is not installed" (a stale link gets a "Search installed manga extensions" button instead of the dead end); hold-menu Play on manga opens the manga search, on collection rows too
+- Anymex folder: the repos above plus the installed Sora / Anymex extensions below, browsed and managed in the one folder like the Anymex home
+
 ## 0.11.22 (continuous build only)
 
 ### Added

@@ -1566,13 +1566,23 @@ class ContentRepository(private val manager: ProviderManager) {
      *  first, and timing THAT out is what left an Aniyomi item with no meta —
      *  and so with the raw catalogue type (see [AniyomiProvider.toItem]). */
     private fun metaForTimeoutMs(p: ContentProvider) =
-        if (isAniyomi(p)) ANIYOMI_META_TIMEOUT_MS else 15_000L
+        if (isAniyomi(p)) ANIYOMI_META_TIMEOUT_MS
+        // A cold SkyStream load boots a whole JS engine before it even asks
+        // the site (see SkyStreamRuntime) — 15s settled too many series as
+        // "no episodes" on the first open.
+        else if (p.config.type == ProviderType.SKYSTREAM) 30_000L
+        else 15_000L
 
     /** The Detail screen's episode fetch — the same story as [metaForTimeoutMs]:
      *  an Aniyomi extension's episode list is a real scrape, and at 12s a cold
      *  one simply never answered. */
     private fun episodesForTimeoutMs(p: ContentProvider) =
-        if (isAniyomi(p)) ANIYOMI_EPISODES_TIMEOUT_MS else 12_000L
+        if (isAniyomi(p)) ANIYOMI_EPISODES_TIMEOUT_MS
+        // Same cold-engine story as metaForTimeoutMs above: 12s turned a
+        // slow-but-healthy SkyStream details call into Episodes (0), and the
+        // hold-menu Play then fired down the movie path on a series.
+        else if (p.config.type == ProviderType.SKYSTREAM) 30_000L
+        else 12_000L
 
     /** One shared budget for the TMDB-id episode shortcut above: TMDB is found
      *  within it or the extension's own list is shown instead, instantly. */
@@ -1899,7 +1909,12 @@ class ContentRepository(private val manager: ProviderManager) {
             runCatching { p.effectivePluginTimeoutMs() }.getOrDefault(0L)
                 .coerceIn(0L, 480_000L)
         } else 0L
-        val attemptBudgetMs = maxOf(fullTimeoutMs, originCs3BudgetMs)
+        // SkyStream's own engine waits a flat 90s per call (see
+        // SkyStreamRuntime.CALL_TIMEOUT_MS): an origin SkyStream provider cut
+        // at 45s here dies mid-extraction while the reference app plays it.
+        val originSkyBudgetMs =
+            if (isOrigin && p.config.type == ProviderType.SKYSTREAM) 90_000L else 0L
+        val attemptBudgetMs = maxOf(fullTimeoutMs, originCs3BudgetMs, originSkyBudgetMs)
         val maxAttempts = if (isOrigin) maxOf(NetTuning.attempts(), 3) else NetTuning.attempts()
         var attempt = 0
         var lastWhy: String? = null
@@ -5182,7 +5197,7 @@ class ContentRepository(private val manager: ProviderManager) {
                         com.hikari.app.skystream.SkyStreamPluginManager.siteHostOf(
                             com.hikari.app.skystream.SkyStreamPluginManager.scriptFile(
                                 com.hikari.app.HikariApp.instance,
-                                p.config.id.removePrefix("sky|"),
+                                com.hikari.app.skystream.SkyStreamPluginManager.packageOf(p.config.id),
                             )
                         )
                     }.getOrNull()

@@ -1088,7 +1088,7 @@ fun SearchScreen(
                         val go = {
                             Routes.safeNavigate(
                                 nav,
-                                if (item.rawType == "manga") Routes.mangaDetail(item.providerId, item.id, item.title, item.posterUrl)
+                                if (item.rawType == "manga") Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
                                 else Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
                             )
                         }
@@ -1118,7 +1118,7 @@ fun SearchScreen(
                                     // land somewhere sensible — and what makes any
                                     // manga search work, not just that one.
                                     if (item.rawType == "manga") {
-                                        Routes.mangaDetail(
+                                        Routes.mangaRoute(
                                             item.providerId, item.id, item.title, item.posterUrl
                                         )
                                     } else {

@@ -74,7 +74,12 @@ object SkyStreamRuntime {
      */
     private const val TV_CONCURRENT = 3
     private const val FETCH_TIMEOUT_MS = 30_000L
-    private const val CALL_TIMEOUT_MS = 45_000L
+    /** One plugin call: load / loadStreams / search all wait what the
+     *  reference app waits — its invokeAsync budget is a flat 90s per call
+     *  (see JsEngineService.invokeAsync), so a slow extraction (token flow +
+     *  playlist + key over mobile data) that plays there was cut here at 45s
+     *  and read as "no playable sources". */
+    private const val CALL_TIMEOUT_MS = 90_000L
     private const val VALIDATE_TIMEOUT_MS = 20_000L
     /** Budget for `getHome`/`search`: a catalog answer needs SEVERAL pages
      *  (the `akash` sites fetch 8 category pages, the `dev.cookie.*` family up
@@ -401,10 +406,14 @@ object SkyStreamRuntime {
         scriptFile: File,
         fnName: String,
         argsJson: String,
+        /** Extra manifest keys for this call, as a JSON object (sub-provider
+         *  id — see SkyStreamPluginManager.subIdOf). Merged into the
+         *  plugin.json payload before the engine sees it. */
+        manifestExtra: String? = null,
     ): String {
         val source = runCatching { scriptFile.readText() }.getOrNull()
         if (source.isNullOrBlank()) return failure("plugin file missing — reinstall this extension")
-        val manifestJson = readManifest(scriptFile)
+        val manifestJson = readManifest(scriptFile, manifestExtra)
         val budget = budgetFor(fnName)
         return gate.withPermit {
             withTimeoutOrNull(budget + CALL_GRACE_MS) {
@@ -542,14 +551,28 @@ object SkyStreamRuntime {
     }
 
     /** The plugin's plugin.json (next to its plugin.js), as a JSON object the
-     *  engine can assign to `manifest`. Falls back to an empty object so a
+     *  engine can assign to `manifest`. A stored mirror choice replaces
+     *  `baseUrl` (the reference app's domain selector — see
+     *  SkyStreamPluginManager.customBaseUrl), and [manifestExtra] keys are
+     *  merged on top (a bundle's sub-provider id — see
+     *  SkyStreamPluginManager.subIdOf). Falls back to an empty object so a
      *  plugin that reads manifest.baseUrl fails on its own terms. */
-    private fun readManifest(scriptFile: File): String {
-        val dir = scriptFile.parentFile ?: return "{}"
+    private fun readManifest(scriptFile: File, manifestExtra: String? = null): String {
+        val dir = scriptFile.parentFile ?: return manifestExtra ?: "{}"
         val f = File(dir, "plugin.json")
         val text = runCatching { f.takeIf { it.exists() }?.readText() }.getOrNull()
-        if (text.isNullOrBlank()) return "{}"
-        val obj = runCatching { JSONObject(text) }.getOrNull() ?: return "{}"
+        val obj = if (text.isNullOrBlank()) JSONObject()
+        else runCatching { JSONObject(text) }.getOrNull() ?: JSONObject()
+        val custom = runCatching {
+            SkyStreamPluginManager.customBaseUrl(dir.name)
+        }.getOrNull()?.takeIf { it.startsWith("http") }
+        if (custom != null) runCatching { obj.put("baseUrl", custom) }
+        if (!manifestExtra.isNullOrBlank()) {
+            runCatching {
+                val extra = JSONObject(manifestExtra)
+                extra.keys().forEach { k -> obj.put(k, extra.get(k)) }
+            }
+        }
         return obj.toString()
     }
 

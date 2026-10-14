@@ -3656,6 +3656,21 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 }
             ProviderType.ANIYOMI, ProviderType.MANGA -> schemaProvider = p
             ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA, ProviderType.SORA -> schemaProvider = p
+            // A SkyStream plugin with mirror domains gets the mirror picker;
+            // without domains there is nothing to configure (see the info
+            // dialog). The manifest read is one small local file, like the
+            // Vega settings check above.
+            ProviderType.SKYSTREAM -> {
+                val hasMirrors = runCatching {
+                    com.hikari.app.skystream.SkyStreamPluginManager.domainsOf(
+                        com.hikari.app.skystream.SkyStreamPluginManager.scriptFile(
+                            context,
+                            com.hikari.app.skystream.SkyStreamPluginManager.packageOf(p.config.id),
+                        )
+                    ).isNotEmpty()
+                }.getOrDefault(false)
+                if (hasMirrors) schemaProvider = p else infoProvider = p
+            }
             // A playlist has no settings either — what it has is a source and a
             // channel count, plus a way to re-read it.
             ProviderType.IPTV -> iptvInfoId = p.config.id
@@ -4790,6 +4805,8 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 AnymexSettingsDialog(provider = provider, onDismiss = close)
             ProviderType.SORA ->
                 SoraSettingsDialog(provider = provider, onDismiss = close)
+            ProviderType.SKYSTREAM ->
+                SkyStreamSettingsDialog(provider = provider, onDismiss = close)
             else -> NuvioSettingsDialog(provider = provider, onDismiss = close)
         }
     }
@@ -7390,6 +7407,121 @@ private fun SoraSettingsDialog(
         onDismiss = onDismiss,
     )
 }
+
+/**
+ * A SkyStream extension's mirror-domain picker — the reference app's domain
+ * selector (see DEVELOPER.md "Declaring Mirror Domains"): the manifest's
+ * `domains` become `manifest.baseUrl` candidates, and the pick is stored next
+ * to plugin.json and injected at engine boot (see SkyStreamRuntime).
+ */
+@Composable
+private fun SkyStreamSettingsDialog(
+    provider: ContentProvider,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val mgr = com.hikari.app.skystream.SkyStreamPluginManager
+    val pkg = remember(provider.config.id) { mgr.packageOf(provider.config.id) }
+    var domains by remember {
+        mutableStateOf(emptyList<com.hikari.app.skystream.SkyStreamPluginManager.SkyDomain>())
+    }
+    var picked by remember { mutableStateOf<String?>(null) }
+    var loaded by remember { mutableStateOf(false) }
+    LaunchedEffect(pkg) {
+        val pair = withContext(Dispatchers.IO) {
+            val file = mgr.scriptFile(context, pkg)
+            mgr.domainsOf(file) to mgr.customBaseUrl(pkg)
+        }
+        domains = pair.first
+        picked = pair.second
+        loaded = true
+    }
+    fun pick(url: String?) {
+        picked = url
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                mgr.setCustomBaseUrl(context, pkg, url)
+                // A new site means new pages: retire cached episode payloads
+                // so the next open re-resolves against the picked mirror.
+                com.hikari.app.data.MetaCache.bumpEpisodesEpoch()
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(I18n.t("%s settings").replace("%s", provider.config.name)) },
+        text = {
+            if (!loaded) {
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(Modifier.size(28.dp))
+                }
+            } else {
+                Column {
+                    Text(
+                        tr("Mirror domain — the site address this extension reads. Switch mirrors here when the current one stops answering. Takes effect on the next search."),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    domains.forEach { d ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { pick(d.url) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = picked == d.url,
+                                onClick = { pick(d.url) },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    d.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    d.url,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { pick(null) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = picked == null,
+                            onClick = { pick(null) },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            tr("Default (manifest)"),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(tr("Close")) }
+        },
+    )
+}
 @Composable
 private fun ProviderInfoDialog(provider: ContentProvider, onDismiss: () -> Unit) {
     val kind = when (provider.config.type) {
@@ -8922,6 +9054,39 @@ private fun SourceFolderView(
                         onRefresh = { onRefreshRepo(repo) },
                         onRemoveRepo = { onRemoveRepo(repo.url) }
                     )
+                }
+                // The Anymex family's new folder UI: the repos above, plus the
+                // extensions already installed from them below — browsed and
+                // managed in the one place, like the Anymex home above it.
+                // (The home keeps repos inside Sora / Anymex; this is the leaf
+                // folder, so its own installs belong here.)
+                val installedHere = when (folder) {
+                    SourceFolder.SORA -> providers.filter { it.config.type == ProviderType.SORA }
+                    SourceFolder.ANYMEX -> providers.filter {
+                        it.config.type == ProviderType.ANYMEX ||
+                            it.config.type == ProviderType.ANYMEX_MANGA
+                    }
+                    else -> emptyList()
+                }.distinctBy { it.config.id }
+                if (installedHere.isNotEmpty()) {
+                    item(key = "anymex-installed-head") {
+                        Text(
+                            tr("Installed"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp)
+                        )
+                    }
+                    items(installedHere, key = { "anymex-installed-" + it.config.id }) { p ->
+                        ProviderCard(
+                            p = p,
+                            status = pluginStatus(p, iptvTick),
+                            onToggle = { enabled -> onToggleProvider(p.config.id, enabled) },
+                            onDelete = { onDeleteProvider(p.config.id) },
+                            onSettings = { onOpenSettings(p) },
+                            onVerify = rememberVerifyAction(p),
+                        )
+                    }
                 }
             } else if (folder == SourceFolder.IPTV) {
                 if (iptvProviders.isEmpty()) {

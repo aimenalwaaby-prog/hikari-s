@@ -56,7 +56,10 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
 
         private const val MAX_ITEMS_PER_ROW = 80
         private const val MAX_EPISODES = 800
-        private const val MAX_STREAMS = 60
+        /** Per-call stream cap: the reference app caps one loadStreams answer
+         *  at 200 (see _kMaxStreamsPerCall) — cutting at 60 dropped real
+         *  mirrors from big meta providers. */
+        private const val MAX_STREAMS = 200
         private const val HOME_TTL_MS = 8 * 60 * 1000L
 
         /** What Home says when this extension's site would not load for us.
@@ -67,8 +70,12 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
             "This extension's site wouldn't load — open it in the WebView from the globe button, then retry."
     }
 
-    /** `sky|<packageName>` → the plugin's package name (also its manifest id). */
-    private val packageName: String get() = config.id.removePrefix("sky|")
+    /** `sky|<packageName>[|<feedId>]` → the plugin's package name (also its
+     *  manifest id and its directory — see SkyStreamPluginManager.packageOf).
+     *  [subId] is a bundle's feed id, injected as `manifest.providerId` so a
+     *  multi-feed plugin answers instead of NOT_FOUND. */
+    private val packageName: String get() = SkyStreamPluginManager.packageOf(config.id)
+    private val subId: String? get() = SkyStreamPluginManager.subIdOf(config.id)
 
     /**
      * The plugin's script. `config.url` holds the absolute path captured at
@@ -137,12 +144,16 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
             return@withContext null
         }
         val argsJson = JSONArray().apply { args.forEach { put(it) } }.toString()
+        val extra = subId?.let { sid ->
+            runCatching { JSONObject().put("providerId", sid).toString() }.getOrNull()
+        }
         val payload = SkyStreamRuntime.invoke(
             HikariApp.instance,
             packageName,
             file,
             fn,
             argsJson,
+            extra,
         )
         val parsed = runCatching { JSONObject(payload) }.getOrNull()
         lastFailure = if (parsed == null) {
@@ -617,6 +628,15 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
         val isM3u8 = o.optBoolean("isM3U8", false) ||
             url.startsWith("data:application/vnd.apple.mpegurl") || url.contains(".m3u8", true)
         val isMpd = url.contains(".mpd", true)
+        // Protected streams carry their DRM grant on the entry (the reference
+        // app's StreamResult.drmKid/drmKey/licenseUrl) — dropping it left a
+        // black screen on protected manifests instead of a media3 DRM session
+        // (see DrmSpec).
+        val kid = o.optString("drmKid").takeIf { it.isNotBlank() }
+        val key = o.optString("drmKey").takeIf { it.isNotBlank() }
+        val license = o.optString("licenseUrl").takeIf { it.isNotBlank() }
+        val drm = if (kid == null && key == null && license == null) null
+        else com.hikari.app.data.DrmSpec(kid = kid, key = key, licenseUrl = license)
         return StreamSource(
             name = displayName,
             url = if (isTorrent || url.startsWith("data:")) url else Http.normalizeDriveUrl(url),
@@ -626,6 +646,7 @@ class SkyStreamProvider(override val config: ProviderConfig) : ContentProvider {
             isM3u8 = isM3u8,
             isMpd = isMpd,
             details = size,
+            drm = drm,
         )
     }
 

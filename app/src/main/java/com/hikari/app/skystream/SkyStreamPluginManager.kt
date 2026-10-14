@@ -49,6 +49,84 @@ object SkyStreamPluginManager {
     private fun safe(name: String): String =
         name.replace(Regex("[^A-Za-z0-9_.-]"), "_").ifBlank { "plugin" }
 
+    /**
+     * The plugin's package from an installed row id. A bundle (one JS, many
+     * feeds — see the reference DEVELOPER.md "Declaring Sub-Providers")
+     * installs one row per feed as `sky|<package>|<feedId>`, while a plain
+     * plugin is `sky|<package>`; package names can never contain `|`, so the
+     * split is unambiguous either way.
+     */
+    fun packageOf(configId: String): String =
+        configId.removePrefix("sky|").substringBefore("|")
+
+    /** A bundle row's feed id (`manifest.providerId` in the reference app),
+     *  or null for a plain single-feed plugin. */
+    fun subIdOf(configId: String): String? =
+        configId.removePrefix("sky|").substringAfter("|", "").takeIf { it.isNotBlank() }
+
+    /** One feed of a bundle manifest (`providers[]` entry): the id the
+     *  reference app injects as `manifest.providerId`, and the display name. */
+    data class SkySubFeed(val id: String, val name: String)
+
+    /** A bundle's feeds from its manifest, or empty for a plain plugin. */
+    fun subFeedsOf(manifest: JSONObject): List<SkySubFeed> {
+        val arr = runCatching { manifest.getJSONArray("providers") }.getOrNull()
+            ?: return emptyList()
+        val out = mutableListOf<SkySubFeed>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("id").trim()
+            if (id.isBlank()) continue
+            out += SkySubFeed(id, o.optString("name").ifBlank { id })
+        }
+        return out
+    }
+
+    /** One mirror domain from a manifest `domains` entry — either the
+     *  `{name,url}` object shape the reference docs describe or the bare
+     *  string shape the community listings ship. */
+    data class SkyDomain(val name: String, val url: String)
+
+    /** The mirror domains a plugin declares, or empty when it declares none. */
+    fun domainsOf(scriptFile: File): List<SkyDomain> {
+        val o = manifestOf(scriptFile) ?: return emptyList()
+        val arr = runCatching { o.getJSONArray("domains") }.getOrNull()
+            ?: return emptyList()
+        val out = mutableListOf<SkyDomain>()
+        for (i in 0 until arr.length()) {
+            val entry = arr.opt(i) ?: continue
+            if (entry is JSONObject) {
+                val url = entry.optString("url").trim()
+                if (url.startsWith("http")) out += SkyDomain(
+                    entry.optString("name").ifBlank { url },
+                    url,
+                )
+            } else {
+                hostUrl(entry.toString())?.let { out += SkyDomain(it, it) }
+            }
+        }
+        return out
+    }
+
+    private fun overrideFile(context: Context, packageName: String): File =
+        File(pluginDir(context, packageName), "domain_override")
+
+    /** The user's picked mirror for a plugin (the reference app's domain
+     *  selector), or null for the manifest default. A plain file next to
+     *  plugin.json — no DataStore read on the engine's path. */
+    fun customBaseUrl(packageName: String): String? = runCatching {
+        overrideFile(HikariApp.instance, packageName).takeIf { it.exists() }
+            ?.readText()?.trim()?.takeIf { it.startsWith("http") }
+    }.getOrNull()
+
+    fun setCustomBaseUrl(context: Context, packageName: String, url: String?) {
+        runCatching {
+            val f = overrideFile(context, packageName)
+            if (url.isNullOrBlank()) f.delete()
+            else f.writeText(url.trim())
+        }
+    }
+
     /** The built-in SkyStream extension repositories (repo.json). */
     val DEFAULT_REPOS = listOf(
         Triple(
@@ -146,10 +224,42 @@ object SkyStreamPluginManager {
                     extra = sourceUrl ?: packageName,
                 )
             )
+            // A bundle (one JS, many feeds) registers one row per feed — the
+            // reference app creates one provider instance per `providers[]`
+            // entry and injects its id as `manifest.providerId`. A single row
+            // for the whole bundle leaves every feed answering NOT_FOUND, so
+            // the bundle plays nowhere even though it plays in the reference
+            // app. Plain plugins keep their single row, untouched.
+            val feeds = subFeedsOf(manifest)
+            var rows = 1
+            if (feeds.isNotEmpty()) {
+                val store = HikariApp.instance.store
+                runCatching {
+                    store.updateProviders { list ->
+                        list.filterNot { it.id == "sky|" + packageName }
+                    }
+                }
+                val src = sourceUrl ?: packageName
+                feeds.forEach { feed ->
+                    runCatching {
+                        store.addProvider(
+                            ProviderConfig(
+                                id = "sky|" + packageName + "|" + feed.id,
+                                name = "$displayName · ${feed.name}",
+                                type = ProviderType.SKYSTREAM,
+                                url = jsFile.absolutePath,
+                                iconUrl = icon,
+                                extra = src,
+                            )
+                        )
+                    }
+                }
+                rows = feeds.size
+            }
             HikariApp.instance.providers.refresh()
             // A new extension build may change provider-opaque episode payloads — retire cached ones (see MetaCache).
             runCatching { com.hikari.app.data.MetaCache.bumpEpisodesEpoch() }
-            Result.success(1)
+            Result.success(rows)
         }
     }
 
@@ -180,6 +290,70 @@ object SkyStreamPluginManager {
         return mine.size
     }
 
+    /**
+     * Expands bundles that were installed before sub-feed rows existed: a
+     * single `sky|<package>` row whose manifest now declares `providers[]`
+     * becomes one row per feed (see install()), keeping the row's enabled
+     * state; orphan feed rows whose feed left the manifest collapse back.
+     * Runs headless at startup (see HikariApp) — true when anything moved.
+     */
+    suspend fun reconcileBundles(context: Context, store: AppStore): Boolean =
+        withContext(Dispatchers.IO) {
+            var changed = false
+            val rows = runCatching { store.providers() }.getOrDefault(emptyList())
+                .filter { it.type == ProviderType.SKYSTREAM }
+            for (row in rows) {
+                val pkg = packageOf(row.id)
+                val manifest = manifestOf(scriptFile(context, pkg)) ?: continue
+                val feeds = subFeedsOf(manifest).map { it.id }.toSet()
+                val sub = subIdOf(row.id)
+                if (feeds.isEmpty()) {
+                    if (sub != null) {
+                        runCatching {
+                            store.updateProviders { list ->
+                                list.filterNot { it.id == row.id }
+                            }
+                        }
+                        changed = true
+                    }
+                    continue
+                }
+                if (sub == null) {
+                    val enabled = row.enabled
+                    runCatching {
+                        store.updateProviders { list ->
+                            list.filterNot { it.id == row.id }
+                        }
+                    }
+                    feeds.forEach { feedId ->
+                        val feedName = subFeedsOf(manifest)
+                            .firstOrNull { it.id == feedId }?.name ?: feedId
+                        runCatching {
+                            store.addProvider(
+                                row.copy(
+                                    id = "sky|$pkg|$feedId",
+                                    name = "${row.name} · $feedName",
+                                    enabled = enabled,
+                                )
+                            )
+                        }
+                    }
+                    changed = true
+                } else if (sub !in feeds) {
+                    runCatching {
+                        store.updateProviders { list ->
+                            list.filterNot { it.id == row.id }
+                        }
+                    }
+                    changed = true
+                }
+            }
+            if (changed) {
+                runCatching { com.hikari.app.data.MetaCache.bumpEpisodesEpoch() }
+            }
+            changed
+        }
+
     /** Whether the provider's plugin.js still exists on disk. */
     fun fileMissing(config: ProviderConfig): Boolean =
         config.type == ProviderType.SKYSTREAM &&
@@ -194,7 +368,7 @@ object SkyStreamPluginManager {
      * BLOCKING (reads plugin.json off disk).
      */
     fun siteUrlOf(config: ProviderConfig): String? =
-        siteUrlOf(scriptFile(HikariApp.instance, config.id.removePrefix("sky|")))
+        siteUrlOf(scriptFile(HikariApp.instance, packageOf(config.id)))
 
     fun siteUrlOf(scriptFile: File): String? {
         val o = manifestOf(scriptFile) ?: return null
@@ -217,6 +391,12 @@ object SkyStreamPluginManager {
         if (!f.exists()) return@runCatching null
         JSONObject(f.readText())
     }.getOrNull()
+
+    /** The manifest's own default site (before any stored mirror choice). */
+    fun defaultBaseUrlOf(scriptFile: File): String? {
+        val o = manifestOf(scriptFile) ?: return null
+        return hostUrl(o.optString("baseUrl"))
+    }
 
     /**
      * A `https://host/` URL for a manifest-declared site, or null when the entry
@@ -251,7 +431,7 @@ object SkyStreamPluginManager {
     fun iconFallback(config: ProviderConfig): String? {
         iconCache[config.id]?.let { return it }
         val result = runCatching {
-            val json = File(pluginDir(HikariApp.instance, config.id.removePrefix("sky|")), "plugin.json")
+            val json = File(pluginDir(HikariApp.instance, packageOf(config.id)), "plugin.json")
             if (!json.exists()) return@runCatching null
             val o = runCatching { JSONObject(json.readText()) }.getOrNull() ?: return@runCatching null
             val declared = o.optString("iconUrl")

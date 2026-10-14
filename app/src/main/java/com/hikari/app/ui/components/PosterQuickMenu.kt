@@ -2,9 +2,15 @@ package com.hikari.app.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -14,6 +20,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -28,7 +35,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hikari.app.i18n.tr
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -115,47 +126,104 @@ fun Modifier.quickMenuGesture(
     }
 }
 
-/** The semicircle overlay: dim glass fan with the three action icons. */
+/** The fan overlay: a dark-glass arc rising from the poster's bottom edge with
+ *  three labelled round actions — Details, Play, Library — and a slide hint.
+ *  Every disc is sized from the poster's own width so all three always fit,
+ *  even on narrow shelf posters (the old fixed 44/52dp discs overflowed and
+ *  the Library button was cut off). Sliding left/centre/right without lifting
+ *  picks slot 0/1/2; Play starts playback directly, Details opens the page. */
 @Composable
 fun BoxScope.QuickMenuOverlay(selected: Int) {
     val scheme = MaterialTheme.colorScheme
-    Canvas(Modifier.matchParentSize()) {
-        val w = size.width
-        val h = size.height
-        // Dim the art so the icons read on any poster.
-        drawRect(Color.Black.copy(alpha = 0.28f))
-        // The fan: a disc whose centre sits below the card's bottom edge, so
-        // only its top cap shows — a semicircle rising from the bottom.
-        val r = w * 0.78f
-        val cx = w / 2f
-        val cy = h + r * 0.28f
-        drawCircle(
-            color = Color.Black.copy(alpha = 0.62f),
-            radius = r,
-            center = Offset(cx, cy),
-        )
-        drawCircle(
-            color = scheme.primary.copy(alpha = 0.85f),
-            radius = r,
-            center = Offset(cx, cy),
-            style = Stroke(width = 3.dp.toPx()),
-        )
-    }
-    Row(
-        Modifier
-            .align(Alignment.BottomCenter)
-            .padding(bottom = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        QuickMenuIcon(icon = 0, selected = selected) {
-            Icon(Icons.Filled.Info, contentDescription = "More info", tint = iconTint(0, selected))
+    val detailsLabel = tr("Details")
+    val playLabel = tr("Play")
+    val libraryLabel = tr("Library")
+    val hint = tr("Slide to explore")
+    BoxWithConstraints(Modifier.matchParentSize()) {
+        // Equal discs, sized to fit three across with room to spare — the
+        // selection reads through colour + ring, never through a bigger disc
+        // that would push its neighbours off a narrow card.
+        val spacing = (maxWidth * 0.05f).coerceAtMost(12.dp)
+        val disc = ((maxWidth - spacing * 2 - 20.dp) / 3).coerceIn(28.dp, 48.dp)
+        Canvas(Modifier.matchParentSize()) {
+            val w = size.width
+            val h = size.height
+            // Dim the art so the icons read on any poster.
+            drawRect(Color.Black.copy(alpha = 0.30f))
+            // The fan: a disc whose centre sits below the card's bottom edge,
+            // so only its top cap shows — an arc rising from the bottom.
+            val r = w * 0.85f
+            val cx = w / 2f
+            val cy = h + r * 0.30f
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.66f),
+                radius = r,
+                center = Offset(cx, cy),
+            )
+            drawCircle(
+                color = scheme.primary.copy(alpha = 0.90f),
+                radius = r,
+                center = Offset(cx, cy),
+                style = Stroke(width = 2.5.dp.toPx()),
+            )
+            // The glow at the arc's crown.
+            val glowR = 5.dp.toPx()
+            drawCircle(
+                color = Color(0xFFFF5252).copy(alpha = 0.35f),
+                radius = glowR * 2.2f,
+                center = Offset(cx, cy - r),
+            )
+            drawCircle(
+                color = Color(0xFFFF5252),
+                radius = glowR,
+                center = Offset(cx, cy - r),
+            )
         }
-        QuickMenuIcon(icon = 1, selected = selected) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = "Play", tint = iconTint(1, selected))
-        }
-        QuickMenuIcon(icon = 2, selected = selected) {
-            Icon(Icons.Filled.BookmarkAdd, contentDescription = "Add to library", tint = iconTint(2, selected))
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                hint,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = Color.White.copy(alpha = 0.75f),
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(3.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                QuickMenuOption(
+                    label = detailsLabel,
+                    icon = 0,
+                    selected = selected,
+                    disc = disc,
+                    raised = false,
+                ) {
+                    Icon(Icons.Filled.Info, contentDescription = detailsLabel, tint = iconTint(0, selected))
+                }
+                QuickMenuOption(
+                    label = playLabel,
+                    icon = 1,
+                    selected = selected,
+                    disc = disc,
+                    raised = true,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = playLabel, tint = iconTint(1, selected))
+                }
+                QuickMenuOption(
+                    label = libraryLabel,
+                    icon = 2,
+                    selected = selected,
+                    disc = disc,
+                    raised = false,
+                ) {
+                    Icon(Icons.Filled.BookmarkAdd, contentDescription = libraryLabel, tint = iconTint(2, selected))
+                }
+            }
         }
     }
 }
@@ -166,24 +234,49 @@ private fun iconTint(icon: Int, selected: Int): Color {
     return if (icon == selected) scheme.onPrimary else Color.White
 }
 
-/** One fan button: a filled accent disc when selected, a dim disc otherwise. */
+/** One fan option: a labelled disc, accent-filled with a light ring when
+ *  selected, dark glass otherwise. The centre (Play) option rides slightly
+ *  higher on the arc. */
 @Composable
-private fun QuickMenuIcon(
+private fun QuickMenuOption(
+    label: String,
     icon: Int,
     selected: Int,
+    disc: Dp,
+    raised: Boolean,
     content: @Composable () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val on = icon == selected
-    androidx.compose.foundation.layout.Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(if (on) 52.dp else 44.dp)
-            .background(
-                if (on) scheme.primary else Color.Black.copy(alpha = 0.55f),
-                CircleShape,
-            ),
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.offset(y = if (raised) (-7).dp else 0.dp),
     ) {
-        content()
+        androidx.compose.foundation.layout.Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(disc)
+                .background(
+                    if (on) scheme.primary else Color.Black.copy(alpha = 0.55f),
+                    CircleShape,
+                )
+                .then(
+                    if (on) Modifier.border(
+                        1.5.dp,
+                        Color.White.copy(alpha = 0.75f),
+                        CircleShape,
+                    ) else Modifier
+                ),
+        ) {
+            content()
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            color = if (on) Color.White else Color.White.copy(alpha = 0.8f),
+            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+        )
     }
 }

@@ -476,12 +476,27 @@ fun MangaDetailScreen(
                 }
             } else if (error != null && chapters.isEmpty()) {
                 item(key = "detail-error") {
-                    Text(
-                        error.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(vertical = 20.dp),
-                    )
+                    Column(Modifier.padding(vertical = 20.dp)) {
+                        Text(
+                            error.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        // A tracker link (or an uninstalled engine) lands here
+                        // with no provider to load from — offer the title
+                        // across every installed manga engine instead of a
+                        // dead end (see Routes.mangaRoute).
+                        if (app.providers.byId(providerId) == null) {
+                            Button(
+                                onClick = {
+                                    Routes.safeNavigate(nav, Routes.mangaSearch(title))
+                                },
+                                modifier = Modifier.padding(top = 12.dp),
+                            ) {
+                                Text(tr("Search installed manga extensions"))
+                            }
+                        }
+                    }
                 }
             }
 

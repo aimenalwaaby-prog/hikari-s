@@ -1174,16 +1174,28 @@ fun HomeScreen(nav: NavHostController) {
                         onClick = { item ->
                             Routes.safeNavigate(
                                 nav,
-                                Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
+                                // Tracker manga shelves open in the manga
+                                // section (searched across every installed
+                                // manga engine), never as video.
+                                if (item.rawType == "manga") {
+                                    Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
+                                } else {
+                                    Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
+                                }
                             )
                         },
                         // Poster hold-menu play: open the detail page already
                         // wanting playback, so it starts the instant the first
-                        // server lands (see DetailScreen autoplay).
+                        // server lands (see DetailScreen autoplay). Manga has
+                        // no video to autoplay — it opens in the manga section.
                         onQuickPlay = { item ->
                             Routes.safeNavigate(
                                 nav,
-                                Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType, autoplay = true)
+                                if (item.rawType == "manga") {
+                                    Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
+                                } else {
+                                    Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType, autoplay = true)
+                                }
                             )
                         },
                         onShowAll = {
@@ -1436,7 +1448,7 @@ fun HomeScreen(nav: NavHostController) {
                     Routes.safeNavigate(
                         nav,
                         if (item.rawType == "manga") {
-                            Routes.mangaDetail(item.providerId, item.id, item.title, item.posterUrl)
+                            Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
                         } else {
                             Routes.detail(
                                 item.providerId, item.type, item.id,

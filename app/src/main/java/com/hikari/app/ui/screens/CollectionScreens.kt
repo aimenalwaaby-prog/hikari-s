@@ -4564,10 +4564,32 @@ private fun FolderRowList(
                 onClick = { item ->
                     Routes.safeNavigate(
                         nav,
-                        Routes.detail(
-                            item.providerId, item.type, item.id,
-                            item.title, item.posterUrl, item.rawType
-                        )
+                        // Tracker manga opens in the manga section, searched
+                        // across the installed manga engines — never as video.
+                        if (item.rawType == "manga") {
+                            Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
+                        } else {
+                            Routes.detail(
+                                item.providerId, item.type, item.id,
+                                item.title, item.posterUrl, item.rawType
+                            )
+                        }
+                    )
+                },
+                // Hold-menu play matches Home: video arrives wanting playback
+                // (see DetailScreen autoplay); manga opens in the manga section.
+                onQuickPlay = { item ->
+                    Routes.safeNavigate(
+                        nav,
+                        if (item.rawType == "manga") {
+                            Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
+                        } else {
+                            Routes.detail(
+                                item.providerId, item.type, item.id,
+                                item.title, item.posterUrl, item.rawType,
+                                autoplay = true,
+                            )
+                        }
                     )
                 },
                 // An imported list already puts ALL of its titles in this row,

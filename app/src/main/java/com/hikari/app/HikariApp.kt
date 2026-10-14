@@ -902,6 +902,14 @@ class HikariApp : Application() {
                     providers.refresh()
                 }
             }
+            // SkyStream bundles (one JS, many feeds) installed before feed
+            // rows existed expand into one row per feed here, once.
+            runCatching {
+                if (com.hikari.app.skystream.SkyStreamPluginManager.reconcileBundles(this@HikariApp, store)) {
+                    Logs.log("Providers", "SkyStream sync expanded bundle feeds — refreshing")
+                    providers.refresh()
+                }
+            }
             // Warm the installed Aniyomi extensions here so the first catalog or
             // search tap doesn't pay the class-loading cost on the UI thread.
             runCatching {

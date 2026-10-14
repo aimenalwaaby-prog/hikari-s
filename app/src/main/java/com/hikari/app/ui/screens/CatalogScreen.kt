@@ -777,7 +777,7 @@ fun CatalogScreen(
                             com.hikari.app.tv.TvCinemaCard(item = item, onClick = {
                                 Routes.safeNavigate(
                                     nav,
-                                    if (rawType == "manga") Routes.mangaDetail(item.providerId, item.id, item.title, item.posterUrl)
+                                    if (rawType == "manga") Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
                                     else Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
                                 )
                             })
@@ -785,7 +785,7 @@ fun CatalogScreen(
                             com.hikari.app.tv.TvVerticalCard(item = item, onClick = {
                                 Routes.safeNavigate(
                                     nav,
-                                    if (rawType == "manga") Routes.mangaDetail(item.providerId, item.id, item.title, item.posterUrl)
+                                    if (rawType == "manga") Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
                                     else Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
                                 )
                             })
@@ -798,11 +798,13 @@ fun CatalogScreen(
                             // A manga engine's "catalog" is its Popular/Latest list
                             // and its items are manga, not video: those open the
                             // manga detail page (the provider tags its catalogs with
-                            // rawType "manga" — see MangaProvider.catalogs).
+                            // rawType "manga" — see MangaProvider.catalogs), unless
+                            // they came from a tracker shelf — those are searched
+                            // across the installed manga engines instead.
                             Routes.safeNavigate(
                                 nav,
                                 if (rawType == "manga") {
-                                    Routes.mangaDetail(
+                                    Routes.mangaRoute(
                                         item.providerId, item.id, item.title, item.posterUrl
                                     )
                                 } else {
@@ -820,7 +822,7 @@ fun CatalogScreen(
                             Routes.safeNavigate(
                                 nav,
                                 if (rawType == "manga") {
-                                    Routes.mangaDetail(
+                                    Routes.mangaRoute(
                                         quick.providerId, quick.id, quick.title, quick.posterUrl
                                     )
                                 } else {

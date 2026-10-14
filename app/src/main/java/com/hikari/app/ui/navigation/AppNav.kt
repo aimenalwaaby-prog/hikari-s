@@ -240,6 +240,29 @@ object Routes {
         return "manga-search?q=${Uri.encode(q)}&genre=${Uri.encode(g)}&engine=${Uri.encode(engineId.trim().take(200))}"
     }
 
+    /** Tracker rows that carry manga (AniList / MAL / Kitsu / Shikimori /
+     *  Simkl shelves): their provider ids are virtual sources, not installed
+     *  engines, so a manga from one must be searched across the installed
+     *  manga engines — never opened as video, and never handed to the manga
+     *  detail with a provider id no engine answers for ("This manga engine
+     *  is not installed"). */
+    private val TRACKER_MANGA_SOURCES = setOf(
+        "anilist", "mal", "kitsu", "shikimori", "simkl", "trakt", "tmdb",
+    )
+    fun isTrackerMangaSource(providerId: String): Boolean =
+        providerId.startsWith("tracker|") || providerId in TRACKER_MANGA_SOURCES
+
+    /** The manga route for an item: tracker manga goes to the Manga tab
+     *  search (every installed engine, read from any); engine manga keeps
+     *  its own detail page. */
+    fun mangaRoute(
+        providerId: String,
+        url: String,
+        title: String,
+        posterUrl: String? = null,
+    ): String = if (isTrackerMangaSource(providerId)) mangaSearch(title)
+    else mangaDetail(providerId, url, title, posterUrl)
+
     /** Opens one IPTV playlist's group list. */
     fun iptvPlaylist(providerId: String): String =
         "iptv-playlist?pid=${Uri.encode(providerId)}"
