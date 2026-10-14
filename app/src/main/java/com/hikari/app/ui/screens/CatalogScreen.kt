@@ -1,4 +1,7 @@
 package com.hikari.app.ui.screens
+import com.hikari.app.ui.components.QuickMenuOverlay
+import com.hikari.app.ui.components.quickMenuGesture
+import com.hikari.app.ui.components.rememberQuickMenuState
 import com.hikari.app.tv.TvUi
 import com.hikari.app.i18n.tr
 
@@ -911,7 +914,7 @@ private fun CatalogCard(
     val cinema = style.isCinema(com.hikari.app.tv.TvMode.current())
     val hero = if (cinema) Artwork.heroModel(item) else null
     // 1-second-hold quick menu (info / play / library) — see PosterQuickMenu.
-    val quickMenu = com.hikari.app.ui.components.rememberQuickMenuState()
+    val quickMenu = rememberQuickMenuState()
     val quickScope = rememberCoroutineScope()
     val latestClick by rememberUpdatedState(onClick)
     val latestPlay by rememberUpdatedState(onQuickPlay)
@@ -930,7 +933,7 @@ private fun CatalogCard(
                 .aspectRatio(if (cinema) 16f / 9f else 2f / 3f)
                 .clip(shape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .com.hikari.app.ui.components.quickMenuGesture(quickMenu) { slot ->
+                .quickMenuGesture(quickMenu) { slot ->
                     when (slot) {
                         0 -> latestClick()
                         1 -> {
@@ -992,7 +995,7 @@ private fun CatalogCard(
                         .padding(4.dp),
                 )
             }
-            if (quickMenu.visible) com.hikari.app.ui.components.QuickMenuOverlay(quickMenu.selected)
+            if (quickMenu.visible) QuickMenuOverlay(quickMenu.selected)
         }
         if (style.showTitles) {
             Text(
