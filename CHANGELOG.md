@@ -1,7 +1,67 @@
 ## 0.11.33
 
+Everything new and fixed since the last release (0.11.04) — the builds in between were test builds and never went out:
+
+### Added
+
+- Poster hold menu: hold any poster for 1 second and a glass ring fans out with Details / Play / Library / Close — slide without lifting, release to fire. Play starts instantly on the first server that lands
+- Series start instantly too: hold-play and Resume fire the moment the continue episode (your progress) or the first aired episode is known, with the episode's servers prefetched — no more sitting on the detail page while movies play
+- Correct movie/series tags everywhere: one episode on a site-scraper plays and tags as a movie, two or more as a series — films no longer wear "Series · Ep 1" and open an Episodes page
+- Full-page Sources screen, like the reference client: fullscreen list instead of a small box, provider chips with live counts, engine sections with counts, rectangular cards with red size badge + filename + fact chips (1080p/HEVC/Hindi/MKV), real codec-logo badges (4K, Dolby, HEVC, Blu-ray, DTS) and country flags — all parsed from what the provider states, never invented
+- Servers land in seconds: the first server hands over after ~3s and the rest fill behind (meta providers took ~50s before), search waves run 12-wide with batched paints, and the player waits (bounded) while the title's own extension is still working instead of failing at 30s
+- Manga without end: catalogues and searches never stop early — failed pages hold the cursor with Retry instead of ending the list, every engine is asked at once with answers streaming in, results survive coming back from a detail page, and genre-chip taps run a real tag search with a Tag pill
+- Manga reads right: native Webtoons chapters + pages (no JS needed), Comick across its hosts, Anymex/Mangayomi parity (envelopes, nested chapters, page-shaped keys, polyfills), honest empty instead of the same cover on every page, paid/external chapters opening the publisher page
+- Reader up to 4K: new Ultra (150%) and 4K (200%) tiers (fresh installs start on Ultra), full colour on every tier, bounded sharpening on High/Ultra/4K so upscaled sources read crisp — Low/Medium stay on the fast path
+- Extension settings that actually apply: the settings dialog binds the extension's own store, so saved values (e.g. Comix content rating) reach the extension; any catalogue with its own settings opens them from its 3-dot; Aniyomi searches pass the extension's default filters
+- WebView verification from anywhere: the reader's Verify button opens the site from the chapter/manga URL even when the extension won't load, and search headers carry the globe (single engine opens directly, All offers a picker)
+- Video decoder choice (Settings → Player, plus the player gear): Best/auto, Hardware only, Software only — with one shift-to-Best prompt per server if a forced choice stutters
+- SkyStream parity: 90s extraction budgets, 200 streams/call, protected-stream DRM carried to the player, bundle plugins installing one row per feed, mirror-domain picker as a base-URL override
+- Nuvio same-pipeline: season from the episode's own field (opaque-id taps no longer pin to S1), episode numbers floored at 1, season-less series standing in S1E1
+- AnymeX 1-to-1: movie taps resolve the extension's own first episode for getVideoList, with one bounded owned-credential retry before "no playable sources"
+- Tracker manga where it belongs: tracker manga opens in the Manga tab across every installed manga engine (never "Episodes (0)"), and opened chapters push manga progress to AniList + MyAnimeList with chapter numbers in Sync history
+- IPTV "More from this playlist" rail on channel pages (same group first, 24 max), and Group-by Country that sticks (Groups → Language → Category → Country)
+- Player comfort: opt-in pinch-to-zoom (1x–4x, resets per server), hold-for-speed pill at the top-center, top-icon size slider, PiP close silencing everything, and sheets that hide the controller + top bar and restore exactly what was there
+- Profiles with pictures: gradient tiles or a storage photo through a crop sheet, wrapping tile rows, creation sheet with preview
+- Backup is instant on big sets (wide parallel encode, no cache double-write, live progress) and restores skip identical files with background extension reloads
+- Glass episode UI is ON by default (all three layouts), with Dub/Sub episode pills on posters once episodes are known
+- TV toward the reference client: one-line home header (title + mouse/search/translate/site + provider + profile), Select Provider box with filter + hold-to-multi, Manage Home Screen Feed mixer, cinema-grid default with its own pref, compact hero with instant art, white Play pill + bookmark, ratings + studio plates on TV, Mark Season Watched + Anti-spoiler, tappable full overview, full-bleed/blur-merge art options, floating dark-glass rail and pills
+- TV remote that behaves: cursor-only arrows with OK tapping under the cursor, global repeat guard + tap debounce so a held OK can never walk two screens, repo-folder bounce fixed
+- One icon language: glassy line glyphs on every add-a-source row (Hikari torii, Stremio diamond-play, Vega TV, Aniyomi flower, SkyStream stacked-cloud, Anymex A–Z, CloudStream cloud, Nuvio play triangle) plus theme tiles across Settings/ChoiceRow/TV/cards — the 39 old PNGs (~3.4MB) are gone
+- Repos with real icons (repo iconUrl, owner avatar fallback, letter last), vertical cards with counts, host-aware manga naming ("MangaDot • mangadot"), Vega-Next seeded, torrent pastes normalized with honest hints
+- Network honesty: Terabox shares resolve only via the box API (sekey + sign/timestamp + shareid/uk, wider hosts/shapes, honest-empty with the errno logged — never a fake share-page "server"), Diskwala/MDisk through the site's own signed file API, bare info-hashes magnetized with trackers, Playlist mode refusing torrent-shaped links
+
 ### Fixed
-- Add-a-source icons in the glassy line style: Nuvio wears a solid play triangle and Anymex a line A with its sweeping cut (motifs from the supplied art, drawn as strokes in the tile language) on phone + TV; Hikari torii, Stremio diamond-play, Vega TV, Aniyomi flower, SkyStream stacked-cloud, CloudStream cloud unchanged
+
+- "No playable sources" that plays after a restart: a wedged extension call held the provider gate and every later tap queued behind the corpse — gates are bounded on both lanes, two consecutive no-answers trigger stall recovery (fresh lock, wedged instance evicted, current tap retries on the new runtime)
+- Cold origins answering empty in milliseconds before their runtime comes up: warm pauses + retries, per-pass verdict stamping, full call budgets (Nuvio 60s), final-read retries
+- Silent-fan-out empties (meta providers answering success-with-nothing on poisoned state): one bounded clean-room retry — fresh lock, reloaded plugin (re-runs load/init), evicted title + episode caches, re-resolved episodes, full-budget extraction, cooldown-gated; walls and deserialization failures keep their own paths
+- Stale episode payloads after silent overnight updates (MissingKotlinParameterException on LoadLinksData): episode cache keys stamped with the extension-build epoch, deserialization-shaped failures drop the stale list + cached title, re-resolve fresh and retry once
+- Rotten caches replayed all day: title load cache is 10-minute TTL + capped like the reference app, blank/"[]"/"about:blank" data never reaches a plugin, plugin loadLinks budgets honored (declared in 5s..8min, 2-minute default)
+- Phantom seasons (a season-1-only site painting all 4 seasons, Play sending a foreign id): scraper detail pages show ONLY the origin's own episode list, asked first and alone — TMDB/Stremio/foreign lists can never paint over it, synthetic cache entries evicted
+- Wrong episode/video plays: cross matches gated on season conflict, series taps re-resolve the origin's list at play time and match by season+number (number-only fallback for absolute anime numbering)
+- Detail pages spinning for minutes: header + episodes paint within 3s on whatever answered (extension data when TMDB is slow), TMDB tail bounded, full meta repainting when it lands
+- Signed expiring links 403ing (auth_key/expire hosts): signed-query hosts get the apex Referer like the hotlink set — universally, not one host
+- Sources sheet blank/freezing/lagging (counted servers over an empty list, invisible-until-touch, hide/show cycles, scroll fights): the never-blank invariant — blank paints bypass the coalescer, same-frame recovery, anchor restore after synchronous measure/layout, clamped restores, in-place chip/row syncs, touch + scroll-settle deferring non-blank ticks, coalesced live ticks — the box holds its rows at any depth
+- Thin server rows: uniform details (quality • HDR • codec • audio • size) merged from parsed + provider facts, richer second lines, container/release enrichment
+- Dual-audio second servers: embedded language picker applied to the audio-only player with a loud failure toast; seeks (buttons, gestures, bar, resume, skip) seek both players and never restart from the start; audio/sub picks write to the live player and re-assert until active
+- Downloads: HTTP 429 honors Retry-After with backoff (segment parallelism 6→4), HTTP 428 retries fresh without Range, 547-row chooser coalesced instead of freezing
+- Manga "engine can't return chapters" / "Refresh Chapter List": deeper/wider scans, string-URL + slug/path/endpoint/chapterId shapes, legacy fallbacks, one fresh re-resolved retry, empty answers reporting honestly
+- Manga detail crash on open (duplicate "ch-…" keys): duplicates collapse at store + display, index-disambiguated row keys
+- Extensions uninstalling themselves on failed updates: temp+validate+rename installs, per-source stamps, no ambiguous silent swaps, version-stripped lineage keys so versioned repos converge on Installed/Update, profile snapshots re-saved after provider changes
+- App dying right after launch (PublicSuffixDatabase / applicationContext): OkHttp initialized first in onCreate
+- Terabox errno=105 chain closed: share-page tokens/cookies first, sekey parsed + sent, sign+timestamp extracted and appended, shareid+uk on the list call, reference-exact requests, recursive id scans, canonical-host fallback — then honest-empty
+- IPTV live "Reconnecting…" on dead links: unrecoverable classified, own-playlist rotated link first, then an explicit "search my other playlists?" ask — transients keep backoff re-opens, no silent channel swaps, no double toasts
+- Telegram stall-looping: deeper RAM-only buffer + longer post-rebuffer cushion with prewarm (disk + quality untouched); channel headers show server-side photo/video totals
+- Automatic Cloudflare/promo opens blocked: WebView/browser/custom-tab opens only on the explicit globe tap (manual path kept); extension settings allowed to open windows
+- TV detail doubled (ratings + studios in hero AND page blocks): TV keeps the hero copy single, page keeps status/country/language/votes/release/credits
+- TV pills/cards overflowing, server pills bleeding, rail wrapping, cramped provider box, episode→details crowding, hero/blur seams: clipped outlines, bounded ripples, wrapping rows, breathing gaps, melts to opaque
+- Manga pages refused with no wall in sight: chapter-Referer (+Origin/UA) on page requests, site warm before retries
+- Next-episode stuck on "Loading episode": same-server advance preferred, full pass bounded (~90s) with an honest timeout, label advancing only on adoption
+- Globe "Couldn't determine this extension's site": one universal chain (extension site → manifest/site URL → stashed site → open page host) behind all six buttons
+- TV mouse dead, focus jumps, double activations, repo-tap → Home bounce: covered above under TV remote
+- Torrent gaps: `.tor` recognized as torrent everywhere, pasted links normalized, bare hashes named "Torrent · <hash>"
+- Backup/restore failures: lazy streaming, finite-double guard, rename fallback, logged reasons
+- Locked profiles: password asked on every selection (one-time gates re-lock), locked switch targets refused, launch picker-first, profile catalogues never leaking across switches, movies/series never typed off a single signal
 
 ## 0.11.32 (continuous build only)
 
