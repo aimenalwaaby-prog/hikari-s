@@ -1,3 +1,9 @@
+## 0.11.27 (continuous build only)
+
+### Fixed
+- Server sheet scroll lag while servers load in the background: every background batch re-measured the whole list and restored scrollY on a 350ms tick, fighting the finger and dropping frames. The sheet now tracks touch (observed, never consumed) and scroll-settle (via the ViewTreeObserver, so the panel's own glass re-bend listener is untouched): non-blank ticks under the finger defer to one trailing settle paint, paints under the finger skip the synchronous measure and never call scrollTo, and blank states still paint immediately (never-blank invariant kept)
+- Glassy 3D icons everywhere they were still flat: all Settings detail rows (ChoiceRow leading glyphs) now wear the deterministic-disc + white-glyph badge; extension inner rows converted to the same glass language — repo cards (gradient tile + hairline, real icon fills the tile, letter fallback in white), webview-sites folder (badge full-bleed, flat tile behind it removed), individual webview sites (glass tile + white globe), install/action fallback tiles, and the TV extensions-installed header (badge artwork instead of a flat tint)
+
 ## 0.11.26 (continuous build only)
 
 ### Fixed

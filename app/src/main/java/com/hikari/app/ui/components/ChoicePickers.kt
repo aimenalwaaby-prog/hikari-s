@@ -365,10 +365,12 @@ fun ChoiceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leadingIcon != null) {
-            Icon(
-                leadingIcon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+            // Glassy 3D badge (settings subfolder language): deterministic disc +
+            // white glyph instead of a flat tinted vector.
+            SettingsColorBadge(
+                icon = leadingIcon,
+                key = value,
+                size = 34.dp,
             )
         } else if (!leadingText.isNullOrBlank()) {
             Text(leadingText, style = MaterialTheme.typography.titleMedium)

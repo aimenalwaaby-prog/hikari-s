@@ -8070,6 +8070,19 @@ class PlayerActivity : ComponentActivity() {
         list.requestLayout()
         // Signature of the last paint that actually rebuilt: a paint whose
         // inputs match it has nothing to show that is not already on screen.
+        // Scroll-lag guard (servers landing in the background while the user
+        // scrolls): a paint re-measures the whole list and restores scrollY on
+        // every tick, which fights the finger and drops frames. While the user
+        // touches or the scroll is still settling, non-blank ticks defer to a
+        // trailing settle paint and no paint ever calls scrollTo. Blank states
+        // still paint immediately (never-blank invariant). The listeners are
+        // attached after the panel is presented (see the end of this function):
+        // the scroll signal goes through the ViewTreeObserver so the panel's
+        // own scroll listener (glass re-bend) is never replaced.
+        var chooserTouching = false
+        var chooserScrolling = false
+        var chooserScrollSettleToken = 0
+        var chooserScrollListener: ViewTreeObserver.OnScrollChangedListener? = null
         var lastPaintSig = ""
         fun paintChooser() {
             // Settle the live loop: during an active search every watcher tick
@@ -8107,6 +8120,10 @@ class PlayerActivity : ComponentActivity() {
                 content != null && content.bottom - (v.scrollY + v.height) <= nearBottomPx
             } ?: false)
             val keepX = chipScroll.scrollX
+            // Finger-down state for this paint (see the guard above): when true
+            // this paint rebuilds without a synchronous measure and never
+            // restores scroll — the settle paint after the finger lifts does.
+            val interacting = chooserTouching || chooserScrolling
             // Content anchor: the first visible row below the chip strip and
             // its offset from the viewport top. Raw pixel offsets go stale the
             // moment rows land (a server above shifts everything; a collapsed
@@ -8150,8 +8167,11 @@ class PlayerActivity : ComponentActivity() {
             // until a touch, and scrollY clamped to 0 = "jumped to top").
             // The list is the ScrollView's child: full viewport width,
             // unconstrained height — exactly what the scroller would measure.
+            // Under the finger this synchronous pass is skipped (it is the
+            // frame-drop itself): an async traversal covers it and the settle
+            // paint re-syncs.
             var laidOut = false
-            if (sv != null && sv.width > 0) {
+            if (!interacting && sv != null && sv.width > 0) {
                 runCatching {
                     list.measure(
                         View.MeasureSpec.makeMeasureSpec(sv.width, View.MeasureSpec.EXACTLY),
@@ -8224,8 +8244,9 @@ class PlayerActivity : ComponentActivity() {
             // clamped to the height just laid out — a restore past the
             // content shows an empty viewport (the blank box over counted
             // servers), and blind Int.MAX_VALUE / stale keepY trusts the
-            // device to clamp for us.
-            if (dialog.isShowing && sv != null) {
+            // device to clamp for us. Skipped entirely under the finger (see
+            // the guard above): restoring scrollY mid-drag is the yank.
+            if (dialog.isShowing && sv != null && !interacting) {
                 val contentH = (if (sv.childCount > 0) sv.getChildAt(0) else null)?.height ?: 0
                 val maxY = maxOf(contentH, if (laidOut) list.measuredHeight else 0)
                     .minus(sv.height).coerceAtLeast(0)
@@ -8276,9 +8297,24 @@ class PlayerActivity : ComponentActivity() {
             // holds (a mid-list collapse has >1 children yet shows nothing —
             // the reported bottom-append blank).
             val onScreenNow = (list.childCount - 1).coerceAtLeast(0)
-            if (list.childCount <= 1 || (sources.isNotEmpty() && onScreenNow == 0)) {
+            val interactingNow = chooserTouching || chooserScrolling
+            val blankNow = list.childCount <= 1 || (sources.isNotEmpty() && onScreenNow == 0)
+            if (blankNow) {
                 lastChooserPaintMs = now
                 if (dialog.isShowing) paintChooser()
+            } else if (interactingNow) {
+                // Finger down: never paint under it — queue one settle paint
+                // instead (blank states still paint now above). The paint itself
+                // is also yank-free (no scrollTo, async layout) if a queued
+                // pass still lands mid-touch.
+                if (!chooserTrailingQueued) {
+                    chooserTrailingQueued = true
+                    list.postDelayed({
+                        chooserTrailingQueued = false
+                        lastChooserPaintMs = android.os.SystemClock.uptimeMillis()
+                        if (dialog.isShowing) paintChooser()
+                    }, 600)
+                }
             } else if (now - lastChooserPaintMs < 350) {
                 if (!chooserTrailingQueued) {
                     chooserTrailingQueued = true
@@ -8299,6 +8335,8 @@ class PlayerActivity : ComponentActivity() {
         dialog.setOnDismissListener {
             hintTicker?.cancel()
             sourcesWatchers.remove(watcher)
+            chooserScrollListener?.let { runCatching { verticalScrollerOf(list)?.viewTreeObserver?.removeOnScrollChangedListener(it) } }
+            chooserScrollListener = null
             if (serverChooserDialog === dialog) serverChooserDialog = null
             // Closed without a pick (the back button, the ✕, a tap outside):
             // fall back to the remembered/best server rather than leaving the
@@ -8436,6 +8474,36 @@ class PlayerActivity : ComponentActivity() {
                     delay(1500)
                 }
             }
+        }
+        // Scroll-lag wiring for the guard above: the scroller only exists once
+        // the panel is presented, so the listeners attach here. Touch is observed
+        // (never consumed) and scroll through the ViewTreeObserver — the panel's
+        // own scroll listener (glass re-bend) is left exactly as it is.
+        runCatching {
+            val sv0 = verticalScrollerOf(list)
+            sv0?.setOnTouchListener { _, ev ->
+                when (ev.actionMasked) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> chooserTouching = true
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        chooserTouching = false
+                        list.post { if (dialog.isShowing) requestPaint() }
+                    }
+                }
+                false
+            }
+            val scrollListener = ViewTreeObserver.OnScrollChangedListener {
+                if (!dialog.isShowing) return@OnScrollChangedListener
+                chooserScrolling = true
+                val token = ++chooserScrollSettleToken
+                list.postDelayed({
+                    if (token == chooserScrollSettleToken) {
+                        chooserScrolling = false
+                        if (dialog.isShowing) requestPaint()
+                    }
+                }, 350)
+            }
+            chooserScrollListener = scrollListener
+            sv0?.viewTreeObserver?.addOnScrollChangedListener(scrollListener)
         }
     }
 

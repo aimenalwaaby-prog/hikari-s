@@ -4869,19 +4869,26 @@ private fun SourceActionRow(
                     .size(38.dp)
                     .clip(CircleShape)
             )
-        } else Box(
-            Modifier
-                .size(38.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
+        } else {
+            // Glass tile in the provider-card language (gradient + hairline +
+            // white glyph) instead of a flat square.
+            val glassFb = rememberGlassTokens()
+            val fbShape = RoundedCornerShape(12.dp)
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(fbShape)
+                    .background(Brush.verticalGradient(listOf(glassFb.fillTop, glassFb.fillBottom)))
+                    .border(1.dp, glassFb.border, fbShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -5288,20 +5295,15 @@ private fun RepoBrowserView(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        Modifier
+                    // The installed-extensions badge artwork (glassy 3D, like every
+                    // other extension row) instead of a flat tint tile.
+                    Image(
+                        painterResource(R.drawable.ic_ext_installed_ext),
+                        contentDescription = null,
+                        modifier = Modifier
                             .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Filled.Extension,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                            .clip(CircleShape)
+                    )
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -7960,14 +7962,16 @@ private fun RepoCard(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+            // Glass tile in the provider-card language (gradient + hairline); the
+            // repo's real icon fills it, the letter fallback wears white.
+            val repoGlass = rememberGlassTokens()
+            val repoTile = RoundedCornerShape(if (com.hikari.app.tv.TvMode.current()) 16.dp else 10.dp)
             Box(
                 Modifier
                     .size(if (com.hikari.app.tv.TvMode.current()) 52.dp else 40.dp)
-                    .clip(RoundedCornerShape(if (com.hikari.app.tv.TvMode.current()) 16.dp else 10.dp))
-                    .background(
-                        if (com.hikari.app.tv.TvMode.current()) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    ),
+                    .clip(repoTile)
+                    .background(Brush.verticalGradient(listOf(repoGlass.fillTop, repoGlass.fillBottom)))
+                    .border(1.dp, repoGlass.border, repoTile),
                 contentAlignment = Alignment.Center
             ) {
                 // The repo's real icon (its repo.json iconUrl, else the GitHub
@@ -7977,14 +7981,14 @@ private fun RepoCard(
                 if (avatar != null) {
                     ExtensionIcon(
                         url = avatar,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().clip(repoTile),
                     )
                 } else {
                     Text(
                         repo.name.trim().firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "•",
                         style = if (com.hikari.app.tv.TvMode.current()) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = Color.White,
                         maxLines = 1,
                     )
                 }
@@ -8540,19 +8544,13 @@ private fun SitesFolder(
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painterResource(R.drawable.ic_ext_webview_sites),
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp).clip(CircleShape)
-                    )
-                }
+                // The badge artwork is already a finished glassy circle: draw it
+                // full-bleed with no flat tile behind it.
+                Image(
+                    painterResource(R.drawable.ic_ext_webview_sites),
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp).clip(CircleShape)
+                )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -8619,17 +8617,22 @@ private fun SiteRow(
                 .tvPress(previewPass = false, onClick = onOpen),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Glass tile in the provider-card language (gradient + hairline +
+            // white glyph) instead of a flat square.
+            val siteGlass = rememberGlassTokens()
+            val siteTile = RoundedCornerShape(10.dp)
             Box(
                 Modifier
                     .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .clip(siteTile)
+                    .background(Brush.verticalGradient(listOf(siteGlass.fillTop, siteGlass.fillBottom)))
+                    .border(1.dp, siteGlass.border, siteTile),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Filled.Public,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
             }
