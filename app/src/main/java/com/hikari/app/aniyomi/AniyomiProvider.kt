@@ -181,11 +181,11 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         val src = source() ?: return null
         val http = src as? AnimeHttpSource ?: return null
         ensureHttpServer(http)
+        // Stored keys are providerId + url + hoster + title (same embed URL
+        // can sit under several hosters) — the tap matches by its URL prefix.
         val prefix = playKey(url) + "\n"
-        val entry = playCache[prefix.trimEnd('\n')]
-            ?: playCache.entries.firstOrNull { it.key.startsWith(prefix) }
-            ?: return null
-        val (hosterName, cached) = entry.value
+        val hit = playCache.entries.firstOrNull { it.key.startsWith(prefix) } ?: return null
+        val (hosterName, cached) = hit.value
         var video = cached
         if (!video.initialized) {
             val resolved = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
@@ -203,7 +203,7 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         }
         video = rewriteLocal(video)
         if (video.videoUrl.isBlank() || isUnresolved(video.videoUrl)) return null
-        playCache[entry.key] = hosterName to
+        playCache[hit.key] = hosterName to
             runCatching { video.copy(initialized = true) }.getOrDefault(video)
         return toStreamSource(src, hosterName, video)
     }
