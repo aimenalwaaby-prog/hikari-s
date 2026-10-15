@@ -365,9 +365,9 @@ fun ChoiceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leadingIcon != null) {
-            // Glassy 3D badge (settings subfolder language): deterministic disc +
-            // white glyph instead of a flat tinted vector.
-            SettingsColorBadge(
+            // Theme tile (accent wash + hairline + accent glyph): the same tile
+            // the folders and extension rows wear — one icon language.
+            SettingsThemeTile(
                 icon = leadingIcon,
                 key = value,
                 size = 34.dp,

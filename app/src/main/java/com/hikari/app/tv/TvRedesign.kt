@@ -3,7 +3,6 @@ package com.hikari.app.tv
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -37,8 +35,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
-import com.hikari.app.R
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,15 +44,18 @@ import coil.compose.AsyncImage
 import com.hikari.app.data.MediaItem
 import com.hikari.app.i18n.tr
 import com.hikari.app.ui.Artwork
+import com.hikari.app.ui.components.SettingsThemeTile
 import kotlinx.coroutines.launch
 
 @Composable
+@Suppress("UNUSED_PARAMETER")
 fun TvSettingsSourceCard(
   icon: ImageVector,
   title: String,
   subtitle: String,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
+  // Kept for call-site compatibility; the tile is always theme-drawn now.
   iconRes: Int? = null,
 ) {
   Surface(
@@ -73,21 +72,7 @@ fun TvSettingsSourceCard(
       Modifier.fillMaxWidth().padding(16.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      if (iconRes != null) {
-        // The engine's own round badge artwork: already a finished circle,
-        // drawn full-bleed with no tint (tinting would flatten the artwork).
-        Image(
-          painterResource(iconRes),
-          contentDescription = null,
-          modifier = Modifier.size(52.dp).clip(CircleShape),
-        )
-      } else Box(
-        Modifier.size(52.dp).clip(RoundedCornerShape(16.dp))
-          .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
-        contentAlignment = Alignment.Center,
-      ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-      }
+      SettingsThemeTile(icon, title, 52.dp)
       Spacer(Modifier.width(14.dp))
       Column(Modifier.weight(1f)) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)

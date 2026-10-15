@@ -1,7 +1,5 @@
 package com.hikari.app.ui.components
 
-import androidx.annotation.DrawableRes
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,7 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -88,28 +85,6 @@ fun SettingsIconBadge(icon: ImageVector, size: Dp = 46.dp) {
 }
 
 /**
- * The same round badge, but for one of the app's own round icon artworks
- * (see res/drawable-nodpi/ic_set_*): the artwork is already a finished circle
- * with its own rim, so it is drawn full-bleed with no tint and no wash behind
- * it — tinting it would repaint the whole painting one flat colour.
- */
-@Composable
-fun SettingsIconBadgeRes(@DrawableRes resId: Int, size: Dp = 46.dp) {
-    Box(
-        Modifier
-            .size(size)
-            .clip(CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Image(
-            painterResource(resId),
-            contentDescription = null,
-            modifier = Modifier.size(size),
-        )
-    }
-}
-
-/**
  * A self-made colourful badge in the folder-badge language (navy ring,
  * saturated disc, white glyph): for every inner settings row that has no
  * supplied artwork. The disc colour is picked deterministically from [key]
@@ -132,6 +107,40 @@ fun SettingsColorBadge(icon: ImageVector, key: String, size: Dp = 46.dp) {
             contentDescription = null,
             tint = androidx.compose.ui.graphics.Color.White,
             modifier = Modifier.size(size * 0.46f),
+        )
+    }
+}
+
+/**
+ * The glyph tile every settings/extension row leads with: a rounded square in
+ * the reference language (dark tile, centred glyph) drawn from the ACTIVE
+ * theme — accent wash fill, accent hairline, accent glyph — so it follows the
+ * user's selected accent colour instead of fixed artwork. No picture icons.
+ * Brand-letter keys (TMDB/MDBList) keep their drawn letter tiles; everything
+ * else is the theme tile. [key] is the folder key, section id or row title.
+ */
+@Composable
+fun SettingsThemeTile(icon: ImageVector, key: String = "", size: Dp = 44.dp) {
+    val spec = if (key.isNotBlank()) brandSpecFor(key) else null
+    if (spec?.letters != null) {
+        SettingsBrandBadge(key, icon, size)
+        return
+    }
+    val accent = MaterialTheme.colorScheme.primary
+    val tile = RoundedCornerShape(size * 0.28f)
+    Box(
+        Modifier
+            .size(size)
+            .clip(tile)
+            .background(accent.copy(alpha = 0.16f))
+            .border(1.dp, accent.copy(alpha = 0.38f), tile),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(size * 0.52f),
         )
     }
 }
@@ -273,7 +282,7 @@ private fun SettingsBackButton(onBack: () -> Unit) {
 
 /**
  * The header of a page inside Settings — ONE line: the back button, an optional
- * icon badge, then the page's name with its one-line summary under the name.
+ * theme tile, then the page's name with its one-line summary under the name.
  * A folder page leads with the folder's own icon, so it starts with the same
  * "icon, then what it is called" shape as the row that opened it; the pages that
  * are not folders (Logs, the player-control editor) pass no icon and simply hand
@@ -297,7 +306,6 @@ fun SettingsPageHeader(
     subtitle: String,
     onBack: () -> Unit,
     icon: ImageVector? = null,
-    @DrawableRes iconRes: Int? = null,
     breadcrumb: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -319,12 +327,9 @@ fun SettingsPageHeader(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             SettingsBackButton(onBack)
-            if (iconRes != null) {
+            if (icon != null) {
                 Spacer(Modifier.width(8.dp))
-                SettingsIconBadgeRes(iconRes, 40.dp)
-            } else if (icon != null) {
-                Spacer(Modifier.width(8.dp))
-                SettingsIconBadge(icon, 40.dp)
+                SettingsThemeTile(icon, title, 40.dp)
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {

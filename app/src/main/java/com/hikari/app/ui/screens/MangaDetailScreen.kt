@@ -252,7 +252,12 @@ fun MangaDetailScreen(
     }
 
     val shown = remember(chapters, newestFirst) {
-        if (newestFirst) chapters.asReversed() else chapters
+        val ordered = if (newestFirst) chapters.asReversed() else chapters
+        // Belt-and-braces with MangaStore.putChapters (which now collapses
+        // duplicates): lists already persisted to disk by older builds can
+        // still carry the same URL twice, and that crashes the keyed list
+        // below — so collapse again here before it ever reaches items().
+        ordered.distinctBy { it.url }
     }
 
     // A Box, not a plain Column, purely so the verification nudge can float over
@@ -420,7 +425,8 @@ fun MangaDetailScreen(
                         Modifier.padding(top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(genres, key = { "g-" + it }) { g ->
+                        items(genres.size, key = { i -> "g-" + genres[i] + "#" + i }) { i ->
+                            val g = genres[i]
                             // A tag is a search, not a decoration. Two scopes are
                             // offered because both are wanted and only the user
                             // knows which: the tag belongs to THIS site's
@@ -500,7 +506,8 @@ fun MangaDetailScreen(
                 }
             }
 
-            items(shown, key = { "ch-" + it.url }) { chapter ->
+            items(shown.size, key = { i -> "ch-" + shown[i].url + "#" + i }) { i ->
+                val chapter = shown[i]
                 ChapterRow(
                     chapter = chapter,
                     isCurrent = progress?.chapterUrl == chapter.url,

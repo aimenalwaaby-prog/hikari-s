@@ -162,6 +162,9 @@ fun IptvScreen(nav: NavHostController) {
 
     fun addNow(playAfter: Boolean = false) {
         val link = addLink.trim()
+        // Re-derived through the same normalization the save uses, so a pasted
+        // bare info hash (saved magnetized) is found after Add saves it.
+        val normalized = NetworkStream.normalizePastedLink(link)
         val local = addFilePath.takeIf { it.isNotBlank() }
         val name = addName
         val wasStream = addStream
@@ -448,7 +451,7 @@ fun IptvScreen(nav: NavHostController) {
                     Text(
                         if (addTorrent) {
                             tr(
-                                "Paste a magnet link or .torrent URL. Add saves it for later; " +
+                                "Paste a magnet link, a .torrent URL, or a bare info hash. Add saves it for later; " +
                                     "Play starts it now through the torrent engine."
                             )
                         } else if (addStream) {

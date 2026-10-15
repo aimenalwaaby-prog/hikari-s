@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,6 +91,7 @@ import com.hikari.app.ui.rememberPosterScore
 import com.hikari.app.ui.rememberPosterStyle
 import com.hikari.app.ui.components.EmptyState
 import com.hikari.app.ui.components.GlassSearchField
+import com.hikari.app.ui.components.ProviderSettingsDialog
 import com.hikari.app.ui.components.VerificationNudge
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.ui.rememberVisibleItems
@@ -629,6 +631,31 @@ fun CatalogScreen(
                 Icon(Icons.Filled.ArrowBack, contentDescription = tr("Back"))
             }
             Spacer(Modifier.weight(1f))
+            // The extension's own settings, where the catalogue comes from:
+            // the same schema-driven dialog the Extensions screen opens —
+            // only offered for formats that declare settings of their own.
+            val settingsProvider = remember(providerId) { hikari.providers.byId(providerId) }
+            val settingsType = settingsProvider?.config?.type
+            if (settingsType == ProviderType.NUVIO || settingsType == ProviderType.VEGA ||
+                settingsType == ProviderType.ANIYOMI || settingsType == ProviderType.MANGA ||
+                settingsType == ProviderType.ANYMEX || settingsType == ProviderType.ANYMEX_MANGA ||
+                settingsType == ProviderType.SORA || settingsType == ProviderType.SKYSTREAM
+            ) {
+                var showProviderSettings by remember { mutableStateOf(false) }
+                IconButton(onClick = { showProviderSettings = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = tr("Extension settings"),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (showProviderSettings && settingsProvider != null) {
+                    ProviderSettingsDialog(
+                        provider = settingsProvider,
+                        onDismiss = { showProviderSettings = false },
+                    )
+                }
+            }
             // The Cloudflare-verification WebView. A manga site behind a bot wall
             // answers every request — including the extension's own — with a
             // challenge until a browser has passed it, and no extension can open

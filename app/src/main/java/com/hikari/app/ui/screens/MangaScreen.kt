@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.hikari.app.HikariApp
-import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderConfig
 import com.hikari.app.i18n.I18n
@@ -81,6 +80,7 @@ import com.hikari.app.ui.components.GlassSearchField
 import com.hikari.app.ui.navigation.LocalTaskbarInset
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.ui.rememberVisibleItems
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -176,16 +176,73 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
     var engineFilter by rememberSaveable { mutableStateOf("") }
     // Shown when "Clear all" is tapped on the reading history.
     var confirmClearReading by remember { mutableStateOf(false) }
-    var results by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var searching by remember { mutableStateOf(false) }
+    // Search rows live in the view-model, not in `remember`: opening a title
+    // leaves this composition, and coming back must find the rows still there
+    // (the search effect below skips re-asking when its key is unchanged).
+    val searchVm: MangaSearchViewModel = viewModel()
+    var results by searchVm::results
+    var searching by searchVm::searching
     // Engines that have not answered the current query yet — the grid fills
     // per answer (see below) and this counts the stragglers for the footer.
-    var enginesLeft by remember { mutableStateOf(0) }
+    var enginesLeft by searchVm::enginesLeft
 
     val scope = rememberCoroutineScope()
     val typed = query.trim()
     // Blank here means a plain keyword search, exactly as before.
     val genreTag = genre.trim()
+
+    // The engines this question asks ("" = every installed manga engine).
+    val searchTargets = remember(engines, enginePick) {
+        engines.filter { enginePick.isBlank() || it.config.id == enginePick }
+    }
+    // One key per question asked: coming back from a detail page re-enters
+    // this composition, and the same key with rows already in hand means the
+    // answer is still on screen — no re-search.
+    val searchKey = typed + "\n" + genreTag + "\n" + enginePick + "\n" + engineKey
+
+    // Page 2+ of the same question, per engine, appended under the page-1
+    // rows when the reader reaches the end (see the load-more footer below).
+    // An engine that answers a page empty has no more pages and is skipped.
+    fun loadMore() {
+        val tag = genreTag
+        val targets = searchTargets.filter { searchVm.pagesDone[it.config.id] != true }
+        if (targets.isEmpty() || searchVm.loadingMore || searching) return
+        searchVm.loadingMore = true
+        scope.launch {
+            try {
+                coroutineScope {
+                    targets.forEach { p ->
+                        launch {
+                            try {
+                                val page = searchVm.nextPage[p.config.id] ?: 2
+                                val keyword = typed.ifBlank { tag }
+                                val found = withTimeoutOrNull(25_000L) {
+                                    runCatching {
+                                        if (tag.isNotBlank()) {
+                                            (p as? com.hikari.app.manga.MangaProvider)?.searchByGenre(tag, page)
+                                                ?: p.search(keyword, page)
+                                        } else p.search(typed, page)
+                                    }.getOrDefault(emptyList())
+                                } ?: emptyList()
+                                val kept = if (tag.isNotBlank()) found.filter { genreMatches(it.genres, tag) }
+                                else found
+                                if (kept.isEmpty()) {
+                                    searchVm.pagesDone[p.config.id] = true
+                                } else {
+                                    results = (results + kept).distinctBy { it.uniqueId }
+                                    searchVm.nextPage[p.config.id] = page + 1
+                                }
+                            } catch (_: Exception) {
+                                searchVm.pagesDone[p.config.id] = true
+                            }
+                        }
+                    }
+                }
+            } finally {
+                searchVm.loadingMore = false
+            }
+        }
+    }
 
     // Debounced cross-engine search. Runs on the text itself rather than on a
     // keyboard action because the field is a plain BasicTextField (the app's
@@ -197,15 +254,21 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
             searching = false
             return@LaunchedEffect
         }
+        // Back from a detail page with the same question: the rows survived
+        // in the view-model — keep them instead of asking every engine again.
+        if (searchKey == searchVm.lastKey && results.isNotEmpty()) return@LaunchedEffect
         delay(450)
-        val targets = engines.filter { enginePick.isBlank() || it.config.id == enginePick }
+        val targets = searchTargets
         if (targets.isEmpty()) {
             results = emptyList()
             searching = false
             return@LaunchedEffect
         }
+        searchVm.lastKey = searchKey
         searching = true
         results = emptyList()
+        searchVm.nextPage.clear()
+        searchVm.pagesDone.clear()
         // Every engine at once — each one is a separate site and they answer in
         // parallel; the app's own gate keeps a big install from flooding the
         // network (see ProviderGate). One engine throwing must not empty the
@@ -241,6 +304,9 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                         else found
                         if (kept.isNotEmpty()) {
                             results = (results + kept).distinctBy { it.uniqueId }
+                            searchVm.nextPage[p.config.id] = 2
+                        } else {
+                            searchVm.pagesDone[p.config.id] = true
                         }
                     } finally {
                         // A restarted query cancels these children: their
@@ -427,6 +493,37 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                    }
+                }
+                // Page 2+ lives behind this footer: reaching the end of the
+                // page-1 rows asks every engine with pages left for its next
+                // page, one page per engine per pass — the answers stream in
+                // the same way page 1 did, so paging never ends at page 1.
+                val queryActive = typed.isNotBlank() || genreTag.isNotBlank()
+                val moreLeft = searchTargets.any { searchVm.pagesDone[it.config.id] != true }
+                if (queryActive && !searching && moreLeft) {
+                    item(key = "manga-load-more", span = { GridItemSpan(maxLineSpan) }) {
+                        LaunchedEffect(visibleResults.size) {
+                            if (!searchVm.loadingMore) loadMore()
+                        }
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (searchVm.loadingMore) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            TextButton(onClick = { loadMore() }) {
+                                Text(
+                                    if (searchVm.loadingMore) tr("Loading more…") else tr("Load more"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
                         }
                     }
                 }

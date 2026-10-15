@@ -1225,6 +1225,13 @@ class PlayerActivity : ComponentActivity() {
     private var externalPlayerRow = true
     /** Size of icon-only player controls, in dp. */
     private var iconOnlySizeDp = 24
+    /** Size of the player TOP-bar pills (favourite, download, PiP, options,
+     *  lock), in dp — its own slider above the bottom icon size. */
+    private var topIconSizeDp = 24
+    /** The top-bar pills, sized by [topIconSizeDp] instead of [iconOnlySizeDp]. */
+    private val topPillIds = setOf(
+        R.id.fav_btn, R.id.download_btn, R.id.pip_btn, R.id.options_btn, R.id.lock_btn
+    )
     /** Large left-side TV panels are opt-in from Settings → Player. */
     private var tvPanelsEnabled = false
     private val originalPillLabels = HashMap<Int, CharSequence>()
@@ -2117,6 +2124,9 @@ class PlayerActivity : ComponentActivity() {
             }.getOrDefault(false)
             iconOnlySizeDp = runCatching {
                 (applicationContext as HikariApp).store.playerIconSize()
+            }.getOrDefault(24).coerceIn(20, 44)
+            topIconSizeDp = runCatching {
+                (applicationContext as HikariApp).store.playerTopIconSize()
             }.getOrDefault(24).coerceIn(20, 44)
             applyControlLabels()
         }
@@ -3158,8 +3168,11 @@ class PlayerActivity : ComponentActivity() {
     private fun applyControlLabels() {
         val density = resources.displayMetrics.density
         val iconPx = (iconOnlySizeDp * density).roundToInt().coerceAtLeast(1)
-        fun sized(drawable: Drawable?): Drawable? =
-            drawable?.mutate()?.apply { setBounds(0, 0, iconPx, iconPx) }
+        val topPx = (topIconSizeDp * density).roundToInt().coerceAtLeast(1)
+        fun sizedTop(id: Int, drawable: Drawable?): Drawable? {
+            val px = if (id in topPillIds) topPx else iconPx
+            return drawable?.mutate()?.apply { setBounds(0, 0, px, px) }
+        }
         fun intrinsic(drawable: Drawable?): Drawable? =
             drawable?.mutate()?.apply {
                 setBounds(0, 0, intrinsicWidth.coerceAtLeast(1), intrinsicHeight.coerceAtLeast(1))
@@ -3171,9 +3184,9 @@ class PlayerActivity : ComponentActivity() {
             if (iconOnlyControls) {
                 v.text = ""
                 v.setCompoundDrawablesRelative(
-                    sized(drawables[0]), sized(drawables[1]),
-                    if (id == R.id.speed_btn) null else sized(drawables[2]),
-                    sized(drawables[3]),
+                    sizedTop(id, drawables[0]), sizedTop(id, drawables[1]),
+                    if (id == R.id.speed_btn) null else sizedTop(id, drawables[2]),
+                    sizedTop(id, drawables[3]),
                 )
                 v.compoundDrawablePadding = 0
                 val side = (7f * density).roundToInt()

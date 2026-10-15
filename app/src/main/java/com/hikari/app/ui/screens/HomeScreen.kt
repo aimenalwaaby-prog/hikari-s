@@ -2830,22 +2830,19 @@ internal fun webUrlRootOf(raw: String?): String? =
     }
 
 /**
- * The universal site chain for the globe/WebView button: the site derived
- * from the extension first (it knows its mirrors), then any site the install
- * itself carries (a manifest URL in the config, or a site stashed in extra),
- * then the host of a page already open on that site (a manga/chapter URL).
+ * The universal site chain for the globe/WebView button: the page the user is
+ * already on first (a detail/chapter URL — a Cloudflare wall can only be
+ * passed on the page that raises it), then the site derived from the
+ * extension (it knows its mirrors), then any site the install itself carries
+ * (a manifest URL in the config, or a site stashed in extra).
  * The button opens the first answer instead of the "Couldn't determine"
  * toast; the toast stays only when every link in the chain is empty.
  */
 internal fun webUrlChain(p: ContentProvider, itemUrl: String? = null): String? {
+    itemUrl?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let { return it }
     runCatching { webUrlFor(p) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
     webUrlRootOf(p.config.url)?.let { return it }
     webUrlRootOf(p.config.extra)?.let { return it }
-    val u = itemUrl?.trim().orEmpty()
-    if (u.startsWith("http://") || u.startsWith("https://")) {
-        val host = runCatching { java.net.URI(u).host?.lowercase() }.getOrNull()
-        if (!host.isNullOrBlank() && host.contains(".")) return "https://$host/"
-    }
     return null
 }
 

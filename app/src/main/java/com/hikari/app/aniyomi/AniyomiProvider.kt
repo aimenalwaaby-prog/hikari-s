@@ -220,7 +220,13 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
     override suspend fun search(query: String, page: Int): List<MediaItem> = gate {
         if (query.isBlank() || page < 1) return@gate emptyList()
         val src = source() ?: return@gate failCatalog(missingReason())
-        val result = runCatching { src.getSearchAnime(page, query, AnimeFilterList()) }
+        // The extension's own default filters, not an empty list: gates the
+        // extension ships as defaults (Comix-style content-rating filters and
+        // kin) are honoured the way the extension's own search does it.
+        // MangaProvider already searches this way (see its getFilterList
+        // calls); an empty AnimeFilterList silently dropped those gates.
+        val filters = runCatching { src.getFilterList() }.getOrDefault(AnimeFilterList())
+        val result = runCatching { src.getSearchAnime(page, query, filters) }
         val pageData = result.getOrElse {
             val why = reason(it)
             catalogErrors[config.id] = "Search failed: $why"

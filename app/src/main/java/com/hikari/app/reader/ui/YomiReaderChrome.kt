@@ -1858,7 +1858,8 @@ private fun ChapterListSheet(
                 .fillMaxWidth()
                 .heightIn(max = 460.dp),
         ) {
-            items(chapters, key = { it.id }) { ch ->
+            items(chapters.size, key = { i -> chapters[i].id.toString() + "#" + i }) { i ->
+                val ch = chapters[i]
                 val active = ch.id == activeChapterId
                 Row(
                     modifier = Modifier

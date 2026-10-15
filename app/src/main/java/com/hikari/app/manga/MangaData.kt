@@ -215,10 +215,15 @@ object MangaStore {
     }
 
     fun putChapters(mangaKey: String, list: List<MangaChapter>) {
-        chapters[mangaKey] = list
+        // Engines sometimes return the same chapter twice (scanlator copies /
+        // paged-list overlaps — e.g. manhuatop chapter-48 "?style=list" twice).
+        // A duplicated URL crashes every Lazy list keyed by URL, so collapse
+        // here: every screen reads this same cached list.
+        val clean = list.distinctBy { it.url }
+        chapters[mangaKey] = clean
         runCatching {
             val arr = JSONArray()
-            list.forEach { arr.put(jsonOf(it)) }
+            clean.forEach { arr.put(jsonOf(it)) }
             chaptersFile(ctx(), mangaKey).writeText(arr.toString())
         }
         ping()

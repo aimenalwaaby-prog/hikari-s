@@ -386,6 +386,7 @@ class AppStore(private val ctx: Context) {
         val PLAYER_AUTOPLAY = booleanPreferencesKey("playerAutoplayNext")
         /** Size of player icons when the text labels are hidden, in dp. */
         val PLAYER_ICON_SIZE = intPreferencesKey("playerIconSize")
+        val PLAYER_TOP_ICON_SIZE = intPreferencesKey("playerTopIconSize")
         /** Use the large left-side TV menu for player panels. */
         val PLAYER_TV_PANELS = booleanPreferencesKey("playerTvPanels")
         /** Size of TV episode rows/cards as a percentage of the default size. */
@@ -3602,6 +3603,19 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun setPlayerIconSize(size: Int) {
         write("PLAYER_ICON_SIZE") { it[K.PLAYER_ICON_SIZE] = size.coerceIn(20, 44) }
+    }
+
+    /** Size of the player TOP-bar icons (back, favourite, download, PiP,
+     *  options, lock — 20–44dp). The bottom pills have their own size above. */
+    fun playerTopIconSizeFlow(): Flow<Int> =
+        store.data.map { (it[K.PLAYER_TOP_ICON_SIZE] ?: 24).coerceIn(20, 44) }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+
+    suspend fun playerTopIconSize(): Int = playerTopIconSizeFlow().first()
+
+    suspend fun setPlayerTopIconSize(size: Int) {
+        write("PLAYER_TOP_ICON_SIZE") { it[K.PLAYER_TOP_ICON_SIZE] = size.coerceIn(20, 44) }
     }
 
     /** Whether player panels use the large left-side TV layout. */

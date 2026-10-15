@@ -397,6 +397,23 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
                 return emptyList()
             }
         val url = channel.url
+        // A torrent link plays through the torrent engine even when the row
+        // predates the MARKER (legacy rows saved without it): resolve first,
+        // whatever the row carries, so an old torrent entry plays instead of
+        // handing a magnet to the player as a plain URL.
+        if (com.hikari.app.data.NetworkStream.isTorrentLink(url)) {
+            val resolved = com.hikari.app.data.NetworkStream.resolve(
+                rawUrl = url,
+                label = channel.name,
+                providerId = config.id,
+                providerName = displayName,
+            )
+            if (resolved.isEmpty()) {
+                iptvErrors[config.id] = "That torrent could not be opened — it may have no peers yet."
+                return emptyList()
+            }
+            return resolved
+        }
         // A NETWORK STREAM is not a URL the player can open as it stands: it is
         // a link to a FILE on some host, and what is behind it has to be worked
         // out first (an m3u8, a Terabox share, an MDisk page, a download page an

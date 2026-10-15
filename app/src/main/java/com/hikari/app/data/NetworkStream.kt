@@ -114,6 +114,22 @@ object NetworkStream {
 
     /** [url] with default trackers appended when a magnet names none. */
     private fun withDefaultTrackers(url: String): String {
+    /**
+     * Normalizes a pasted link exactly the way it is saved: surrounding and
+     * inner whitespace stripped (hashes/URLs pasted with line breaks), a bare
+     * info hash magnetized with default trackers, magnets kept verbatim, and
+     * scheme-less hosts gaining their https:// prefix. One function so saving
+     * and looking up can never disagree again (see IptvScreen.addNow, which
+     * re-derives this to find the row Play just saved).
+     */
+    fun normalizePastedLink(link: String): String {
+        val trimmed = link.trim().filter { !it.isWhitespace() }
+        if (trimmed.startsWith("magnet:", ignoreCase = true)) return trimmed
+        if (isBareInfoHash(trimmed)) return magnetize(trimmed)
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
+        if (trimmed.isBlank()) return ""
+        return "https://$trimmed"
+    }
         if (!url.startsWith("magnet:", ignoreCase = true)) return url
         if (url.contains("&tr=", ignoreCase = true)) return url
         val tr = DEFAULT_TRACKERS.joinToString("") {

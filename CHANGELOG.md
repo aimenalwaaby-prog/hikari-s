@@ -1,3 +1,15 @@
+## 0.11.29 (continuous build only)
+
+### Fixed
+- Manga detail crash on open (`Key "ch-…" was already used`): some engines return the same chapter URL twice (scanlator copies / paged-list overlaps — e.g. manhuatop chapter-48 twice) and chapter rows were keyed by URL. Lists collapse duplicates at the store and at display, and chapter, genre and reader-sheet rows carry index-disambiguated keys
+- One icon language everywhere, artwork deleted: every Settings folder, ChoiceRow, TV source card, add-a-source row (phone + TV), webview-sites folder, site row and repo letter now wears the accent theme tile (accent wash + hairline + accent glyph, TMDB/MDBList brand letters kept); the 39 `ic_set_*`/`ic_ext_*` PNGs (~3.4MB) are gone
+- Manga WebView opens the page you are on: the site chain returns the full detail/chapter URL first (a Cloudflare wall can only be passed on the page that raises it), extension site and install URLs after
+- Manga search pages without end: per-engine next-page cursors with a load-more footer that keeps asking every engine with pages left (one page per pass, streaming in like page 1); results, counters and cursors live in a view-model, so coming back from a detail page keeps the rows instead of re-asking every engine
+- Extension gates honoured: Aniyomi search now passes the extension's own default filter list (content-rating gates and kin), the way the manga engines already did
+- Catalogue 3-dot: any catalogue from an engine with its own settings opens that same schema-driven dialog (shared provider-settings file, also used by the Extensions screen) right from the catalogue header
+- Player top icon size: its own slider above the bottom one (20–44dp, back/favourite/download/PiP/options/lock), applied to the top pills on next open
+- Torrent paste honesty: the add dialog normalizes pasted links (magnets verbatim, bare info hashes magnetized with trackers, https prefixing) and the hint names the bare info hash
+
 ## 0.11.27 (continuous build only)
 
 ### Fixed
