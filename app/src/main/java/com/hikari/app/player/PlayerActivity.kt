@@ -11025,6 +11025,14 @@ class PlayerActivity : ComponentActivity() {
             playTorrent(index)
             return
         }
+        // Yomi parity for Aniyomi extensions: their videos resolve ON TAP
+        // (resolveVideo runs once on the chosen video), so the search lists
+        // everything unresolved and this step finishes the pick — failing over
+        // to the next server when the tap cannot be resolved.
+        if (src.providerId.startsWith("aniyomi|")) {
+            resolveAniyomiAndPlay(index)
+            return
+        }
         playDirect(index)
     }
 
@@ -11371,6 +11379,57 @@ class PlayerActivity : ComponentActivity() {
                 playSource(index + 1)
             } else {
                 showError(I18n.t("Playback failed to start:\n%s").replace("%s", rootMessage(t)), false)
+            }
+        }
+    }
+
+    /** Yomi parity resolve-on-tap (their `HosterLoader.getResolvedVideo`): the
+     *  Aniyomi search lists videos unresolved, and the tapped one is finished
+     *  here — one bounded `resolveVideo` + `getVideoUrl` fill + local-server
+     *  rewrite — before ExoPlayer ever sees it. A tap that cannot be resolved
+     *  fails over to the next untried server (Yomi marking that video ERROR
+     *  and trying the next candidate), never trapping the player. Downloads
+     *  and external hand-off read the playing source, so they inherit the
+     *  resolved URL with no extra hook. */
+    private fun resolveAniyomiAndPlay(index: Int) {
+        val src = sources.getOrNull(index) ?: run { playDirectInner(index); return }
+        var dialog: Dialog? = null
+        val slowJob = lifecycleScope.launch {
+            delay(1200)
+            if (isActive && currentIndex == index) {
+                dialog = showGlassProgress(src.name, "Preparing stream…", cancelable = false)
+            }
+        }
+        lifecycleScope.launch {
+            val resolved = withContext(Dispatchers.IO) {
+                runCatching {
+                    com.hikari.app.aniyomi.AniyomiProvider.resolveForPlay(src.providerId, src.url)
+                }.getOrNull()
+            }
+            slowJob.cancel()
+            dialog?.let { runCatching { it.dismiss() } }
+            if (currentIndex != index) return@launch
+            if (resolved != null) {
+                val list = sources.toMutableList()
+                list[index] = src.copy(
+                    url = resolved.url,
+                    headers = resolved.headers,
+                    subtitles = resolved.subtitles,
+                    isM3u8 = resolved.isM3u8,
+                    isMpd = resolved.isMpd,
+                )
+                sources = list
+                notifySourcesChanged()
+                playDirect(index)
+            } else {
+                triedUrls.add(src.url)
+                val next = nextUntriedIndex()
+                if (next >= 0) {
+                    noSubsRetry = false
+                    playSource(next)
+                } else {
+                    showError(I18n.t("No playable sources found for this episode."), false)
+                }
             }
         }
     }

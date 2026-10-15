@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.Hoster.Companion.toHosterList
+import eu.kanade.tachiyomi.animesource.model.HttpServer
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SAnimeImpl
 import eu.kanade.tachiyomi.animesource.model.SEpisode
@@ -24,7 +25,10 @@ import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -73,9 +77,38 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
          *  Pure de-duplication of a burst of callers — never a verdict: an
          *  episode list that failed is asked for again a few seconds later. */
         private const val EPISODE_MISS_TTL_MS = 20_000L
-        private const val MAX_HOSTERS = 16
-        private const val MAX_VIDEOS_PER_HOSTER = 24
-        private const val MAX_STREAMS = 150
+        /** One hoster's video fetch never holds the list hostage past this. */
+        private const val HOSTER_TIMEOUT_MS = 30_000L
+        /** One tap's resolve (resolveVideo + getVideoUrl fill) is bounded by this. */
+        private const val RESOLVE_TIMEOUT_MS = 30_000L
+
+        /** providerId -> live instance, so the player's tap can resolve through
+         *  the same provider that listed the servers (Yomi's getResolvedVideo). */
+        private val instances = ConcurrentHashMap<String, AniyomiProvider>()
+
+        /** providerId + "\n" + videoUrl -> hoster name + the extension's live
+         *  Video, kept UNRESOLVED at list time and resolved once on tap. */
+        private val playCache = ConcurrentHashMap<String, Pair<String, Video>>()
+
+        /** packageName -> the extension's started local HTTP server (ext-lib 17
+         *  `createHttpServer` — the app starts it and rewrites the
+         *  `http://localhost:1…` placeholder to the live port, like Yomi). */
+        private val httpServers = ConcurrentHashMap<String, HttpServer>()
+
+        /**
+         * Yomi parity resolve-on-tap (their `HosterLoader.getResolvedVideo`):
+         * runs the extension's `resolveVideo` ONCE on the tapped video (plus a
+         * `getVideoUrl` fill when the url is still unresolved), rewrites local
+         * HTTP-server URLs to the live port, and returns a playable
+         * [StreamSource] — or null when this tap cannot be resolved (the
+         * player then fails over to the next server, exactly like Yomi
+         * marking that video ERROR and trying the next candidate).
+         */
+        suspend fun resolveForPlay(providerId: String, url: String): StreamSource? =
+            withContext(Dispatchers.IO) {
+                val inst = instances[providerId] ?: return@withContext null
+                inst.resolveVideoForPlay(url)
+            }
     }
 
     /** `aniyomi|<packageName>|<sourceIndex>` → the extension it belongs to. */
@@ -106,6 +139,73 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
     suspend fun warm() {
         withContext(Dispatchers.IO) { runCatching { source() } }
         runCatching { AniyomiExtensionManager.siteUrlOf(config) }
+    }
+
+    init {
+        instances[config.id] = this
+    }
+
+    private fun playKey(url: String) = config.id + "\n" + url
+
+    /**
+     * Starts the extension's local HTTP server when it provides one
+     * (ext-lib 17 `createHttpServer`) — the app owns the server's lifecycle,
+     * exactly like Yomi/Aniyomi do. Videos served through it carry the
+     * `http://localhost:1…` placeholder until [rewriteLocal] swaps in the
+     * live port. One server per package, kept for the process: tearing it
+     * down between a search and its playback would orphan every localhost
+     * link it handed out.
+     */
+    private fun ensureHttpServer(src: AnimeSource) {
+        val http = src as? AnimeHttpSource ?: return
+        val pkg = pkgName
+        if (httpServers[pkg]?.isRunning() == true) return
+        val server = runCatching { http.createHttpServer() }.getOrNull() ?: return
+        runCatching { server.start() }
+        if (server.isRunning()) httpServers[pkg] = server
+    }
+
+    /** Rewrites a local-server video URL to the started server's live port
+     *  (their `Video.copyHttpServer`), like Yomi does before handing a video
+     *  to its player. Non-local videos pass through untouched. */
+    private fun rewriteLocal(video: Video): Video {
+        if (!video.usesHttpServer()) return video
+        val port = httpServers[pkgName]?.takeIf { it.isRunning() }?.listeningPort ?: return video
+        if (port <= 0) return video
+        return runCatching { video.copyHttpServer(port) }.getOrDefault(video)
+    }
+
+    /** The tap half of list-then-resolve: finishes one cached [Video] into a
+     *  playable [StreamSource], or null when it cannot be resolved. */
+    private suspend fun resolveVideoForPlay(url: String): StreamSource? {
+        val src = source() ?: return null
+        val http = src as? AnimeHttpSource ?: return null
+        ensureHttpServer(http)
+        val prefix = playKey(url) + "\n"
+        val entry = playCache[prefix.trimEnd('\n')]
+            ?: playCache.entries.firstOrNull { it.key.startsWith(prefix) }
+            ?: return null
+        val (hosterName, cached) = entry.value
+        var video = cached
+        if (!video.initialized) {
+            val resolved = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+                runCatching { http.resolveVideo(video) }.getOrNull()
+            } ?: video
+            video = resolved
+        }
+        if (isUnresolved(video.videoUrl)) {
+            val filled = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+                runCatching { http.getVideoUrl(video) }.getOrNull()
+            }
+            if (!filled.isNullOrBlank() && !isUnresolved(filled)) {
+                video = runCatching { video.copy(videoUrl = filled) }.getOrDefault(video)
+            }
+        }
+        video = rewriteLocal(video)
+        if (video.videoUrl.isBlank() || isUnresolved(video.videoUrl)) return null
+        playCache[entry.key] = hosterName to
+            runCatching { video.copy(initialized = true) }.getOrDefault(video)
+        return toStreamSource(src, hosterName, video)
     }
 
     private fun fail(msg: String): List<StreamSource> {
@@ -682,7 +782,6 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         }
         val out = ArrayList<StreamSource>(videos.size)
         for ((hosterName, video) in videos) {
-            if (out.size >= MAX_STREAMS) break
             toStreamSource(src, hosterName, video)?.let { out += it }
         }
         if (out.isEmpty()) {
@@ -698,18 +797,24 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
 
     /**
      * Every video the source can produce for [episode], paired with the hoster
-     * it came from — the same walk Aniyomi's own `EpisodeLoader` performs:
+     * it came from — Yomi's `EpisodeLoader` walk, 1-to-1:
      *
-     *  - a source that declares hoster support (its class overrides
-     *    `getHosterList`/`hosterListRequest`/`hosterListParse`) is asked for its
-     *    hoster list, and each hoster for its videos;
-     *  - an extensions-lib 14 source (no hoster API at all) is asked straight
-     *    for its video list, wrapped as one pseudo-hoster.
+     *  - a source that declares hoster support is asked for its hoster list
+     *    (ONE call, no cap — Yomi lists every hoster it is given);
+     *  - an extensions-lib 14 source is asked straight for its video list,
+     *    wrapped as one pseudo-hoster.
      *
-     * Hoster/video ordering is left to the source's own `sortHosters`/
-     * `sortVideos`, which is what Aniyomi does (and what makes VidCloud-style
-     * mirrors come first). Those are `protected` in some extensions-lib builds,
-     * so a refusal degrades to the unsorted list rather than losing the results.
+     *  Hoster/video ordering is left to the source's own `sortHosters`/
+     *  `sortVideos`, which is what Yomi does (and what makes VidCloud-style
+     *  mirrors come first). Those are `protected` in some extensions-lib builds,
+     *  so a refusal degrades to the unsorted list rather than losing the results.
+     *
+     *  And like Yomi, this LIST step never resolves: videos are cached
+     *  unresolved and finished once, on tap, by [resolveForPlay] (their
+     *  `HosterLoader.getResolvedVideo`). Resolving every video up front —
+     *  hundreds of embed unpacks before a single server shows — burned
+     *  single-use tokens, tripped rate limits, and dropped every video whose
+     *  resolve failed at search time although it resolved fine on tap.
      */
     private suspend fun loadVideos(src: AnimeSource, episode: SEpisode): List<Pair<String, Video>> {
         val http = src as? AnimeHttpSource
@@ -720,8 +825,9 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
                 AniyomiExtensionManager.recordError("getVideoList failed", it)
                 return emptyList()
             }
-            return videos.take(MAX_VIDEOS_PER_HOSTER).map { "" to it }
+            return videos.map { "" to it }
         }
+        ensureHttpServer(http)
 
         val hosters: List<Hoster> = if (hasHosters(http)) {
             runCatching { http.getHosterList(episode) }.getOrElse {
@@ -735,39 +841,74 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
             }.let { list -> runCatching { with(http) { list.sortVideos() } }.getOrDefault(list) }
                 .toHosterList()
         }
+        if (hosters.isEmpty()) return emptyList()
 
+        // Every hoster on its own: fetched in parallel, each bounded, each
+        // failure costing only that hoster — a hung or throwing mirror can
+        // never again void the whole episode (their per-hoster ERROR rows).
+        val perHoster: List<List<Pair<String, Video>>> = supervisorScope {
+            hosters.map { hoster ->
+                async(Dispatchers.IO) {
+                    withTimeoutOrNull(HOSTER_TIMEOUT_MS) {
+                        runCatching { videosForHoster(http, hoster) }.getOrDefault(emptyList())
+                    } ?: emptyList()
+                }
+            }.awaitAll()
+        }
         val out = ArrayList<Pair<String, Video>>()
-        for (hoster in hosters.take(MAX_HOSTERS)) {
-            val fromHoster = hoster.videoList
-            val videos = if (fromHoster != null) {
-                val parsed = if (fromHoster.any { it.videoUrl == "null" }) {
-                    parseVideoUrls(http, fromHoster)
-                } else fromHoster
-                runCatching { with(http) { parsed.sortVideos() } }.getOrDefault(parsed)
-            } else {
-                runCatching { http.getVideoList(hoster) }.getOrElse {
-                    AniyomiExtensionManager.recordError("getVideoList(hoster) failed", it)
-                    continue
-                }.let { list -> runCatching { with(http) { list.sortVideos() } }.getOrDefault(list) }
-                    .let { parseVideoUrls(http, it) }
-            }
-            val name = hoster.hosterName.takeIf { it.isNotBlank() && it != Hoster.NO_HOSTER_LIST }.orEmpty()
-            for (video in videos.take(MAX_VIDEOS_PER_HOSTER)) {
-                val resolved = resolve(http, video) ?: continue
-                if (resolved.videoUrl.isBlank() || isUnresolved(resolved.videoUrl)) continue
-                out += name to resolved
-            }
+        var failed = 0
+        for (list in perHoster) {
+            if (list.isEmpty()) failed++
+            out += list
         }
         if (out.isEmpty()) {
             val direct = runCatching { http.getVideoList(episode) }.getOrElse {
-                AniyomiExtensionManager.recordError("getVideoList(episode) fallback failed", it)
+                AniyomiExtensionManager.recordError(
+                    if (failed > 0) "all $failed hoster(s) failed and getVideoList(episode) failed"
+                    else "getVideoList(episode) fallback failed",
+                    it,
+                )
                 emptyList()
             }.let { list -> runCatching { with(http) { list.sortVideos() } }.getOrDefault(list) }
-            for (video in parseVideoUrls(http, direct).take(MAX_VIDEOS_PER_HOSTER)) {
-                val resolved = resolve(http, video) ?: continue
-                if (resolved.videoUrl.isBlank() || isUnresolved(resolved.videoUrl)) continue
-                out += "" to resolved
+            for (video in parseVideoUrls(http, direct)) {
+                if (video.videoUrl.isBlank()) continue
+                out += "" to rewriteLocal(video)
             }
+            if (out.isEmpty()) {
+                AniyomiExtensionManager.recordError(
+                    "no videos from ${hosters.size} hoster(s)",
+                    null,
+                )
+            }
+        }
+        return out
+    }
+
+    /**
+     * One hoster's videos, unresolved (list step; the tap resolves). A hoster
+     * that already carries its list — lazy or pre-grouped — is taken as-is
+     * (Yomi lists those without resolving); otherwise one `getVideoList`
+     * plus the `"null"`-url fill. Only truly blank urls are dropped: an
+     * unresolvable-looking video stays on the list and gets its bounded
+     * resolve on tap, exactly like Yomi's QUEUE rows.
+     */
+    private suspend fun videosForHoster(http: AnimeHttpSource, hoster: Hoster): List<Pair<String, Video>> {
+        val fromHoster = hoster.videoList
+        val videos = if (fromHoster != null) {
+            val parsed = if (fromHoster.any { isUnresolved(it.videoUrl) }) {
+                parseVideoUrls(http, fromHoster)
+            } else fromHoster
+            runCatching { with(http) { parsed.sortVideos() } }.getOrDefault(parsed)
+        } else {
+            runCatching { http.getVideoList(hoster) }.getOrElse { return emptyList() }
+                .let { list -> runCatching { with(http) { list.sortVideos() } }.getOrDefault(list) }
+                .let { parseVideoUrls(http, it) }
+        }
+        val name = hoster.hosterName.takeIf { it.isNotBlank() && it != Hoster.NO_HOSTER_LIST }.orEmpty()
+        val out = ArrayList<Pair<String, Video>>(videos.size)
+        for (video in videos) {
+            if (video.videoUrl.isBlank()) continue
+            out += name to rewriteLocal(video)
         }
         return out
     }
@@ -778,22 +919,10 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     /**
-     * `AnimeHttpSource.resolveVideo` when the source resolves lazily (ext-lib 16+;
-     * the base implementation simply returns the video). A video whose url is
-     * still the literal `"null"` after [parseVideoUrls] could not be resolved and
-     * is dropped — but a throw never costs us a link that already works.
-     */
-    private suspend fun resolve(http: AnimeHttpSource, video: Video): Video? {
-        if (video.initialized) return video
-        val resolved = runCatching { http.resolveVideo(video) }.getOrNull()
-        val out = resolved ?: return if (video.videoUrl.isNotBlank() && video.videoUrl != "null") video else null
-        return runCatching { out.copy(initialized = true) }.getOrDefault(out)
-    }
-
-    /**
      * extensions-lib 14 hands out videos whose `videoUrl` is the literal
      * `"null"`, to be filled in by a second request (`getVideoUrl`). Same
-     * two-step as Aniyomi's `parseVideoUrls`.
+     * two-step as Yomi's `parseVideoUrls` (theirs fills only `"null"`; ours
+     * also covers the blank/`"undefined"`/`"none"` shapes).
      */
     private suspend fun parseVideoUrls(http: AnimeHttpSource, videos: List<Video>): List<Video> =
         videos.map { video ->
@@ -825,14 +954,18 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         false
     }.getOrDefault(false)
 
-    /** One resolved Aniyomi [Video] → a Hikari [StreamSource]. */
+    /** One Aniyomi [Video] → a Hikari [StreamSource], cached unresolved for the
+     *  tap ([resolveForPlay]). Only truly blank urls are dropped: an
+     *  unresolvable-looking video stays on the list and gets its bounded
+     *  resolve on tap, like Yomi's QUEUE rows. */
     private fun toStreamSource(
         src: AnimeSource,
         hosterName: String,
         video: Video,
     ): StreamSource? {
         val raw = video.videoUrl
-        if (raw.isBlank() || raw == "null") return null
+        if (raw.isBlank()) return null
+        playCache[playKey(raw) + "\n" + hosterName + "\n" + video.videoTitle] = hosterName to video
 
         val headers = LinkedHashMap<String, String>()
         video.headers?.toMultimap()?.forEach { (k, values) ->

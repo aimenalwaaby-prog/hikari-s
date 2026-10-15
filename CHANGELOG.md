@@ -1,3 +1,9 @@
+## 0.11.34 (continuous build only)
+
+### Fixed
+- Aniyomi pipeline 1-to-1 with Yomi/Aniyomi (universal, all extensions — MissAV class): the search lists every hoster uncapped and every hoster fetches in parallel with per-hoster isolation (one hung mirror costs only itself, never the episode), videos stay unresolved on the list instead of being mass-resolved then dropped, and the tap finishes the pick with one bounded resolveVideo + getVideoUrl fill (Yomi's getResolvedVideo) with failover to the next server; extensions serving video through their own local HTTP server get it started with the placeholder port rewritten, like the reference apps
+- Player resolves Aniyomi taps before ExoPlayer sees them (preparing-stream cover only when slow, current-tap guard, failed taps walk on); downloads and external hand-off read the playing source so they inherit the resolved URL
+
 ## 0.11.33
 
 Everything new and fixed since the last release (0.11.04) — the builds in between were test builds and never went out:
