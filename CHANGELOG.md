@@ -1,3 +1,10 @@
+## 0.11.30 (continuous build only)
+
+### Fixed
+- Extension settings now actually apply (Yomi 1:1): the schema dialog binds the extension's own Preference objects to the source's own `source_<id>` store — the file its code reads at search/browse time — instead of the app's default prefs, so saved values (e.g. Comix content rating up to pornographic) reach the extension. Display already read the right file; the save was the silent half
+- Add-a-source icons per type (phone + TV): CloudStream cloud, Nuvio phone, Vega speaker; every other row keeps its glyph
+- Reader image quality up to 4K: new Ultra (150%) and 4K (200%) tiers, fresh installs default to Ultra, short-page decodes capped at 2160px wide so a full-quality decode can never OOM; tall strips still region-decode at full resolution from disk
+
 ## 0.11.29 (continuous build only)
 
 ### Fixed

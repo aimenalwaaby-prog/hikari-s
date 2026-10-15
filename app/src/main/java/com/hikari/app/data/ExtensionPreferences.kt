@@ -180,6 +180,19 @@ object ExtensionPreferences {
             else -> null
         } ?: return null
         val screen = PreferenceManager(context).createPreferenceScreen(context)
+        // Yomi 1:1 (MangaSourcePreferencesFragment binds a DataStore over
+        // source.sourcePreferences()): the extension's own Preference objects
+        // must read AND write the source's own `source_<id>` file — the store
+        // its code reads at search/browse time. A bare PreferenceManager
+        // persists to the app's default prefs instead, which is how a value
+        // the dialog showed as saved (e.g. Comix content rating) silently
+        // never reached the extension. Set before setupPreferenceScreen, so
+        // every Preference the extension declares adopts this storage.
+        val sourceId = (source as? MangaSource)?.id ?: (source as? AnimeSource)?.id
+        if (sourceId != null) {
+            screen.preferenceManager.sharedPreferencesName = "source_$sourceId"
+            screen.preferenceManager.sharedPreferencesMode = Context.MODE_PRIVATE
+        }
         when (source) {
             is ConfigurableAnimeSource -> source.setupPreferenceScreen(screen)
             is ConfigurableSource -> source.setupPreferenceScreen(screen)

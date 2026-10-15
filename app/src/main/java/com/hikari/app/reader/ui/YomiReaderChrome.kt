@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1486,12 +1487,14 @@ private fun ColumnScope.SettingsGeneralTab(
             modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
         )
         Row(
-            modifier = Modifier.padding(start = 16.dp),
+            modifier = Modifier.padding(start = 16.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             QualityChip("Low (fast)", readerQuality == 50) { onSelectReaderQuality(50) }
             QualityChip("Medium", readerQuality == 75) { onSelectReaderQuality(75) }
             QualityChip("High (sharp)", readerQuality == 100) { onSelectReaderQuality(100) }
+            QualityChip("Ultra", readerQuality == 150) { onSelectReaderQuality(150) }
+            QualityChip("4K", readerQuality == 200) { onSelectReaderQuality(200) }
         }
     }
     SectionCard("Gestures") {

@@ -5293,16 +5293,16 @@ private fun RepoBrowserView(
                         com.hikari.app.tv.TvSettingsSourceCard(icon = icon, title = title, subtitle = sub, onClick = onClick, modifier = Modifier.weight(1f))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Public, tr("CloudStream repos"), tr("repo.json · CloudStream extensions"), { onOpenFolder(SourceFolder.CLOUDSTREAM) })
+                        srcCard(Icons.Filled.Cloud, tr("CloudStream repos"), tr("repo.json · CloudStream extensions"), { onOpenFolder(SourceFolder.CLOUDSTREAM) })
                         srcCard(Icons.Filled.Extension, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.FolderOpen, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
+                        srcCard(Icons.Filled.Smartphone, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
                         srcCard(Icons.Filled.Extension, tr("SkyStream repos"), tr("repo.json · SkyStream extensions"), { onOpenFolder(SourceFolder.SKYSTREAM) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Extension, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) })
-                        srcCard(Icons.Filled.Movie, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
+                        srcCard(Icons.Filled.Speaker, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Extension, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
@@ -5337,7 +5337,7 @@ private fun RepoBrowserView(
             ) {
                 Column {
                     SourceActionRow(
-                        icon = Icons.Filled.Public,
+                        icon = Icons.Filled.Cloud,
                         title = tr("CloudStream repos"),
                         subtitle = tr("repo.json · CloudStream extensions"),
                         onClick = { onOpenFolder(SourceFolder.CLOUDSTREAM) }
@@ -5351,7 +5351,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.FolderOpen,
+                        icon = Icons.Filled.Smartphone,
                         title = tr("Nuvio repos"),
                         subtitle = tr("manifest.json · Nuvio providers"),
                         onClick = { onOpenFolder(SourceFolder.NUVIO) }
@@ -5372,7 +5372,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Movie,
+                        icon = Icons.Filled.Speaker,
                         title = tr("Vega repos"),
                         subtitle = tr("manifest.json · Vega providers"),
                         onClick = { onOpenFolder(SourceFolder.VEGA) }

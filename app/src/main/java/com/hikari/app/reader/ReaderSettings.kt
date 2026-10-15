@@ -103,7 +103,7 @@ data class ReaderChapter(
  * to zoom, double-tap to zoom and tap-to-turn-the-page — because on a long strip
  * those turn a scroll into a jump. Tap zones are `Edge`, the webtoon scale type
  * is `Fit`, the menu hides at the `Normal` threshold, and pages are decoded at
- * the `High (sharp)` quality. A fresh install therefore reads a chapter exactly
+ * the `Ultra` quality. A fresh install therefore reads a chapter exactly
  * the way the reference app does, and every one of them is one tap away in the
  * chrome (or one tap on *Reset to defaults*).
  */
@@ -142,7 +142,7 @@ data class ReaderSettings(
     val grayscale: Boolean = false,
     val invertedColors: Boolean = false,
     val imageEnhance: Boolean = false,
-    val readerQuality: Int = 100,
+    val readerQuality: Int = 150,
     val webtoonFade: Boolean = false,
     val autoScroll: Boolean = false,
     val autoScrollSpeedDp: Float = 30f,

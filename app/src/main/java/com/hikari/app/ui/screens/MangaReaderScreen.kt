@@ -770,9 +770,10 @@ fun MangaReaderScreen(
     val screenWidthPx = context.resources.displayMetrics.widthPixels
     // Strips are always drawn at fill-width, so a strip decoded below the screen
     // width costs a little sharpness and saves a lot of memory. The reader's
-    // "Image quality" setting picks the width (50/75/100%); the Low tier also
-    // decodes as RGB_565 for heavy chapters.
-    val webtoonDecodeWidth = (screenWidthPx * settings.readerQuality / 100f).roundToInt().coerceAtLeast(360)
+    // "Image quality" setting picks the width (50/75/100/150/200%, capped at
+    // 2160px so a full-quality decode can never OOM the device); the Low tier
+    // also decodes as RGB_565 for heavy chapters.
+    val webtoonDecodeWidth = (screenWidthPx * settings.readerQuality / 100f).roundToInt().coerceIn(360, 2160)
     val useRgb565 = isWebtoon && settings.readerQuality == 50
     val displayDecodeWidth = if (isWebtoon) webtoonDecodeWidth else screenWidthPx
     val cacheDir = remember { File(context.cacheDir, "webtoon_pages") }
