@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.hikari.app.HikariApp
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.Ratings
+import com.hikari.app.data.screenTypeFor
 import com.hikari.app.ui.components.PosterImage
 import com.hikari.app.ui.theme.rememberGlassTokens
 import kotlin.math.hypot
@@ -409,13 +410,24 @@ fun rememberPosterBadges(item: MediaItem?, style: PosterStyle): List<String> {
     // designs in one corner.
     val movieLabel = com.hikari.app.i18n.tr("Movie")
     val seriesLabel = com.hikari.app.i18n.tr("Series")
-    return remember(item, style.showType, style.showQuality, revision, movieLabel, seriesLabel) {
+    // The corrected type needs the episode COUNT, which lives in the same
+    // disk cache the Ep pills below read (never network on a poster). Null =
+    // never loaded: the declared tag stands until the count lands, and
+    // [epRevision] repaints the cell the moment it does.
+    val epRevision by com.hikari.app.data.MetaCache.epRevision.collectAsState()
+    var epCount by remember(item.uniqueId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(item.uniqueId, epRevision) {
+        epCount = withContext(Dispatchers.IO) {
+            runCatching { cachedEpisodeCount(item) }.getOrNull()
+        }
+    }
+    return remember(item, style.showType, style.showQuality, revision, movieLabel, seriesLabel, epCount) {
         buildList {
             if (style.showQuality) {
                 com.hikari.app.data.TitleQuality.forItem(item)?.let { add(it) }
             }
             if (style.showType) {
-                when (item.type) {
+                when (screenTypeFor(item, epCount)) {
                     com.hikari.app.data.MediaType.MOVIE -> add(movieLabel)
                     com.hikari.app.data.MediaType.SERIES -> add(seriesLabel)
                     else -> Unit
@@ -456,12 +468,25 @@ fun rememberPosterEpBadges(item: MediaItem?): List<String> {
     return pills ?: emptyList()
 }
 
+/** Episode count from the cached list, or null when never loaded. */
+private fun cachedEpisodeCount(item: MediaItem): Int? {
+    val key = com.hikari.app.data.MetaCache.episodesKey(item.uniqueId)
+    val eps = com.hikari.app.data.MetaCache.cachedEpisodes(key)
+        ?: com.hikari.app.data.MetaCache.cachedEpisodes(key + "|trk2")
+        ?: return null
+    return eps.size
+}
+
 /** Latest Dub / Sub episode numbers from the cached list, as pill texts. */
 private fun epPillsFor(item: MediaItem, dubLabel: String, subLabel: String): List<String> {
     val key = com.hikari.app.data.MetaCache.episodesKey(item.uniqueId)
     val eps = com.hikari.app.data.MetaCache.cachedEpisodes(key)
         ?: com.hikari.app.data.MetaCache.cachedEpisodes(key + "|trk2")
         ?: return emptyList()
+    // A corrected movie wears no episode pills: a single-episode
+    // site-scraper "series" is a film, so "Ep 1" would re-attach the wrong
+    // tag the badge above just removed.
+    if (screenTypeFor(item, eps.size) == com.hikari.app.data.MediaType.MOVIE) return emptyList()
     var dub = 0
     var sub = 0
     var plain = 0

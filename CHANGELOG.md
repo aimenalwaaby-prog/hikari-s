@@ -1,3 +1,11 @@
+## 0.11.26 (continuous build only)
+
+### Fixed
+- Wrong movie/series tags everywhere (universal, no per-extension code): a film listed with one episode wore Series + "Ep 1" and opened an Episodes (1) page with Play E1 (and multi-episode titles could sit under Movie). New central `screenTypeFor` differential — exactly one episode on a site-scraper (CloudStream/.hiki/SkyStream/Aniyomi/Vega/Sora/Anymex/universal) plays and tags as a movie, two or more as a series, unloaded/empty keeps the declared tag; Nuvio/Stremio/IPTV/TMDB/tracker rows exempt (their namespaces type correctly). Applied at the detail page (both episode loads), the Aniyomi meta (a film is a single-episode anime), the poster type chip (cache-only count, repaints when episodes land) and the Dub/Sub pills (a corrected movie wears none)
+- Nuvio same-pipeline (from NuvioMobile cmp-rewrite): season now comes from the episode's own season field first (URL-text parsing pinned every opaque-id tap to S1, so S2E5 played as S1E5 or found nothing), episode numbers never drop below 1, and a series with no episode in hand stands in S1E1 like the Stremio addon instead of an unqueryable undefined season
+- Hold-menu Close: the slide menu gains a fourth band — Details / Play / Library / Close — so an opened menu dismisses with no action instead of forcing a pick (discs + glass stadium resized for four, both gesture sites)
+- Servers surface in big batches: cross waves start 12 wide with a 400/800ms stagger (device/TV/booster caps and the stall watchdog untouched) so answers arrive 20-30 together, and the Sources sheet paints everything pending per 350ms window (400ms trailing, blank still paints now) in one cheap in-place sync that never cancels an in-flight extraction
+
 ## 0.11.25 (continuous build only)
 
 ### Fixed

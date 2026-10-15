@@ -195,6 +195,41 @@ data class RepoLoadState(
 
 enum class MediaType { MOVIE, SERIES, UNKNOWN }
 
+/**
+ * True for provider ids whose "series" is just "has an episode list" — a
+ * site-scraping extension (CloudStream / .hiki / SkyStream / Aniyomi / Vega /
+ * Sora / Anymex / universal). Nuvio, Stremio, IPTV, TMDB and tracker rows
+ * keep their declared types: those namespaces type their rows correctly
+ * (and the reference Nuvio/Stremio apps treat them as authoritative).
+ */
+fun isSiteScraperProviderId(providerId: String): Boolean {
+    val p = providerId.lowercase()
+    return p.startsWith("cs3|") || p.startsWith("hiki|") || p.startsWith("sky|") ||
+        p.startsWith("aniyomi|") || p.startsWith("vega|") || p.startsWith("sora|") ||
+        p.startsWith("anymex|") || p.startsWith("uni|")
+}
+
+/**
+ * The type a row SHOULD show and play as, from its episode count — the
+ * universal movie↔series differential.
+ *
+ * Site scrapers tag by shape: one listed episode reads as "series" on the
+ * poster (Series chip, "Ep 1" pill) and opens an Episodes (1) page with Play
+ * E1 for what is plainly a film (and the reverse: a multi-episode title
+ * sitting under a Movie tag). [episodeCount] null = not loaded yet: keep the
+ * declared type, never guess. Zero likewise keeps it (an unanswered lookup
+ * is not evidence either way).
+ */
+fun screenTypeFor(item: MediaItem, episodeCount: Int?): MediaType {
+    if (episodeCount == null || episodeCount <= 0) return item.type
+    if (!isSiteScraperProviderId(item.providerId)) return item.type
+    return when {
+        episodeCount == 1 && item.type == MediaType.SERIES -> MediaType.MOVIE
+        episodeCount >= 2 && item.type != MediaType.SERIES -> MediaType.SERIES
+        else -> item.type
+    }
+}
+
 /** A user-added website opened in the ad-free web view. */
 data class Site(
     val name: String,

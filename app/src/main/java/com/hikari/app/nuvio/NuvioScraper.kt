@@ -441,7 +441,14 @@ class NuvioScraper(override val config: ProviderConfig) : ContentProvider {
             }
             // Series: nuvio needs the season + episode numbers. The episode's
             // id/name usually carries them ("S2E5", "2x3", …).
-            val season = if (episode == null) null else seasonOf(episode)
+            //
+            // A series with no episode in hand (autoplay firing before the
+            // list lands) stands in S1E1 — the same stand-in the Stremio
+            // addon uses — instead of handing the engine an undefined season
+            // it cannot query with.
+            val season: Int? = if (episode == null) {
+                if (item.type == MediaType.SERIES) 1 else null
+            } else seasonOf(episode)
             val epNum = if (episode == null) 1 else epNumberInSeason(episode)
             // TMDB has exactly two namespaces, and every nuvio provider is
             // written for those two: the whole ecosystem tests
@@ -711,8 +718,14 @@ class NuvioScraper(override val config: ProviderConfig) : ContentProvider {
         return host == "w3.org" || host.endsWith(".w3.org")
     }
 
-    /** Best-effort season number from the episode's id or name. */
+    /** Season number for the engine. NuvioMobile passes its own episode
+     *  model's season straight in — the curated struct field first, text
+     *  parsing only as fallback. Reading the id/name text first (URLs and
+     *  opaque payloads carry no SxxExx) pinned EVERY such tap to season 1,
+     *  so S2E5 played as S1E5 — or found nothing — while the same episode
+     *  played in NuvioMobile. */
     private fun seasonOf(ep: Episode): Int {
+        if (ep.season > 0) return ep.season
         val text = listOfNotNull(ep.id, ep.name).firstOrNull { it.isNotBlank() } ?: return 1
         Regex("""(?i)[sS]\s*(\d+)\s*[eE]\s*(\d+)""").find(text)?.let { m ->
             m.groupValues[1].toIntOrNull()?.let { return it }
@@ -726,16 +739,17 @@ class NuvioScraper(override val config: ProviderConfig) : ContentProvider {
         return 1
     }
 
-    /** Best-effort in-season episode number from the episode's id or name
-     *  (e.g. "S2E5" → 5). Falls back to [Episode.number]. */
+    /** In-season episode number for the engine (e.g. "S2E5" → 5): the id/name
+     *  text first (it names the credential when present), then the curated
+     *  struct field — never below 1, which no engine answers for. */
     private fun epNumberInSeason(ep: Episode): Int {
-        val text = listOfNotNull(ep.id, ep.name).firstOrNull { it.isNotBlank() } ?: return ep.number
+        val text = listOfNotNull(ep.id, ep.name).firstOrNull { it.isNotBlank() } ?: return ep.number.coerceAtLeast(1)
         Regex("""(?i)[sS]\s*(\d+)\s*[eE]\s*(\d+)""").find(text)?.let { m ->
             m.groupValues[2].toIntOrNull()?.let { return it }
         }
         Regex("""(?:^|[^\d])(\d+)\s*[xX:.\-]\s*(\d+)(?:$|[^\d])""").find(text)?.let { m ->
             m.groupValues[2].toIntOrNull()?.let { return it }
         }
-        return ep.number
+        return ep.number.coerceAtLeast(1)
     }
 }

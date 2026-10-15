@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -61,8 +62,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * only the moves after the 1-second hold are consumed, which is also what
  * stops the card's own tap from firing after a menu pick.
  *
- * Slots, left to right: 0 = info, 1 = play, 2 = library.
- */
+ * Slots, left to right: 0 = info, 1 = play, 2 = library, 3 = close (dismisses
+ * the menu with no action, so an opened menu never forces a pick). */
 const val QUICK_MENU_HOLD_MS = 1000L
 
 class QuickMenuState {
@@ -75,7 +76,7 @@ fun rememberQuickMenuState(): QuickMenuState = remember { QuickMenuState() }
 
 /**
  * Hold-to-menu gesture for a poster. [onPick] fires once, on release, with the
- * chosen slot (0 info / 1 play / 2 library). Taps and scrolls pass through
+ * chosen slot (0 info / 1 play / 2 library / 3 close). Taps and scrolls pass through
  * untouched — see the note above.
  */
 fun Modifier.quickMenuGesture(
@@ -114,10 +115,11 @@ fun Modifier.quickMenuGesture(
                 val x = ev.changes.firstOrNull()?.position?.x
                 val w = size.width.toFloat()
                 if (x != null && w > 0f) {
-                    // Horizontal slide picks the slot — left info, centre play,
-                    // right library — so the thumb never has to aim at a small
-                    // icon, just lean left or right.
-                    sel = ((x / w) * 3).toInt().coerceIn(0, 2)
+                    // Horizontal slide picks the slot — info, play, library,
+                    // then close — so the thumb never has to aim at a small
+                    // icon, just lean left or right. The last band dismisses
+                    // with no action.
+                    sel = ((x / w) * 4).toInt().coerceIn(0, 3)
                     state.selected = sel
                 }
                 ev.changes.forEach { it.consume() }
@@ -130,16 +132,16 @@ fun Modifier.quickMenuGesture(
     }
 }
 
-/** The fan overlay: a glass stadium ring enclosing the hint and the three
- *  labelled round actions — Details, Play, Library. The ring is a stadium
+/** The fan overlay: a glass stadium ring enclosing the hint and the four
+ *  labelled round actions — Details, Play, Library, Close. The ring is a stadium
  *  (upper semicircle + lower semicircle) painted from the taskbar floating-bar
  *  recipe ([rememberGlassTokens]): theme surface at near-full strength with
  *  the top-light falloff and the 1px hairline, so menu and taskbar read as one
  *  material over any poster art.
- *  Every disc is sized from the poster's own width so all three always fit,
- *  even on narrow shelf posters (the old fixed 44/52dp discs overflowed and
- *  the Library button was cut off). Sliding left/centre/right without lifting
- *  picks slot 0/1/2; Play starts playback directly, Details opens the page. */
+ *  Every disc is sized from the poster's own width so all four always fit,
+ *  even on narrow shelf posters. Sliding across without lifting picks a
+ *  slot; Play starts playback directly, Details opens the page, Close
+ *  dismisses with no action. */
 @Composable
 fun BoxScope.QuickMenuOverlay(selected: Int) {
     val scheme = MaterialTheme.colorScheme
@@ -147,13 +149,15 @@ fun BoxScope.QuickMenuOverlay(selected: Int) {
     val detailsLabel = tr("Details")
     val playLabel = tr("Play")
     val libraryLabel = tr("Library")
+    val closeLabel = tr("Close")
     val hint = tr("Slide to explore")
     BoxWithConstraints(Modifier.matchParentSize()) {
-        // Equal discs, sized to fit three across with room to spare — the
+        // Equal discs, sized to fit four across with room to spare — the
         // selection reads through colour + ring, never through a bigger disc
-        // that would push its neighbours off a narrow card.
-        val spacing = (maxWidth * 0.05f).coerceAtMost(12.dp)
-        val disc = ((maxWidth - spacing * 2 - 20.dp) / 3).coerceIn(28.dp, 48.dp)
+        // that would push its neighbours off a narrow card. Slide-to-pick
+        // needs no aiming, so the discs can run smaller than tap targets.
+        val spacing = (maxWidth * 0.04f).coerceAtMost(10.dp)
+        val disc = ((maxWidth - spacing * 3 - 16.dp) / 4).coerceIn(20.dp, 40.dp)
         Canvas(Modifier.matchParentSize()) {
             val w = size.width
             val h = size.height
@@ -164,10 +168,10 @@ fun BoxScope.QuickMenuOverlay(selected: Int) {
             // glass always encloses the buttons on every poster width.
             val discPx = disc.toPx()
             val spacingPx = spacing.toPx()
-            val rowW = discPx * 3f + spacingPx * 2f
-            val padX = 14.dp.toPx()
-            val padT = 10.dp.toPx()
-            val padB = 12.dp.toPx()
+            val rowW = discPx * 4f + spacingPx * 3f
+            val padX = 10.dp.toPx()
+            val padT = 8.dp.toPx()
+            val padB = 10.dp.toPx()
             val bottomPad = 8.dp.toPx()
             val hintPx = 15.dp.toPx()
             val labelPx = 16.dp.toPx()
@@ -263,6 +267,15 @@ fun BoxScope.QuickMenuOverlay(selected: Int) {
                 ) {
                     Icon(Icons.Filled.BookmarkAdd, contentDescription = libraryLabel, tint = iconTint(2, selected))
                 }
+                QuickMenuOption(
+                    label = closeLabel,
+                    icon = 3,
+                    selected = selected,
+                    disc = disc,
+                    raised = false,
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = closeLabel, tint = iconTint(3, selected))
+                }
             }
         }
     }
@@ -313,7 +326,7 @@ private fun QuickMenuOption(
         Spacer(Modifier.height(2.dp))
         Text(
             label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
             color = if (on) Color.White else Color.White.copy(alpha = 0.8f),
             fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,

@@ -7,6 +7,7 @@ import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderConfig
 import com.hikari.app.data.StreamSource
+import com.hikari.app.data.screenTypeFor
 import com.hikari.app.data.SubtitleSource
 import com.hikari.app.net.Http
 import com.hikari.app.providers.ContentProvider
@@ -502,7 +503,13 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         // film. Reclassifying it that way is what hid the episode grid, made the
         // Play button skip the episode the user had chosen, and told the cross
         // pass there was no S1E5 to match.
-        val type = MediaType.SERIES
+        //
+        // But exactly ONE episode IS evidence: an Aniyomi film is an anime
+        // with a single episode, so a one-row list plays and tags as a movie
+        // (no Series chip, no "Ep 1" pill, no Episodes (1) page) — the same
+        // universal differential as [screenTypeFor].
+        val type = screenTypeFor(item, episodes.size).takeUnless { episodes.isEmpty() }
+            ?: MediaType.SERIES
         val out = MediaItem(
             providerId = item.providerId,
             id = item.id,

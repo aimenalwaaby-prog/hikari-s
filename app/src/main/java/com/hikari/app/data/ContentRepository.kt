@@ -1465,13 +1465,19 @@ class ContentRepository(private val manager: ProviderManager) {
      *  answers are actually coming back. [crossExtensionTargets] already orders
      *  the queue by trust (origin's family, proven repos, then the rest), so
      *  the waves never cost a repo its turn — they only stagger its start. */
-    private val CROSS_EXT_WAVE_START = 8
+    private val CROSS_EXT_WAVE_START = 12
     /** Ceiling on one wave of repo searches — see [deviceFanOut]. A getter, not
      *  a value: the performance booster can be switched on while the app is
      *  running, and the NEXT lookup has to see it. */
     private val CROSS_EXT_WAVE_MAX: Int get() = deviceFanOut()
-    private val CROSS_EXT_WAVE_GAP_MS = 700L
-    private val CROSS_EXT_WAVE_SLOW_MS = 1_200L
+    // Tight stagger so answers arrive in big bursts: the sheet paints every
+    // arrival window as one batch (20-30 rows landing together is the normal
+    // case, not a special path), each paint as soon as it lands — never held
+    // for a full set, never cancelling an in-flight extraction. The wedge
+    // watchdog ([CROSS_EXT_STALL_MS]) and the device fan-out ceiling still
+    // bound the work; TV and booster caps are untouched.
+    private val CROSS_EXT_WAVE_GAP_MS = 400L
+    private val CROSS_EXT_WAVE_SLOW_MS = 800L
 
     /** How long the pass may go with NOTHING completing before it is called
      *  wedged and ends early, handing every repo it has no answer from to the

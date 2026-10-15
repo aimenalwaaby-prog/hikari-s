@@ -138,6 +138,7 @@ import com.hikari.app.data.HistoryEntry
 import com.hikari.app.data.LibraryCategory
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
+import com.hikari.app.data.screenTypeFor
 import com.hikari.app.data.ProviderType
 import com.hikari.app.data.RatingSource
 import com.hikari.app.data.RatingVerdict
@@ -828,8 +829,21 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
                             // alone). A single row proves nothing (films are
                             // listed as one entry by some providers), so those
                             // keep whatever type they arrived with.
-                            if (list.size >= 2 && _meta.value?.type != MediaType.SERIES) {
-                                _meta.value = _meta.value?.copy(type = MediaType.SERIES)
+                            //
+                            // And the reverse (see [screenTypeFor]): a
+                            // site-scraper "series" with exactly ONE episode is
+                            // a film wearing the wrong tag (Series chip, "Ep 1"
+                            // pill, Episodes (1) page with Play E1) — it plays
+                            // and files as a movie. Nuvio/Stremio/TMDB rows are
+                            // exempt inside the helper: their namespaces type
+                            // correctly.
+                            val cur = _meta.value
+                            if (cur != null) {
+                                val fixed = screenTypeFor(cur, list.size)
+                                if (fixed != cur.type) _meta.value = cur.copy(type = fixed)
+                                else if (list.size >= 2 && cur.type != MediaType.SERIES) {
+                                    _meta.value = cur.copy(type = MediaType.SERIES)
+                                }
                             }
                         }
                     } finally {
@@ -961,9 +975,16 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
                     _episodes.value = list
                     // Same type correction as the initial load above: a retry
                     // (or a Vega pack switch) that lands two or more episodes
-                    // on an UNKNOWN-typed item proves it is a series.
-                    if (list.size >= 2 && _meta.value?.type != MediaType.SERIES) {
-                        _meta.value = _meta.value?.copy(type = MediaType.SERIES)
+                    // on an UNKNOWN-typed item proves it is a series — and a
+                    // single-episode site-scraper "series" proves it is a film
+                    // (see [screenTypeFor]; Nuvio/Stremio/TMDB exempt).
+                    val cur = _meta.value
+                    if (cur != null) {
+                        val fixed = screenTypeFor(cur, list.size)
+                        if (fixed != cur.type) _meta.value = cur.copy(type = fixed)
+                        else if (list.size >= 2 && cur.type != MediaType.SERIES) {
+                            _meta.value = cur.copy(type = MediaType.SERIES)
+                        }
                     }
                 }
             } finally {

@@ -915,7 +915,7 @@ private fun CatalogCard(
     val shape = RoundedCornerShape(style.corner.dp)
     val cinema = style.isCinema(com.hikari.app.tv.TvMode.current())
     val hero = if (cinema) Artwork.heroModel(item) else null
-    // 1-second-hold quick menu (info / play / library) — see PosterQuickMenu.
+    // 1-second-hold quick menu (info / play / library / close) — see PosterQuickMenu.
     val quickMenu = rememberQuickMenuState()
     val quickScope = rememberCoroutineScope()
     val latestClick by rememberUpdatedState(onClick)
@@ -942,7 +942,9 @@ private fun CatalogCard(
                             val play = latestPlay
                             if (play != null) play(item) else latestClick()
                         }
-                        else -> quickScope.launch {
+                        // Slot 2 files into the Library; slot 3 (Close)
+                        // dismisses with no action.
+                        2 -> quickScope.launch {
                             runCatching { com.hikari.app.HikariApp.instance.store.addFavorite(item) }
                             runCatching {
                                 android.widget.Toast.makeText(
@@ -952,6 +954,7 @@ private fun CatalogCard(
                                 ).show()
                             }
                         }
+                        else -> {}
                     }
                 },
             contentAlignment = Alignment.Center,

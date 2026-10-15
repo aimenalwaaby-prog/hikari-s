@@ -8256,18 +8256,21 @@ class PlayerActivity : ComponentActivity() {
             }
             if (dialog.isShowing && chipScroll.scrollX != keepX) chipScroll.scrollTo(keepX, 0)
         }
-        // Live servers land in bursts (hundreds for big titles): running the
-        // full sync+sections+rebuild+layout pass on EVERY tick saturates the
-        // main thread, the sheet freezes, and the OS kills the app. Coalesce
-        // rapid ticks — at most one paint per 750ms, with a trailing paint so
-        // the last servers still land.
+        // Live servers land in bursts (dozens for big titles): painting every
+        // single arrival on the main thread saturates it — the sheet freezes
+        // and the OS kills the app. So rapid ticks coalesce into one in-place
+        // paint per window (350ms) with a trailing paint (400ms) so the last
+        // servers still land: each paint renders EVERYTHING pending as one
+        // batch (20-30 rows at once is the normal case), surfaces sooner, and
+        // stays read-only — a paint never cancels, restarts or otherwise
+        // contradicts an in-flight extraction.
         var lastChooserPaintMs = 0L
-        var chooserTrailingQueued = false // 500ms window + 550ms trailing (was 750/800): servers surface sooner, bursts still coalesce
+        var chooserTrailingQueued = false
         val requestPaint: () -> Unit = {
             val now = android.os.SystemClock.uptimeMillis()
             // A blank screen never waits for the coalescer: rows are already
             // children (the user is looking at an empty box over found
-            // servers), so paint now instead of in 800ms. The invariant is
+            // servers), so paint now instead of in ~350ms. The invariant is
             // "no blank while servers exist": zero on-screen rows over a
             // non-empty list paints NOW, however many children the container
             // holds (a mid-list collapse has >1 children yet shows nothing —
@@ -8276,14 +8279,14 @@ class PlayerActivity : ComponentActivity() {
             if (list.childCount <= 1 || (sources.isNotEmpty() && onScreenNow == 0)) {
                 lastChooserPaintMs = now
                 if (dialog.isShowing) paintChooser()
-            } else if (now - lastChooserPaintMs < 500) {
+            } else if (now - lastChooserPaintMs < 350) {
                 if (!chooserTrailingQueued) {
                     chooserTrailingQueued = true
                     list.postDelayed({
                         chooserTrailingQueued = false
                         lastChooserPaintMs = android.os.SystemClock.uptimeMillis()
                         if (dialog.isShowing) paintChooser()
-                    }, 550)
+                    }, 400)
                 }
             } else {
                 lastChooserPaintMs = now

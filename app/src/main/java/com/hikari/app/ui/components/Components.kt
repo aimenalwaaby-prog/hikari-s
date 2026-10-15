@@ -328,7 +328,7 @@ fun PosterCard(
     // height rather than a constant (see TvUi.posterWidth) so several rows fit
     // on one screen instead of one row covering it.
     val cardWidth = if (TvMode.current()) TvUi.posterWidth() else 120.dp
-    // 1-second-hold quick menu (info / play / library) — see PosterQuickMenu.
+    // 1-second-hold quick menu (info / play / library / close) — see PosterQuickMenu.
     // The lambdas are hoisted into refs so the gesture (keyed on Unit, never
     // restarted) can never close over a stale item after recomposition.
     val quickMenu = rememberQuickMenuState()
@@ -357,7 +357,10 @@ fun PosterCard(
                             val play = latestPlay
                             if (play != null) play(item) else latestClick()
                         }
-                        else -> scope.launch {
+                        // Slot 2 files into the Library; slot 3 (Close)
+                        // dismisses with no action, so an opened menu never
+                        // forces a pick.
+                        2 -> scope.launch {
                             runCatching { HikariApp.instance.store.addFavorite(item) }
                             runCatching {
                                 android.widget.Toast.makeText(
@@ -367,6 +370,7 @@ fun PosterCard(
                                 ).show()
                             }
                         }
+                        else -> {}
                     }
                 }
         ) {
