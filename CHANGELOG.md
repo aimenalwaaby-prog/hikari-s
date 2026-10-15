@@ -1,3 +1,10 @@
+## 0.11.32 (continuous build only)
+
+### Fixed
+- Add-a-source icons in the glassy line style: Hikari wears a line torii gate and Stremio a line diamond-play (motifs from the supplied art, drawn as strokes in the tile language) on phone + TV; Vega TV, Aniyomi flower, SkyStream stacked-cloud, Anymex A–Z, CloudStream cloud, Nuvio phone unchanged
+- Manga catalogues/searches never stop early (universal, all manga engines): a failed page (timeout, wall, exception) no longer counts as an empty page — catalogues hold the cursor and offer Retry instead of ending the list, and searches retire an engine only after 3 consecutive failures; page 2+ also loads while slow engines still answer, and tag search rides the same path, so scrolling is unlimited everywhere
+- WebView verification from anywhere (universal): the site chain now takes every URL the caller holds (chapter + manga pages first), so the reader's Verify button opens the site even when the extension itself will not load; global and tag search gain the globe (single engine opens directly, All offers an engine picker) and re-ask on return
+
 ## 0.11.31 (continuous build only)
 
 ### Fixed

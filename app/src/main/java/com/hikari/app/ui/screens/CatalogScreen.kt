@@ -43,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -273,6 +274,10 @@ class CatalogViewModel(
         loadJob = viewModelScope.launch {
             val provider: ContentProvider? = manager.byId(providerId)
             val ref = CatalogRef(providerId, type, _catalog.value, catalogName, rawType)
+            // A FAILED page (exception, wall, timeout) is not an empty page and
+            // never advances the cursor: the same page is asked again on retry
+            // instead of the list silently ending pages early.
+            var failed: Throwable? = null
             val fresh = try {
                 // A search is paged exactly like the catalog is: the same
                 // infinite-scroll effect asks for page 2, and a source with 400
@@ -323,8 +328,16 @@ class CatalogViewModel(
                 // was still running (pagination stopped dead after a search, and
                 // the grid looked like the engine had returned nothing).
                 if (t is kotlinx.coroutines.CancellationException) throw t
-                _reason.value = describeFailure(t)
+                failed = t
                 emptyList()
+            }
+            if (failed != null) {
+                // The page was never answered: hold the cursor (same page is
+                // asked on retry), keep the list open, and say why — the
+                // footer's Retry button is the way back (see the grid below).
+                _reason.value = describeFailure(failed!!)
+                _loading.value = false
+                return@launch
             }
             val translated = if (providerId in com.hikari.app.data.Translator.enabledIds()) {
                 com.hikari.app.data.Translator.translateAll(fresh.map { it.title })
@@ -878,6 +891,18 @@ fun CatalogScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        } else if (!done && items.isNotEmpty() && catalogReason != null) {
+                            // A page that FAILED (never answered) holds the
+                            // cursor and the list open — this is the way back.
+                            // Without it the scroll trigger (fired on position
+                            // change) never re-fires and the list sat stuck
+                            // until the page was left and re-entered.
+                            TextButton(onClick = { vm.loadNext() }) {
+                                Text(
+                                    tr("Couldn't load more — retry"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
                         }
                     }
                 }

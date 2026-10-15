@@ -19,7 +19,10 @@ import com.hikari.app.data.MediaItem
  *
  * It also carries the per-engine page cursor behind the endless scroll: each
  * engine's next page to ask ([nextPage]) and which engines answered a page
- * empty and have nothing more ([pagesDone]).
+ * empty and have nothing more ([pagesDone]). A failed page (timeout, thrown
+ * exception — a Cloudflare wall reads exactly like this) is NOT an empty
+ * page: it counts a strike in [pageFails] and the engine is only retired
+ * after 3 consecutive failures, so one walled moment can never end the list.
  */
 class MangaSearchViewModel : ViewModel() {
     var results by mutableStateOf<List<MediaItem>>(emptyList())
@@ -29,4 +32,5 @@ class MangaSearchViewModel : ViewModel() {
     var lastKey: String? = null
     val nextPage = mutableStateMapOf<String, Int>()
     val pagesDone = mutableStateMapOf<String, Boolean>()
+    val pageFails = mutableStateMapOf<String, Int>()
 }

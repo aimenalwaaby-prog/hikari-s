@@ -67,6 +67,8 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Tv
+import com.hikari.app.ui.HikariTorii
+import com.hikari.app.ui.StremioDiamond
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -5300,7 +5302,7 @@ private fun RepoBrowserView(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Cloud, tr("CloudStream repos"), tr("repo.json · CloudStream extensions"), { onOpenFolder(SourceFolder.CLOUDSTREAM) })
-                        srcCard(Icons.Filled.Extension, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) })
+                        srcCard(HikariTorii, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Smartphone, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
@@ -5312,7 +5314,7 @@ private fun RepoBrowserView(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.SortByAlpha, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
-                        srcCard(Icons.Filled.PlayArrow, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
+                        srcCard(StremioDiamond, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.LiveTv, tr("IPTV playlists"), tr("M3U / M3U8 links and files · live channels"), { onOpenFolder(SourceFolder.IPTV) })
@@ -5350,7 +5352,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Extension,
+                        icon = HikariTorii,
                         title = tr("Hikari repos"),
                         subtitle = tr("repo.json · Hikari extensions"),
                         onClick = { onOpenFolder(SourceFolder.HIKARI) }
@@ -5392,7 +5394,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.PlayArrow,
+                        icon = StremioDiamond,
                         title = tr("Stremio addons"),
                         subtitle = tr("manifest.json · Stremio addons"),
                         onClick = { onOpenFolder(SourceFolder.STREMIO) }

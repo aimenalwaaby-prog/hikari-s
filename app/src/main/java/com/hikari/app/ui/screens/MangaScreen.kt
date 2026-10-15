@@ -59,6 +59,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.hikari.app.HikariApp
@@ -187,6 +191,44 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
     var enginesLeft by searchVm::enginesLeft
 
     val scope = rememberCoroutineScope()
+    // Re-asks the engines after a verification WebView closes: a wall that
+    // has just been passed turns empty answers into real ones, and the grid
+    // must not sit on the old empties as if the check changed nothing.
+    var verifyTick by remember { mutableStateOf(0) }
+    val verifyLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        searchVm.lastKey = null
+        verifyTick++
+    }
+    // Opens one engine's site for its Cloudflare check. The chain ends at the
+    // engine's own pages, so an extension that will not load still resolves.
+    val openEngineVerify: (ContentProvider) -> Unit = { engine ->
+        scope.launch {
+            val site = withContext(Dispatchers.IO) {
+                runCatching { webUrlChain(engine) }.getOrNull()
+            }
+            if (site.isNullOrBlank()) {
+                android.widget.Toast.makeText(
+                    context,
+                    I18n.t("Couldn't determine this extension's site"),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            } else {
+                val host = runCatching { java.net.URI(site).host?.lowercase() }.getOrNull()
+                verifyLauncher.launch(
+                    android.content.Intent(context, com.hikari.app.web.WebViewActivity::class.java)
+                        .apply {
+                            putExtra("url", site)
+                            putExtra("title", "Verify: " + (host ?: engine.config.name))
+                            putExtra("providerId", engine.config.id)
+                            putExtra("autoCloseWhenCloudflarePassed", true)
+                            if (host != null) putExtra("verifyHost", host)
+                        }
+                )
+            }
+        }
+    }
     val typed = query.trim()
     // Blank here means a plain keyword search, exactly as before.
     val genreTag = genre.trim()
@@ -202,19 +244,28 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
 
     // Page 2+ of the same question, per engine, appended under the page-1
     // rows when the reader reaches the end (see the load-more footer below).
-    // An engine that answers a page empty has no more pages and is skipped.
+    // An engine that answers a page CLEAN-empty has no more pages and is
+    // skipped; an engine whose page FAILS (timeout, exception, Cloudflare
+    // wall) keeps its cursor and counts a strike — retired only after 3
+    // consecutive failures — so one bad moment never ends the scroll.
+    // Engines still on page 1 are skipped (their next page does not exist
+    // yet), which also lets this run while page-1 stragglers are still
+    // answering instead of waiting on the slowest engine.
     fun loadMore() {
         val tag = genreTag
-        val targets = searchTargets.filter { searchVm.pagesDone[it.config.id] != true }
-        if (targets.isEmpty() || searchVm.loadingMore || searching) return
+        val targets = searchTargets.filter {
+            searchVm.pagesDone[it.config.id] != true && searchVm.nextPage.containsKey(it.config.id)
+        }
+        if (targets.isEmpty() || searchVm.loadingMore) return
         searchVm.loadingMore = true
         scope.launch {
             try {
                 coroutineScope {
                     targets.forEach { p ->
                         launch {
+                            val id = p.config.id
                             try {
-                                val page = searchVm.nextPage[p.config.id] ?: 2
+                                val page = searchVm.nextPage[id] ?: 2
                                 val keyword = typed.ifBlank { tag }
                                 val found = withTimeoutOrNull(25_000L) {
                                     runCatching {
@@ -222,18 +273,29 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                                             (p as? com.hikari.app.manga.MangaProvider)?.searchByGenre(tag, page)
                                                 ?: p.search(keyword, page)
                                         } else p.search(typed, page)
-                                    }.getOrDefault(emptyList())
-                                } ?: emptyList()
+                                    }.getOrNull()
+                                }
+                                if (found == null) {
+                                    // Failed, not empty: keep the cursor for a
+                                    // later pass, third consecutive strike ends.
+                                    val fails = (searchVm.pageFails[id] ?: 0) + 1
+                                    searchVm.pageFails[id] = fails
+                                    if (fails >= 3) searchVm.pagesDone[id] = true
+                                    return@launch
+                                }
                                 val kept = if (tag.isNotBlank()) found.filter { genreMatches(it.genres, tag) }
                                 else found
                                 if (kept.isEmpty()) {
-                                    searchVm.pagesDone[p.config.id] = true
+                                    searchVm.pagesDone[id] = true
                                 } else {
                                     results = (results + kept).distinctBy { it.uniqueId }
-                                    searchVm.nextPage[p.config.id] = page + 1
+                                    searchVm.nextPage[id] = page + 1
+                                    searchVm.pageFails[id] = 0
                                 }
                             } catch (_: Exception) {
-                                searchVm.pagesDone[p.config.id] = true
+                                val fails = (searchVm.pageFails[id] ?: 0) + 1
+                                searchVm.pageFails[id] = fails
+                                if (fails >= 3) searchVm.pagesDone[id] = true
                             }
                         }
                     }
@@ -246,8 +308,9 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
 
     // Debounced cross-engine search. Runs on the text itself rather than on a
     // keyboard action because the field is a plain BasicTextField (the app's
-    // shared glass search box) with no IME action to hook.
-    LaunchedEffect(typed, genreTag, enginePick, engineKey) {
+    // shared glass search box) with no IME action to hook. verifyTick re-runs
+    // the same question after a verification WebView closes (see above).
+    LaunchedEffect(typed, genreTag, enginePick, engineKey, verifyTick) {
         val tag = genreTag
         if (typed.isBlank() && tag.isBlank()) {
             results = emptyList()
@@ -269,6 +332,7 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
         results = emptyList()
         searchVm.nextPage.clear()
         searchVm.pagesDone.clear()
+        searchVm.pageFails.clear()
         // Every engine at once — each one is a separate site and they answer in
         // parallel; the app's own gate keeps a big install from flooding the
         // network (see ProviderGate). One engine throwing must not empty the
@@ -291,6 +355,10 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                         // such filter — fall back to a keyword search). Either way
                         // only tag-holders are kept below, so title matches that
                         // merely contain the word never leak into a tag search.
+                        // A null answer is a FAILURE (timeout/exception), not an
+                        // empty page: it counts a strike, and only the third
+                        // consecutive strike retires the engine — a walled first
+                        // page must not read as "this engine has nothing".
                         val keyword = typed.ifBlank { tag }
                         val found = withTimeoutOrNull(25_000L) {
                             runCatching {
@@ -298,13 +366,22 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                                     (p as? com.hikari.app.manga.MangaProvider)?.searchByGenre(tag, 1)
                                         ?: p.search(keyword, 1)
                                 } else p.search(typed, 1)
-                            }.getOrDefault(emptyList())
-                        } ?: emptyList()
+                            }.getOrNull()
+                        }
+                        if (found == null) {
+                            val id = p.config.id
+                            val fails = (searchVm.pageFails[id] ?: 0) + 1
+                            searchVm.pageFails[id] = fails
+                            if (fails >= 3) searchVm.pagesDone[id] = true
+                            else searchVm.nextPage[id] = 1
+                            return@launch
+                        }
                         val kept = if (tag.isNotBlank()) found.filter { genreMatches(it.genres, tag) }
                         else found
                         if (kept.isNotEmpty()) {
                             results = (results + kept).distinctBy { it.uniqueId }
                             searchVm.nextPage[p.config.id] = 2
+                            searchVm.pageFails[p.config.id] = 0
                         } else {
                             searchVm.pagesDone[p.config.id] = true
                         }
@@ -361,6 +438,39 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                     value = query,
                     onValueChange = { query = it },
                     placeholder = tr("Search every manga engine"),
+                    trailing = {
+                        // A walled engine answers searches with nothing — the
+                        // same Cloudflare check the catalog header's globe
+                        // passes, here for global and tag search. One engine
+                        // picked means that engine; All means a picker.
+                        var verifyMenu by remember { mutableStateOf(false) }
+                        IconButton(onClick = {
+                            val picked = searchTargets.firstOrNull { it.config.id == enginePick }
+                            if (picked != null) openEngineVerify(picked)
+                            else verifyMenu = true
+                        }) {
+                            Icon(
+                                Icons.Filled.Public,
+                                contentDescription = tr("Verify an engine's site"),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = verifyMenu,
+                            onDismissRequest = { verifyMenu = false },
+                        ) {
+                            searchTargets.forEach { engine ->
+                                DropdownMenuItem(
+                                    text = { Text(engine.config.name) },
+                                    onClick = {
+                                        verifyMenu = false
+                                        openEngineVerify(engine)
+                                    },
+                                )
+                            }
+                        }
+                    },
                 )
                 // The armed tag (see above): clearing it drops back to the
                 // plain keyword search.
@@ -500,9 +610,12 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                 // page-1 rows asks every engine with pages left for its next
                 // page, one page per engine per pass — the answers stream in
                 // the same way page 1 did, so paging never ends at page 1.
+                // Deliberately NOT gated on `searching`: page-1 stragglers
+                // must not hold the fast engines' page 2 hostage, and
+                // loadMore only asks engines whose page 1 already landed.
                 val queryActive = typed.isNotBlank() || genreTag.isNotBlank()
                 val moreLeft = searchTargets.any { searchVm.pagesDone[it.config.id] != true }
-                if (queryActive && !searching && moreLeft) {
+                if (queryActive && moreLeft) {
                     item(key = "manga-load-more", span = { GridItemSpan(maxLineSpan) }) {
                         LaunchedEffect(visibleResults.size) {
                             if (!searchVm.loadingMore) loadMore()
