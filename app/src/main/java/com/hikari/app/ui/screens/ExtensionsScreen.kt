@@ -63,11 +63,11 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Tv
+import com.hikari.app.ui.AnymexA
 import com.hikari.app.ui.HikariTorii
+import com.hikari.app.ui.NuvioTriangle
 import com.hikari.app.ui.StremioDiamond
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -5305,7 +5305,7 @@ private fun RepoBrowserView(
                         srcCard(HikariTorii, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Smartphone, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
+                        srcCard(NuvioTriangle, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
                         srcCard(Icons.Filled.CloudQueue, tr("SkyStream repos"), tr("repo.json · SkyStream extensions"), { onOpenFolder(SourceFolder.SKYSTREAM) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5313,7 +5313,7 @@ private fun RepoBrowserView(
                         srcCard(Icons.Filled.Tv, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.SortByAlpha, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
+                        srcCard(AnymexA, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
                         srcCard(StremioDiamond, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5359,7 +5359,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Smartphone,
+                        icon = NuvioTriangle,
                         title = tr("Nuvio repos"),
                         subtitle = tr("manifest.json · Nuvio providers"),
                         onClick = { onOpenFolder(SourceFolder.NUVIO) }
@@ -5387,7 +5387,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.SortByAlpha,
+                        icon = AnymexA,
                         title = tr("Anymex"),
                         subtitle = tr("Sora sources · Anymex extensions"),
                         onClick = { onOpenFolder(SourceFolder.ANYMEX_HOME) }

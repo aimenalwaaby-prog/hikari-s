@@ -1,3 +1,8 @@
+## 0.11.33
+
+### Fixed
+- Add-a-source icons in the glassy line style: Nuvio wears a solid play triangle and Anymex a line A with its sweeping cut (motifs from the supplied art, drawn as strokes in the tile language) on phone + TV; Hikari torii, Stremio diamond-play, Vega TV, Aniyomi flower, SkyStream stacked-cloud, CloudStream cloud unchanged
+
 ## 0.11.32 (continuous build only)
 
 ### Fixed

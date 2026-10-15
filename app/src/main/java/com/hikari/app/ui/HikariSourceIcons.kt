@@ -60,3 +60,27 @@ val StremioDiamond: ImageVector by lazy {
         )
         .build()
 }
+
+/** Nuvio's play triangle: solid rounded triangle, the reference mark. */
+val NuvioTriangle: ImageVector by lazy {
+    strokeBuilder("NuvioTriangle")
+        .addPath(
+            pathData = strokeNodes("M8,5.2 L19,12 L8,18.8 Z"),
+            fill = SolidColor(Color.White),
+            stroke = SolidColor(Color.White),
+            strokeLineWidth = 2f,
+            strokeLineCap = StrokeCap.Round,
+            strokeLineJoin = StrokeJoin.Round,
+        )
+        .build()
+}
+
+/** Anymex's A: twin legs, crossbar and the reference's sweeping cut. */
+val AnymexA: ImageVector by lazy {
+    strokeBuilder("AnymexA")
+        .stroke("M5.5,20 L12,4", 2.4f)
+        .stroke("M12,4 L18.5,20", 2.4f)
+        .stroke("M8.3,14 L15.7,14", 2f)
+        .stroke("M3,16.5 C8,15.5 14,12.5 21,7", 1.4f)
+        .build()
+}
