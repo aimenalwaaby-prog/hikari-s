@@ -14,8 +14,10 @@ import androidx.preference.SeekBarPreference
 import androidx.preference.TwoStatePreference
 import com.hikari.app.aniyomi.AniyomiExtensionManager
 import com.hikari.app.manga.MangaExtensionManager
+import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.source.ConfigurableSource
+import eu.kanade.tachiyomi.source.MangaSource
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
