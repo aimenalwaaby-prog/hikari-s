@@ -114,6 +114,14 @@ object NetworkStream {
 
     /** [url] with default trackers appended when a magnet names none. */
     private fun withDefaultTrackers(url: String): String {
+        if (!url.startsWith("magnet:", ignoreCase = true)) return url
+        if (url.contains("&tr=", ignoreCase = true)) return url
+        val tr = DEFAULT_TRACKERS.joinToString("") {
+            "&tr=" + URLEncoder.encode(it, "UTF-8")
+        }
+        return url + tr
+    }
+
     /**
      * Normalizes a pasted link exactly the way it is saved: surrounding and
      * inner whitespace stripped (hashes/URLs pasted with line breaks), a bare
@@ -129,13 +137,6 @@ object NetworkStream {
         if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
         if (trimmed.isBlank()) return ""
         return "https://$trimmed"
-    }
-        if (!url.startsWith("magnet:", ignoreCase = true)) return url
-        if (url.contains("&tr=", ignoreCase = true)) return url
-        val tr = DEFAULT_TRACKERS.joinToString("") {
-            "&tr=" + URLEncoder.encode(it, "UTF-8")
-        }
-        return url + tr
     }
 
     /** True for a magnet link or .torrent file: torrent-engine territory, never
