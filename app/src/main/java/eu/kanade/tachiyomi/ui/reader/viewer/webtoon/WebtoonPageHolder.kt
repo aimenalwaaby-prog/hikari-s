@@ -138,6 +138,7 @@ class WebtoonPageHolder(
                     viewer.pageConfig.copy(
                         isTallImage = meta?.isTall,
                         decodeRgb565 = viewer.decodeRgb565,
+                        sharpen = viewer.sharpenPages,
                         nativeWidth = meta?.width,
                         nativeHeight = meta?.height,
                     ),

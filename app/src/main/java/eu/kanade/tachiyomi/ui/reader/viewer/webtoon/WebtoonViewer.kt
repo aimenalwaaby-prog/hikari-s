@@ -98,6 +98,12 @@ class WebtoonViewer(context: Context) {
             reloadPages()
         }
 
+    /** Unsharp-mask pass on short pages at High quality and above (Coil
+     *  transformation, part of the memory-cache key — see
+     *  ReaderPageImageView.Config.sharpen). Plain field like decodeWidth: new
+     *  binds and warms pick it up, in-flight pages keep theirs. */
+    var sharpenPages: Boolean = false
+
     /** Rendering config for each page (fit-width, pinch-to-zoom, ...). */
     var pageConfig: ReaderPageImageView.Config = ReaderPageImageView.Config(
         zoomDuration = 200,

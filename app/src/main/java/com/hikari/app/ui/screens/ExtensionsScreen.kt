@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -63,7 +64,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Speaker
+import androidx.compose.material.icons.filled.SortByAlpha
+import androidx.compose.material.icons.filled.Spa
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -5301,14 +5304,14 @@ private fun RepoBrowserView(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Smartphone, tr("Nuvio repos"), tr("manifest.json · Nuvio providers"), { onOpenFolder(SourceFolder.NUVIO) })
-                        srcCard(Icons.Filled.Extension, tr("SkyStream repos"), tr("repo.json · SkyStream extensions"), { onOpenFolder(SourceFolder.SKYSTREAM) })
+                        srcCard(Icons.Filled.CloudQueue, tr("SkyStream repos"), tr("repo.json · SkyStream extensions"), { onOpenFolder(SourceFolder.SKYSTREAM) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Extension, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) })
-                        srcCard(Icons.Filled.Speaker, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
+                        srcCard(Icons.Filled.Spa, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) })
+                        srcCard(Icons.Filled.Tv, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Extension, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
+                        srcCard(Icons.Filled.SortByAlpha, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
                         srcCard(Icons.Filled.PlayArrow, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5361,28 +5364,28 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Extension,
+                        icon = Icons.Filled.CloudQueue,
                         title = tr("SkyStream repos"),
                         subtitle = tr("repo.json · SkyStream extensions"),
                         onClick = { onOpenFolder(SourceFolder.SKYSTREAM) }
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Extension,
+                        icon = Icons.Filled.Spa,
                         title = tr("Aniyomi repos"),
                         subtitle = tr("index.min.json · Aniyomi extensions"),
                         onClick = { onOpenFolder(SourceFolder.ANIYOMI) }
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Speaker,
+                        icon = Icons.Filled.Tv,
                         title = tr("Vega repos"),
                         subtitle = tr("manifest.json · Vega providers"),
                         onClick = { onOpenFolder(SourceFolder.VEGA) }
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Extension,
+                        icon = Icons.Filled.SortByAlpha,
                         title = tr("Anymex"),
                         subtitle = tr("Sora sources · Anymex extensions"),
                         onClick = { onOpenFolder(SourceFolder.ANYMEX_HOME) }

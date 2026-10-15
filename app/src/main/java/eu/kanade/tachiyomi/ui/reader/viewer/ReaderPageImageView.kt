@@ -26,6 +26,7 @@ import coil.size.Size
 import com.davemorrissey.labs.subscaleview.ImageSource
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.hikari.app.reader.coil.cropBorders
+import com.hikari.app.reader.coil.SharpenTransformation
 import com.hikari.app.reader.cache.WebtoonPageCache
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonBorderDetector
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonChunkedImageView
@@ -434,6 +435,10 @@ open class ReaderPageImageView @JvmOverloads constructor(
             // simultaneous multi-megabyte decodes from each slowing to ~420ms. Not part of the
             // memory-cache key, so the prewarm's warm (which sets it too) still hits.
             .decoderDispatcher(readerPageDecodeDispatcher)
+        // Crispness pass (High/Ultra/4K): same flag the warm loop sets under the
+        // same quality condition, so the warm's bitmap is exactly the one the
+        // bind hits — transformations are part of Coil's memory-cache key.
+        if (config.sharpen) builder.transformations(SharpenTransformation())
         // Only opt into the border-crop path when actually cropping. Setting the crop parameter
         // (even to false) changes Coil's memory-cache key (MemoryCacheService: parameters become
         // key extras), so an always-set parameter would make the prewarm's warm request — which
@@ -600,6 +605,12 @@ open class ReaderPageImageView @JvmOverloads constructor(
         val isTallImage: Boolean? = null,
         val canUseHardwareBitmap: Boolean? = null,
         val decodeRgb565: Boolean = false,
+        // Unsharp-mask pass on short pages (High quality and above): the decode
+        // size is unchanged, but text and line art read crisper on screens wider
+        // than the source. Part of the Coil memory-cache key (transformations
+        // are keyed), so sharpened and plain decodes never collide — the warm
+        // loop sets the same flag under the same quality condition.
+        val sharpen: Boolean = false,
         val alwaysDecodeLongStripWithSSIV: Boolean = false,
         val doubleTapZoom: Boolean = true,
         val disableZoomIn: Boolean = false,

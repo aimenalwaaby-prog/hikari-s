@@ -52,6 +52,11 @@ object VegaPluginManager {
             "Vega Providers",
             "The official Vega repo (AniKoto, 4KHDHub, Showbox, NetflixMirror, …)",
         ),
+        Triple(
+            "https://raw.githubusercontent.com/DHR-Store/vega-providers/main/manifest.json",
+            "Vega Providers (Vega-Next)",
+            "The Vega-Next fork's provider repo (same manifest shape, bare array)",
+        ),
     )
 
     fun providersDir(context: Context): File =

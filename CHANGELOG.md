@@ -1,3 +1,10 @@
+## 0.11.31 (continuous build only)
+
+### Fixed
+- Add-a-source icons stay glassy line icons (phone + TV): Vega wears the TV outline, Aniyomi the flower, SkyStream the stacked-cloud, Anymex the A–Z mark — no image-look tiles anywhere; CloudStream cloud, Hikari puzzle, Nuvio phone and Stremio play unchanged
+- Reader image enhancement (not just bigger decodes): every quality tier decodes full colour (the Low-tier RGB_565 banding is gone — the pixel-budget cap already covers its memory saving), and High/Ultra/4K add a bounded unsharp-mask pass so upscaled sources read crisp; the warm loop carries the same pass, so prewarmed pages are still instant cache hits; Low/Medium stay on the fast plain path
+- Vega-Next providers built in: the Vega-Next fork's provider repo (same bare-array manifest shape, verified live) seeds alongside the official Vega repo — existing installs pick it up, nothing is pre-installed
+
 ## 0.11.30 (continuous build only)
 
 ### Fixed

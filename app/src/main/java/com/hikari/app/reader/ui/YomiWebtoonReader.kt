@@ -50,6 +50,7 @@ fun YomiWebtoonReader(
     colorFilter: android.graphics.ColorFilter?,
     decodeWidth: Int,
     rgb565: Boolean,
+    sharpen: Boolean,
     autoScroll: Boolean,
     autoScrollSpeedDp: Float,
     initialPageIndex: Int,
@@ -115,6 +116,7 @@ fun YomiWebtoonReader(
             v.colorFilter = colorFilter
             v.decodeWidth = decodeWidth
             v.decodeRgb565 = rgb565
+            v.sharpenPages = sharpen
             v.onPageChanged = { seg, page, total -> onPageChanged(seg, page, total) }
             v.onNearEndChanged = { near -> onNearEndChanged(near) }
             v.onNearStartChanged = { near -> onNearStartChanged(near) }
@@ -136,6 +138,7 @@ fun YomiWebtoonReader(
             v.colorFilter = colorFilter
             v.decodeWidth = decodeWidth
             v.decodeRgb565 = rgb565
+            v.sharpenPages = sharpen
             v.setTheme(bgColor.toArgb(), textColor.toArgb())
             v.onNearStartChanged = { near -> onNearStartChanged(near) }
             if (lastSignature != itemsSignature) {

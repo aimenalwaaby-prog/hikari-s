@@ -79,6 +79,7 @@ import com.hikari.app.reader.ReaderOrientation
 import com.hikari.app.reader.ReaderSettings
 import com.hikari.app.reader.cache.WebtoonPageCache
 import com.hikari.app.reader.coil.cropBorders
+import com.hikari.app.reader.coil.SharpenTransformation
 import com.hikari.app.reader.isWebtoon
 import com.hikari.app.reader.source.HikariPageSource
 import com.hikari.app.reader.source.MangaSource
@@ -771,10 +772,19 @@ fun MangaReaderScreen(
     // Strips are always drawn at fill-width, so a strip decoded below the screen
     // width costs a little sharpness and saves a lot of memory. The reader's
     // "Image quality" setting picks the width (50/75/100/150/200%, capped at
-    // 2160px so a full-quality decode can never OOM the device); the Low tier
-    // also decodes as RGB_565 for heavy chapters.
+    // 2160px so a full-quality decode can never OOM the device); every tier
+    // decodes full colour (no RGB_565), and High and above add a bounded
+    // unsharp-mask pass so upscaled sources read crisp.
     val webtoonDecodeWidth = (screenWidthPx * settings.readerQuality / 100f).roundToInt().coerceIn(360, 2160)
-    val useRgb565 = isWebtoon && settings.readerQuality == 50
+    // Full colour at every tier: the old Low-tier RGB_565 decode banded gradients
+    // and dulled text for a memory saving the pixel-budget cap already covers,
+    // so it is gone — tall strips decode at 4 bytes/px like everything else.
+    val useRgb565 = false
+    // Crispness pass at High quality and above (Ultra/4K included): a bounded
+    // unsharp-mask over the decoded page. Low/Medium stay on the fast plain
+    // path. MUST match ReaderPageImageView's bind (config.sharpen comes from
+    // this same flag via the viewer) or the warm's bitmap never hits.
+    val sharpenPages = settings.readerQuality >= 100
     val displayDecodeWidth = if (isWebtoon) webtoonDecodeWidth else screenWidthPx
     val cacheDir = remember { File(context.cacheDir, "webtoon_pages") }
 
@@ -984,6 +994,10 @@ fun MangaReaderScreen(
                                     .allowHardware(!settings.cropBorders)
                                     .decoderDispatcher(readerPageDecodeDispatcher)
                                     .apply { if (settings.cropBorders) cropBorders(true) }
+                                    // Same crispness flag as the bind (see sharpenPages):
+                                    // transformations key the memory cache, so a
+                                    // mismatched warm would never hit.
+                                    .apply { if (sharpenPages) transformations(SharpenTransformation()) }
                                     .build(),
                             )
                         }
@@ -1175,6 +1189,7 @@ fun MangaReaderScreen(
                 colorFilter = pageColorFilter,
                 decodeWidth = displayDecodeWidth,
                 rgb565 = useRgb565,
+                sharpen = sharpenPages,
                 autoScroll = settings.autoScroll,
                 autoScrollSpeedDp = settings.autoScrollSpeedDp,
                 initialPageIndex = webtoonInitialPos,
