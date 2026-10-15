@@ -1,3 +1,10 @@
+## 0.11.25 (continuous build only)
+
+### Fixed
+- Series hold-play just sat on the detail page while movies played: autoplay waited on the FULL episode lookup before firing. It now fires the moment the lookup settles with the continue episode (history progress) or the first aired episode — and a lookup that never settles still opens the player after a bounded 8s wait, with episode 1 resolving behind the player's own title card. Continue-episode servers are additionally prefetched once episodes land (the page prefetch only warms the first), so Resume taps start instantly
+- AnymeX 1-to-1 with the AnymeX app (engine-level, no per-extension code): the app always hands getVideoList an episode link, so a movie tap now resolves the extension's own first episode instead of feeding getVideoList the title URL (which answered nothing); an empty answer gets one bounded owned-credential retry (re-resolved list matched by season+number, number-only fallback) before "no playable sources"
+- Instant servers everywhere: hold-play on series no longer stares at the detail page (player opens within seconds on the live feed's first server, the sweep keeps filling behind), continue taps are prefetch cache hits, and the first-episode page prefetch still covers fresh series
+
 ## 0.11.24 (continuous build only)
 
 ### Fixed

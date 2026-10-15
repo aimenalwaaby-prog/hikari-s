@@ -328,14 +328,50 @@ class AnymexProvider(override val config: ProviderConfig) : ContentProvider {
         withContext(Dispatchers.IO) {
             val started = System.currentTimeMillis()
             val mod = module() ?: return@withContext fail("✗ Source file is missing — reinstall it.")
-            val epRel = episode?.id?.takeIf { it.isNotBlank() } ?: item.id
+            // AnymeX-app parity: the app ALWAYS hands getVideoList an EPISODE
+            // link, never a title link — a film is just an anime with episodes,
+            // and tapping it plays its first one (exactly like the Aniyomi
+            // provider here). Feeding the detail URL straight to getVideoList
+            // answers nothing on most extensions ("no playable sources" for a
+            // movie that plays in AnymeX), so a movie tap resolves the
+            // extension's own first episode first; the title id stays only as
+            // the last resort when the list itself is unreachable.
+            val epRel = episode?.id?.takeIf { it.isNotBlank() }
+                ?: runCatching { withTimeoutOrNull(20_000L) { getEpisodes(item) } }.getOrNull()
+                    ?.sortedWith(compareBy({ it.season }, { it.number }))
+                    ?.firstOrNull()?.id?.takeIf { it.isNotBlank() }
+                ?: item.id
             // The episode page is fetched by name here (a bare Client.get),
             // not through the extension's own site-prefixed request — a
             // site-relative id would fetch nothing, so it is resolved first.
             val epUrl = absUrl(cleanLink(epRel), siteBase()).ifBlank { epRel }
             val raw = AnymexRuntime.videos(mod, config.id, epUrl)
                 ?: return@withContext fail("✗ No playable sources for this title.")
-            val answered = mapVideos(raw, siteBase())
+            var answered = mapVideos(raw, siteBase())
+            if (answered.isEmpty() && episode != null) {
+                // Own-credential retry (same class as the central re-resolve):
+                // the tapped id can predate the install (cached list + silent
+                // update) or belong to another engine's borrowed row, and the
+                // extension finds no videos on a foreign credential. One
+                // bounded re-resolve matched by season+number (number-only
+                // fallback for absolute anime numbering); only a DIFFERENT id
+                // retries, so an owned miss costs one list fetch, never a loop.
+                val owned = runCatching { withTimeoutOrNull(20_000L) { getEpisodes(item) } }
+                    .getOrNull()?.sortedWith(compareBy({ it.season }, { it.number }))
+                val match = owned
+                    ?.firstOrNull { it.season == episode.season && it.number == episode.number }
+                    ?: owned?.firstOrNull { it.number == episode.number }
+                if (match != null && match.id.isNotBlank() && match.id != episode.id) {
+                    val retryUrl = absUrl(cleanLink(match.id), siteBase()).ifBlank { match.id }
+                    val retryRaw = runCatching {
+                        withTimeoutOrNull(30_000L) { AnymexRuntime.videos(mod, config.id, retryUrl) }
+                    }.getOrNull()
+                    if (retryRaw != null) {
+                        val retryMapped = mapVideos(retryRaw, siteBase())
+                        if (retryMapped.isNotEmpty()) answered = retryMapped
+                    }
+                }
+            }
             if (answered.isEmpty()) return@withContext fail("✗ No playable sources for this title.")
             // Playing logic (AnymeX app parity + one step further): an
             // extension that answers EMBED pages instead of files (watch,

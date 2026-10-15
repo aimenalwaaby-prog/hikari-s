@@ -1358,6 +1358,24 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
         _streamsReady.value = true
     }
 
+    /** Warms one NON-first episode's servers (the continue episode — the page
+     *  prefetch above only warms the first), so its Resume tap is a cache hit.
+     *  Same sharing as every other lookup (see [resolveStreams]). */
+    fun prefetchEpisode(base: MediaItem, ep: Episode) {
+        viewModelScope.launch {
+            val key = cacheKey(base, ep)
+            val cached = StreamCache.get(key)
+            if (cached != null && cached.list.isNotEmpty() &&
+                System.currentTimeMillis() - cached.at < STREAM_CACHE_TTL_MS
+            ) {
+                return@launch
+            }
+            resolveStreams(base, ep, onProgress = { partial ->
+                if (partial.isNotEmpty()) _streamsReady.value = true
+            })
+        }
+    }
+
     private fun cacheKey(item: MediaItem, ep: Episode?): String =
         item.providerId + "|" + item.id + "|" + (ep?.id ?: "")
 
@@ -3066,15 +3084,37 @@ fun DetailScreen(
         ?: sortedEps.firstOrNull { !isEpisodeUnaired(it.released) }
         ?: sortedEps.firstOrNull())
     // Poster hold-menu play arrives already wanting playback: fire the primary
-    // action ONCE, as soon as the episode lookup has settled (movies settle
-    // with no episodes — see the view-model) — exactly as if Play was tapped.
+    // action ONCE — exactly as if Play was tapped. Movies settle with no
+    // episodes (see the view-model) so they fire at once; a series fires the
+    // moment its lookup settles with the continue episode (history progress)
+    // or the first aired episode. A series whose lookup never settles does
+    // NOT sit on the detail page: after a bounded wait it opens the player
+    // anyway, and the player resolves episode 1 behind its own title card
+    // (see firstEpisodeOrNull) — so hold-play on a series always plays.
     // Unaired picks toast and stop here, like a manual tap.
     var autoplayFired by remember(autoplay) { mutableStateOf(false) }
     LaunchedEffect(autoplay, episodesLoaded, detailBtnEp) {
         if (!autoplay || autoplayFired) return@LaunchedEffect
-        if (!episodesLoaded) return@LaunchedEffect
+        if (episodesLoaded) {
+            autoplayFired = true
+            if (!playBlocked(detailBtnEp)) tryPlay(detailBtnEp)
+            return@LaunchedEffect
+        }
+        withTimeoutOrNull(8_000L) { vm.episodesLoaded.first { it } }
         autoplayFired = true
         if (!playBlocked(detailBtnEp)) tryPlay(detailBtnEp)
+    }
+    // A returning viewer lands here to continue, not to start over: once the
+    // episodes are known, warm the CONTINUE episode's servers in the
+    // background (the page prefetch only warms the first), so the Resume tap
+    // is a cache hit and starts instantly. Skipped for hold-play arrivals —
+    // autoplay is already playing the target directly.
+    LaunchedEffect(episodesLoaded, resumeEp?.id) {
+        if (!episodesLoaded || autoplay) return@LaunchedEffect
+        val target = resumeEp ?: return@LaunchedEffect
+        if (target.id == sortedEps.firstOrNull()?.id) return@LaunchedEffect
+        val now = m ?: return@LaunchedEffect
+        vm.prefetchEpisode(now, target)
     }
     val detailActionLabel = if (scraperImageMode) I18n.t("Read") else when {
         resumeEp != null ->
