@@ -90,6 +90,10 @@ object DownloadEngine {
      *  connections never kills the whole download. */
     private const val SEGMENT_RETRIES = 5
 
+    /** The reference player's UA — the player's own last-resort pass: some
+     *  stream CDNs serve the reference app and refuse a browser UA. */
+    private const val REFERENCE_UA = "ExoPlayerLib/1.7.1"
+
     suspend fun run(
         ctx: Context,
         task: DownloadTask,
@@ -596,16 +600,17 @@ object DownloadEngine {
         var triedFresh = false
         var rateAttempts = 0
         // Signed-CDN header walk (mirrors the player's own: full → no Referer
-        // → UA-only). A VidLink-style signed mp4 that 428s/403s with extractor
-        // headers often downloads bare — the log_31 class played on the
-        // player's 4th attempt but failed the same URL as a download.
+        // → UA-only → reference-UA). A VidLink-style signed mp4 that 428s/403s
+        // with extractor headers often downloads on the player's 4th attempt
+        // but failed the same URL as a download when the walk stopped at 3.
         var headerStep = 0
         var effHeaders = headers
+        var effUa = ua
         var rangeStart: Long? = if (byteRange != null) null else if (startAt > 0L) startAt else null
         // byteRange requests keep their exact range; resume requests may drop it.
         while (true) {
             val req = Request.Builder().url(url)
-            applyHeaders(req, effHeaders, ua)
+            applyHeaders(req, effHeaders, effUa)
             if (byteRange != null) {
                 req.header("Range", "bytes=${byteRange.first}-${byteRange.second}")
             } else if (rangeStart != null && rangeStart!! > 0L) {
@@ -658,7 +663,7 @@ object DownloadEngine {
                 // A thrown 403 joins the header walk below while steps remain.
                 val m = e.message.orEmpty()
                 val walkable = m.contains("428") || m.contains("403")
-                if (!walkable || byteRange != null || (triedFresh && headerStep >= 2)) throw e
+                if (!walkable || byteRange != null || (triedFresh && headerStep >= 3)) throw e
                 code = if (m.contains("403")) 403 else 428
             }
             if (code == 429) {
@@ -676,12 +681,15 @@ object DownloadEngine {
                 kotlinx.coroutines.delay(400)
                 continue
             }
-            if ((code == 428 || code == 403) && headerStep < 2 && byteRange == null) {
+            if ((code == 428 || code == 403) && headerStep < 3 && byteRange == null) {
                 headerStep++
-                effHeaders = if (headerStep == 1) {
-                    effHeaders.filterKeys { !it.equals("Referer", ignoreCase = true) }
+                if (headerStep == 1) {
+                    effHeaders = effHeaders.filterKeys { !it.equals("Referer", ignoreCase = true) }
+                } else if (headerStep == 2) {
+                    effHeaders = effHeaders.filterKeys { it.equals("User-Agent", ignoreCase = true) }
                 } else {
-                    effHeaders.filterKeys { it.equals("User-Agent", ignoreCase = true) }
+                    effHeaders = effHeaders.filterKeys { it.equals("User-Agent", ignoreCase = true) }
+                    effUa = REFERENCE_UA
                 }
                 triedFresh = true
                 rangeStart = null

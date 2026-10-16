@@ -580,6 +580,11 @@ data class StreamSource(
     val torrentFileHint: String? = null,
     /** Same row's declared byte size (behaviorHints.videoSize), 0 = unknown. */
     val torrentFileSize: Long = 0L,
+    /** Novel text for one chapter part (plain-Source novel extensions): the
+     *  image reader ignores rows with a blank url, so text chapters travel
+     *  here instead of as images — the novel reader joins them. Blank for
+     *  every video/image source. */
+    val text: String = "",
 ) {
     /** Identity across every merge/dedup in the app: a torrent is its
      *  infoHash PLUS its file index — two files of one pack share the hash

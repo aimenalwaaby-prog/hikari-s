@@ -14,6 +14,7 @@ import com.hikari.app.providers.ContentProvider
 import com.hikari.app.providers.ProviderGate
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.MangaSource
+import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
@@ -90,6 +91,14 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
 
     private fun source(): CatalogueSource? =
         MangaExtensionManager.sourceOf(context, extFile, sourceIndex) as? CatalogueSource
+
+    /** True when this row is a plain text-chapter (novel) source: no manga
+     *  methods, no catalogue or search index — chapters + text only. */
+    private val isNovel: Boolean get() = MangaExtensionManager.isNovelId(config.id)
+
+    /** The novel source for a novel row (null for manga rows). */
+    private fun novelSrc(): Source? =
+        MangaExtensionManager.novelSourceOf(context, extFile, MangaExtensionManager.novelIndexOf(config))
 
     private fun missingReason(): String = when {
         !extFile.exists() -> "The extension file is missing — reinstall it in Extensions"
@@ -245,6 +254,12 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     // ---- Catalogues ----
 
     override suspend fun catalogs(): List<CatalogRef> = gate {
+        // A novel source exposes no Popular/Latest index — only chapters of a
+        // known title. Honest empty, never an error.
+        if (isNovel) {
+            lastOutcome[config.id] = "○ text source — no catalogue; open a title to read"
+            return@gate emptyList()
+        }
         val src = source() ?: return@gate emptyList()
         val out = mutableListOf(
             CatalogRef(config.id, MediaType.SERIES, CATALOG_POPULAR, "Popular", "manga"),
@@ -256,6 +271,10 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     override suspend fun getCatalog(ref: CatalogRef, page: Int): List<MediaItem> = gate {
+        if (isNovel) {
+            lastOutcome[config.id] = "○ text source — no catalogue; open a title to read"
+            return@gate emptyList()
+        }
         val src = source() ?: return@gate fail(missingReason(), emptyList())
         val ask: suspend () -> List<eu.kanade.tachiyomi.source.model.SManga> = {
             when (ref.id) {
@@ -333,6 +352,10 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     override suspend fun search(query: String, page: Int): List<MediaItem> = gate {
+        if (isNovel) {
+            lastOutcome[config.id] = "○ text source — no search index; open a title to read"
+            return@gate emptyList()
+        }
         val src = source() ?: return@gate fail(missingReason(), emptyList())
         val ask: suspend () -> List<eu.kanade.tachiyomi.source.model.SManga> = {
             val filters = runCatching { src.getFilterList() }.getOrDefault(FilterList())
@@ -384,6 +407,7 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
      * filter in MangaScreen) — null is "unsupported", never "no results".
      */
     suspend fun searchByGenre(genre: String, page: Int): List<MediaItem>? = gate {
+        if (isNovel) return@gate null
         val src = source() ?: return@gate null
         val filters = runCatching { src.getFilterList() }.getOrDefault(FilterList())
         if (filters.isEmpty()) return@gate null
@@ -473,6 +497,27 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     ) = src.getMangaUpdate(sm(item), emptyList(), details, chapters)
 
     override suspend fun getMeta(item: MediaItem): MediaItem = gate {
+        // Novel details come straight from the novel source — no combined
+        // update call, no catalogue round trip.
+        if (isNovel) {
+            val nsrc = novelSrc() ?: return@gate item
+            return@gate try {
+                val manga = nsrc.getMangaDetails(sm(item))
+                lastOutcome[config.id] = "✓ details"
+                item.copy(
+                    title = manga.title.ifBlank { item.title },
+                    posterUrl = manga.thumbnail_url?.takeIf { it.isNotBlank() } ?: item.posterUrl,
+                    overview = manga.description?.takeIf { it.isNotBlank() } ?: item.overview,
+                    genres = manga.getGenres().orEmpty().ifEmpty { item.genres },
+                    year = item.year,
+                    rating = manga.rating.takeIf { it > 0f }?.toDouble() ?: item.rating,
+                )
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                Logs.log("Manga", "${config.name}: details failed: ${reason(t)}")
+                item
+            }
+        }
         val src = source() ?: return@gate item
         try {
             val manga = updateOf(src, item, details = true, chapters = false).manga
@@ -502,6 +547,26 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
      * the same thing.
      */
     override suspend fun getEpisodes(item: MediaItem): List<Episode>? = gate {
+        // Novel chapters come straight from the novel source's chapter list —
+        // the same Episode shape, cached in the same store, so the detail
+        // screen and the novel reader work unchanged.
+        if (isNovel) {
+            val nsrc = novelSrc() ?: return@gate failEpisodes(missingReason())
+            val raw = runCatching { nsrc.getChapterList(sm(item)) }.getOrNull()
+            if (raw.isNullOrEmpty()) return@gate failEpisodes("no chapters in this answer")
+            val sorted = sortChapters(raw)
+            MangaStore.putChapters(item.providerId + "|" + item.id, sorted.map { it.toChapter() })
+            lastOutcome[config.id] = "✓ ${sorted.size} chapter(s)"
+            return@gate sorted.mapIndexed { i, c ->
+                Episode(
+                    number = i + 1,
+                    id = c.url,
+                    name = c.labelOf(),
+                    image = null,
+                    season = 1,
+                )
+            }
+        }
         val src = source() ?: return@gate failEpisodes(missingReason())
         val ask: suspend () -> List<SChapter> = {
             updateOf(src, item, details = false, chapters = true).chapters
@@ -592,6 +657,51 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
      */
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
         gate(ProviderGate.Lane.BACKGROUND) {
+        // A novel chapter is TEXT, not pages: each part travels as a
+        // StreamSource with its text set and a blank url (the image reader
+        // skips blank urls, so these can never leak into it). The novel
+        // reader joins the parts in order.
+        if (isNovel) {
+            val nsrc = novelSrc() ?: return@gate fail(missingReason(), emptyList())
+            val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
+            return@gate try {
+                val sch = ch(chapter.id).apply { name = chapter.name.orEmpty() }
+                val pages = runCatching { nsrc.getPageList(sch) }.getOrNull().orEmpty()
+                val parts = pages.mapIndexedNotNull { i, pg ->
+                    val text = runCatching { nsrc.fetchPageText(pg) }.getOrNull()?.trim().orEmpty()
+                    if (text.isBlank()) null else StreamSource(
+                        name = "Part ${i + 1}",
+                        url = "",
+                        text = text,
+                        pageUrl = pg.url,
+                    )
+                }
+                if (parts.isNotEmpty()) {
+                    lastOutcome[config.id] = "✓ ${parts.size} part(s)"
+                    parts
+                } else {
+                    // Single-text fallback: some novel sources serve the whole
+                    // chapter as one page.
+                    val text = runCatching { nsrc.fetchPageText(Page(0, chapter.id)) }
+                        .getOrNull()?.trim().orEmpty()
+                    if (text.isBlank()) fail("chapter text unavailable", emptyList())
+                    else {
+                        lastOutcome[config.id] = "✓ 1 part"
+                        listOf(
+                            StreamSource(
+                                name = chapter.name ?: "Chapter",
+                                url = "",
+                                text = text,
+                                pageUrl = chapter.id,
+                            )
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                fail("chapter text failed: ${reason(t)}", emptyList())
+            }
+        }
         val src = source() ?: return@gate fail(missingReason(), emptyList())
         val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
         // Universal Webtoons strips (same class as the Anymex fix): a chapter

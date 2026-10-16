@@ -671,16 +671,25 @@ private fun openChapter(
     posterUrl: String,
     chapter: MangaChapter,
 ) {
-    Routes.safeNavigate(
-        nav,
+    // Novel rows open the text reader; manga rows the image reader.
+    val route = if (com.hikari.app.manga.MangaExtensionManager.isNovelId(providerId)) {
+        Routes.novelReader(
+            providerId = providerId,
+            url = mangaUrl,
+            chapterUrl = chapter.url,
+            title = title,
+            posterUrl = posterUrl,
+        )
+    } else {
         Routes.mangaReader(
             providerId = providerId,
             url = mangaUrl,
             chapterUrl = chapter.url,
             title = title,
             posterUrl = posterUrl,
-        ),
-    )
+        )
+    }
+    Routes.safeNavigate(nav, route)
 }
 
 /** The library record for this title, as complete as it can be made here. */

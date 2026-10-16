@@ -47,7 +47,7 @@ object StreamCache {
      * allowed to hold every later Play tap hostage. The old coroutine is left
      * alive and may still publish a result; its deferred is simply detached from
      * the join slot so a fresh lookup can take over. */
-    private const val INFLIGHT_STALE_MS = 15_000L
+    private const val INFLIGHT_STALE_MS = 60_000L
 
     private val inflight = ConcurrentHashMap<String, Pending>()
 

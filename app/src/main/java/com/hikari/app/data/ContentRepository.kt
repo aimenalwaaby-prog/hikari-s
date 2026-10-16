@@ -3008,6 +3008,19 @@ class ContentRepository(private val manager: ProviderManager) {
         try {
             val servers = streamsForInner(item, episode, onProgress, onOriginSettled, passSeq)
             if (servers.isNotEmpty()) return StreamLookup(servers, complete = true)
+            // A pass that finished with NOTHING must not wipe a list it just
+            // had: a repeat lookup is a fresh time-bounded sweep and can simply
+            // get unlucky (the "31 servers once, empty the next time" report).
+            // Recently-found servers stand in, so playback never empties.
+            val kept = recentlyFoundStreams(item, episode)
+            if (kept.isNotEmpty()) {
+                com.hikari.app.data.Logs.log(
+                    "Search",
+                    "pass for \"${item.title.take(60)}\" found nothing — " +
+                        "keeping ${kept.size} server(s) from the previous lookup",
+                )
+                return StreamLookup(kept, complete = true)
+            }
             // Empty is only an ANSWER when every provider really answered. A
             // cold plugin (its first call still spinning the runtime up), a
             // dropped request, a call cut off by the deadline — [fetchStreams]

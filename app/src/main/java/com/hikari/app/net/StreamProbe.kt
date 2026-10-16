@@ -242,6 +242,11 @@ object StreamProbe {
         bgScope.launch { runCatching { warm(sources) } }
     }
 
+    /** Extension-local proxy URLs are never probed: their ?url= tokens are
+     *  single-use — a probe burns the token the play needs. */
+    private fun isLoopbackUrl(url: String): Boolean = runCatching { java.net.URI(url).host?.lowercase() }
+        .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
+
     /** True when a source URL needs probing: an http(s) non-torrent that isn't
      *  already flagged HLS/DASH and has no media extension ExoPlayer's own
      *  extractors could sniff. */
@@ -252,6 +257,7 @@ object StreamProbe {
         isMpd: Boolean = false,
     ): Boolean {
         if (isTorrent || isM3u8 || isMpd) return false
+        if (isLoopbackUrl(url)) return false
         if (!url.startsWith("http://") && !url.startsWith("https://")) return false
         if (url.contains(".m3u8", true) || url.contains(".mpd", true)) return false
         if (url.contains("master.txt", true)) return false

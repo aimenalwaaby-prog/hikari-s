@@ -107,6 +107,7 @@ import com.hikari.app.ui.screens.IptvScreen
 import com.hikari.app.ui.screens.LibraryScreen
 import com.hikari.app.ui.screens.MangaDetailScreen
 import com.hikari.app.ui.screens.MangaReaderScreen
+import com.hikari.app.ui.screens.NovelReaderScreen
 import com.hikari.app.ui.screens.ScraperReaderScreen
 import com.hikari.app.ui.screens.MangaScreen
 import com.hikari.app.ui.screens.MyStuff
@@ -172,6 +173,14 @@ object Routes {
      */
     const val MANGA_READER =
         "manga-reader?providerId={providerId}&url={url}&chapter={chapter}&title={title}&poster={poster}"
+    /**
+     * The novel reader: text chapters from plain novel sources (see
+     * [com.hikari.app.manga.MangaExtensionManager.isNovelId]). A destination
+     * of its own rather than a mode of the image reader, so text layout,
+     * themes and progress stay out of the image pipeline entirely.
+     */
+    const val NOVEL_READER =
+        "novel-reader?providerId={providerId}&url={url}&chapter={chapter}&title={title}&poster={poster}"
     const val SCRAPER_READER = "scraper-reader?key={key}&title={title}"
 
     /**
@@ -228,6 +237,22 @@ object Routes {
     fun scraperReader(key: String, title: String): String {
         val safeTitle = title.replace(Regex("[\\p{Cc}\\u2028\\u2029]"), " ").trim().take(200)
         return "scraper-reader?key=${Uri.encode(key)}&title=${Uri.encode(safeTitle)}"
+    }
+
+    /** Opens the novel reader on one chapter of a novel. */
+    fun novelReader(
+        providerId: String,
+        url: String,
+        chapterUrl: String,
+        title: String,
+        posterUrl: String? = null,
+    ): String {
+        val safeTitle = title.replace(Regex("[\\p{Cc}\\u2028\\u2029]"), " ").trim().take(500)
+        var s = "novel-reader?providerId=${Uri.encode(providerId)}&url=${Uri.encode(url)}" +
+            "&chapter=${Uri.encode(chapterUrl)}&title=${Uri.encode(safeTitle)}"
+        val poster = posterUrl?.takeIf { it.isNotBlank() && !it.startsWith("data:") && it.length <= 600 }
+        if (poster != null) s += "&poster=${Uri.encode(poster)}"
+        return s
     }
 
     /** Opens the Manga tab with [query] already searched across every
@@ -1373,6 +1398,23 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                 val title = Uri.decode(entry.arguments?.getString("title").orEmpty())
                 val poster = Uri.decode(entry.arguments?.getString("poster").orEmpty())
                 MangaReaderScreen(nav, providerId, url, chapter, title, poster)
+            }
+            composable(
+                route = Routes.NOVEL_READER,
+                arguments = listOf(
+                    navArgument("providerId") { type = NavType.StringType },
+                    navArgument("url") { type = NavType.StringType },
+                    navArgument("chapter") { type = NavType.StringType },
+                    navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("poster") { type = NavType.StringType; defaultValue = "" },
+                )
+            ) { entry ->
+                val providerId = entry.arguments?.getString("providerId").orEmpty()
+                val url = Uri.decode(entry.arguments?.getString("url").orEmpty())
+                val chapter = Uri.decode(entry.arguments?.getString("chapter").orEmpty())
+                val title = Uri.decode(entry.arguments?.getString("title").orEmpty())
+                val poster = Uri.decode(entry.arguments?.getString("poster").orEmpty())
+                NovelReaderScreen(nav, providerId, url, chapter, title, poster)
             }
             composable(
                 route = Routes.SCRAPER_READER,

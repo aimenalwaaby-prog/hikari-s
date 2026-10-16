@@ -11541,7 +11541,9 @@ class PlayerActivity : ComponentActivity() {
                     return
                 }
             }
-            val needsProbe = !src.torrentStream &&
+            // Extension-local proxy URLs are never probed: their ?url= tokens
+            // are single-use, and a probe burns the token the play needs.
+            val needsProbe = !src.torrentStream && !isLoopbackHost(src.url) &&
                 StreamProbe.needsResolve(src.url, src.isTorrent, src.isM3u8, src.isMpd)
             if (needsProbe) {
                 probeAndPlay(index)
@@ -14101,7 +14103,12 @@ class PlayerActivity : ComponentActivity() {
             // only — never a remote CDN) records the real status line,
             // content type and first bytes into the shared log. Runs off the
             // failover path; a late answer changes nothing.
-            if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
+            // A loopback HTTP 400 is the same class (the proxy refused the
+            // request instead of serving garbage): diagnose it identically.
+            val diagUrl = sources.getOrNull(currentIndex)?.url.orEmpty()
+            val diagLoopback400 = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+                httpStatusOf(details) == 400 && isLoopbackHost(diagUrl)
+            if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED || diagLoopback400) {
                 val failedUrl = sources.getOrNull(currentIndex)?.url.orEmpty()
                 val failedLoopback = isLoopbackHost(failedUrl)
                 if (failedLoopback && failedUrl.isNotBlank()) {
@@ -14221,8 +14228,13 @@ class PlayerActivity : ComponentActivity() {
             // those headers, before the server is abandoned. Rescue-only: runs
             // only after the proxy already failed, and a rewritten slot can
             // never re-enter (the upstream is a remote URL).
+            // A loopback HTTP 400 refused the proxy request itself — rescue
+            // its upstream the same way (single-use tokens die proxy-side).
+            val loopback400Rescue = code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+                httpStatus == 400 && isLoopbackHost(sources.getOrNull(currentIndex)?.url.orEmpty())
             if ((code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ||
-                code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) &&
+                code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+                loopback400Rescue) &&
                 !terminalHostFailure
             ) {
                 val cur = sources.getOrNull(currentIndex)
@@ -14292,7 +14304,11 @@ class PlayerActivity : ComponentActivity() {
             // playlist, not a dead mirror. Re-run the attached detail search
             // before walking the other rows. Closing/reopening the app used to
             // "fix" this because it happened to obtain a fresh signed URL.
-            if (httpStatus == 403 &&
+            // A loopback HTTP 400 can be a spent single-use signed link: ask
+            // for fresh sources the same way a stale 403 does.
+            val loopback400Refresh = httpStatus == 400 &&
+                isLoopbackHost(sources.getOrNull(currentIndex)?.url.orEmpty())
+            if ((httpStatus == 403 || loopback400Refresh) &&
                 liveSessionId != null &&
                 signedLinkRefreshes < 2 &&
                 !isLiveSource(sources.getOrNull(currentIndex))
@@ -15987,7 +16003,7 @@ class PlayerActivity : ComponentActivity() {
          *  playing" (see [START_FAILSAFE_MS]). */
         private const val START_FAILSAFE_POLL_MS = 1_000L
         /** If a live lookup has produced no source at all, ask the detail search once more. */
-        private const val SEARCH_RESCUE_MS = 15_000L
+        private const val SEARCH_RESCUE_MS = 45_000L
 
         /** The cover's default line while the detail screen hasn't reported any
          *  search progress yet (matches the layout's initial text). */

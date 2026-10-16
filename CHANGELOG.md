@@ -1,3 +1,11 @@
+## 0.11.40 (continuous build only)
+
+### Fixed
+- MissAV loopback HTTP 400 on every quality (0.11.39 log-proven: new code running, yet each quality 400s at the local /m3u8 with no diag/rescue lines): extension-local URLs are never probed or warmed now (their ?url= tokens are single-use — the probe burned the token the play needed), and a loopback 400 gets the full treatment a malformed manifest does — bounded diag refetch, direct-upstream rescue, and fresh-link re-resolve for a spent signed link
+- Servers found but not shown on flaky runs ("31 servers" once, empty "Re-extracting expired links" the next): the search-rescue window 15s → 45s and the shared-extraction stale cutoff 15s → 60s (slow providers need 10–64s), and a pass that finishes with nothing now keeps the previous lookup's servers instead of reporting empty
+- VidLink-via-Stremio direct mp4 failing download with HTTP 428 while the same URL plays (log_31: plays on the player's 4th attempt): the download header walk gains the player's reference-UA 4th step (full → no-Referer → UA-only → reference-UA, bounded, fresh each step)
+- Novel extensions with no reader (plain text-chapter sources were skipped at install): they now register as manga-tab rows, list chapters through the detail screen, and open a new novel reader — chapter list with prev/next, font size, light/sepia/dark themes, position restored via the manga progress store; novel text travels apart from image pages so the image reader never sees it
+
 ## 0.11.39 (continuous build only)
 
 ### Fixed

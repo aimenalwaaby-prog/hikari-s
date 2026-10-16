@@ -110,8 +110,23 @@ object MangaExtensionManager {
 
     private const val PREFIX = "manga|"
 
+    /** True for a novel row id (`manga|<pkg>|n<idx>`): the `n` keeps novel
+     *  rows from ever colliding with a manga row of the same file. */
+    fun isNovelId(id: String): Boolean {
+        if (!id.startsWith(PREFIX)) return false
+        val tail = id.substringAfterLast('|')
+        return tail.length > 1 && tail[0] == 'n' && tail.substring(1).all { it.isDigit() }
+    }
+
+    /** Which novel source of the extension a novel provider config points at. */
+    fun novelIndexOf(config: ProviderConfig): Int =
+        config.id.substringAfterLast('|').removePrefix("n").toIntOrNull() ?: 0
+
     /** True for a provider id that came from this manager. */
     fun isMangaProviderId(id: String): Boolean = id.startsWith(PREFIX)
+
+    /** True when the provider row is a novel source (see [isNovelId]). */
+    fun isNovelProvider(config: ProviderConfig): Boolean = isNovelId(config.id)
 
     // ---- Paths ----
 
@@ -137,6 +152,12 @@ object MangaExtensionManager {
         /** Display label per source, already de-duplicated. */
         val labels: List<String>,
         val sources: List<MangaSource>,
+        /** Plain text-chapter (novel) sources: a [Source] with no manga
+         *  methods. They read through [com.hikari.app.manga.MangaProvider]'s
+         *  novel branch into the novel reader — never the image reader. */
+        val novels: List<Source> = emptyList(),
+        /** Display label per novel source, already de-duplicated. */
+        val novelLabels: List<String> = emptyList(),
     )
 
     private val cache = ConcurrentHashMap<String, Extension>()
@@ -204,12 +225,25 @@ object MangaExtensionManager {
     fun sourceOf(context: Context, file: File, index: Int): MangaSource? =
         extensionOf(context, file)?.sources?.getOrNull(index)
 
-    /** The source a provider config points at. */
+    /** The source a provider config points at. Null for novel rows (see
+     *  [novelSourceOf]) — a novel id's `n` index is not a manga index. */
     fun sourceOf(context: Context, config: ProviderConfig): MangaSource? {
-        if (!isMangaProviderId(config.id)) return null
+        if (!isMangaProviderId(config.id) || isNovelId(config.id)) return null
         val file = File(config.url)
         if (!file.exists()) return null
         return sourceOf(context, file, indexOf(config))
+    }
+
+    /** The novel source at [novelIndex] of the extension in [file], or null. */
+    fun novelSourceOf(context: Context, file: File, novelIndex: Int): Source? =
+        extensionOf(context, file)?.novels?.getOrNull(novelIndex)
+
+    /** The novel source a novel provider config points at. */
+    fun novelSourceOf(context: Context, config: ProviderConfig): Source? {
+        if (!isNovelId(config.id)) return null
+        val file = File(config.url)
+        if (!file.exists()) return null
+        return novelSourceOf(context, file, novelIndexOf(config))
     }
 
     /** Whether the provider's `.ext` file is still on disk. */
@@ -247,14 +281,20 @@ object MangaExtensionManager {
             )
         }
 
-        val sources = mutableListOf<MangaSource>()
+        val found = mutableListOf<Source>()
         for (className in classNames) {
-            instantiate(context, className, app.sourceDir, classLoader)?.let { sources += it }
+            instantiate(context, className, app.sourceDir, classLoader)?.let { found += it }
         }
-        if (sources.isEmpty()) return failLoad("$name: none of its sources could be loaded")
-        val unique = sources.distinctBy { sourceKey(it) }
-        val labels = disambiguate(unique, name)
-        val langs = unique.mapNotNull { runCatching { it.lang }.getOrNull() }.filter { it.isNotBlank() }.toSet()
+        if (found.isEmpty()) return failLoad("$name: none of its sources could be loaded")
+        val uniqueManga = found.filterIsInstance<MangaSource>().distinctBy { sourceKey(it) }
+        val uniqueNovels = found.filter { it !is MangaSource }.distinctBy { novelKey(it) }
+        if (uniqueManga.isEmpty() && uniqueNovels.isEmpty()) {
+            return failLoad("$name: none of its sources could be loaded")
+        }
+        val labels = disambiguate(uniqueManga, name)
+        val novelLabels = disambiguateNovels(uniqueNovels, name)
+        val langs = (uniqueManga + uniqueNovels)
+            .mapNotNull { runCatching { it.lang }.getOrNull() }.filter { it.isNotBlank() }.toSet()
         return Extension(
             file = file,
             pkgName = pkgName,
@@ -268,7 +308,9 @@ object MangaExtensionManager {
                 else -> "all"
             },
             labels = labels,
-            sources = unique,
+            sources = uniqueManga,
+            novels = uniqueNovels,
+            novelLabels = novelLabels,
         )
     }
 
@@ -295,7 +337,9 @@ object MangaExtensionManager {
 
     /**
      * Instantiates one class: a [MangaSource] is used directly, a [SourceFactory]
-     * is asked for its sources. A `LinkageError` is retried with a plain
+     * is asked for its sources (manga AND plain novel ones), and a plain
+     * [Source] with no manga methods is a novel source — registered, not
+     * skipped. A `LinkageError` is retried with a plain
      * parent-first `PathClassLoader`, exactly like the anime loader — a
      * child-first loader can shadow a class the extension itself ships.
      */
@@ -304,7 +348,7 @@ object MangaExtensionManager {
         className: String,
         apkPath: String,
         child: ClassLoader,
-    ): List<MangaSource>? {
+    ): List<Source>? {
         val loaders = listOf(child, dalvik.system.PathClassLoader(apkPath, null, context.classLoader))
         for ((index, loader) in loaders.withIndex()) {
             try {
@@ -313,14 +357,8 @@ object MangaExtensionManager {
                     .newInstance()
                 val sources = when (instance) {
                     is MangaSource -> listOf(instance)
-                    is SourceFactory -> instance.createSources().filterIsInstance<MangaSource>()
-                    is Source -> {
-                        // A plain Source with no manga methods is a novel source:
-                        // this app has no text reader, so it is reported instead
-                        // of being registered as a broken manga extension.
-                        record("$className is a novel source (no manga chapters) — skipped")
-                        emptyList()
-                    }
+                    is SourceFactory -> instance.createSources().filterIsInstance<Source>()
+                    is Source -> listOf(instance)
                     else -> {
                         record("$className is not a manga source")
                         emptyList()
@@ -345,6 +383,27 @@ object MangaExtensionManager {
         val name = runCatching { s.name }.getOrNull()
         val lang = runCatching { s.lang }.getOrNull()
         return "$id|$name|$lang"
+    }
+
+    private fun novelKey(s: Source): String {
+        val id = runCatching { s.id }.getOrNull()
+        val name = runCatching { s.name }.getOrNull()
+        val lang = runCatching { s.lang }.getOrNull()
+        return "$id|$name|$lang"
+    }
+
+    /** De-duplicated display names for novel sources (same rule as manga:
+     *  colliding names get a numeric suffix). */
+    private fun disambiguateNovels(sources: List<Source>, fallback: String): List<String> {
+        val raw = sources.map { runCatching { it.name }.getOrNull()?.takeIf { n -> n.isNotBlank() } ?: fallback }
+        val byName = HashMap<String, MutableList<Int>>()
+        raw.forEachIndexed { idx, n -> byName.getOrPut(n) { ArrayList() } += idx }
+        val out = raw.toMutableList()
+        for ((n, idxs) in byName) {
+            if (idxs.size <= 1) continue
+            idxs.forEachIndexed { k, idx -> out[idx] = "$n (${k + 1})" }
+        }
+        return out
     }
 
     /** One display name per source: colliding names get the site host (Mihon parity),
@@ -406,6 +465,8 @@ object MangaExtensionManager {
     fun siteUrlOf(config: ProviderConfig): String? {
         siteCache[config.id]?.let { return it }
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return null
+        // A novel source exposes no baseUrl — there is no site to warm.
+        if (isNovelId(config.id)) return null
         val url = runCatching {
             val file = File(config.url)
             if (!file.exists()) return@runCatching null
@@ -490,7 +551,7 @@ object MangaExtensionManager {
             }
             cache.remove(target.absolutePath)
             val ext = extensionOf(context, target, force = true)
-            if (ext == null || ext.sources.isEmpty()) {
+            if (ext == null || (ext.sources.isEmpty() && ext.novels.isEmpty())) {
                 runCatching { target.delete() }
                 cache.remove(target.absolutePath)
                 return@withContext fail(
@@ -503,7 +564,7 @@ object MangaExtensionManager {
             val prefix = "$PREFIX$pkgName|"
             val existing = store.providers()
             val prevById = existing.associateBy { it.id }
-            val fresh = ext.sources.indices.map { index ->
+            val freshManga = ext.sources.indices.map { index ->
                 val id = "$prefix$index"
                 ProviderConfig(
                     id = id,
@@ -517,6 +578,23 @@ object MangaExtensionManager {
                     extra = sourceUrl ?: pkgName,
                 )
             }
+            // Novel (text-chapter) sources ride as MANGA rows with an `n`
+            // index, so the manga tab lists them and the whole provider
+            // plumbing (search scope, detail screen, library) works unchanged;
+            // the provider's novel branch + the novel reader take it from here.
+            val freshNovels = ext.novels.indices.map { index ->
+                val id = "$prefix" + "n$index"
+                ProviderConfig(
+                    id = id,
+                    name = ext.novelLabels.getOrNull(index) ?: ext.name,
+                    type = ProviderType.MANGA,
+                    url = target.absolutePath,
+                    iconUrl = icon ?: prevById[id]?.iconUrl,
+                    enabled = prevById[id]?.enabled ?: true,
+                    extra = sourceUrl ?: pkgName,
+                )
+            }
+            val fresh = freshManga + freshNovels
             store.updateProviders { list ->
                 // The canonical rows for this file — plus any LEGACY rows
                 // pointing at the same file under a different id scheme (an
