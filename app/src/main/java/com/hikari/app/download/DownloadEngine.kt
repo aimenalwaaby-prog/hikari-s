@@ -595,11 +595,17 @@ object DownloadEngine {
         // surfacing "Failed - HTTP 429".
         var triedFresh = false
         var rateAttempts = 0
+        // Signed-CDN header walk (mirrors the player's own: full → no Referer
+        // → UA-only). A VidLink-style signed mp4 that 428s/403s with extractor
+        // headers often downloads bare — the log_31 class played on the
+        // player's 4th attempt but failed the same URL as a download.
+        var headerStep = 0
+        var effHeaders = headers
         var rangeStart: Long? = if (byteRange != null) null else if (startAt > 0L) startAt else null
         // byteRange requests keep their exact range; resume requests may drop it.
         while (true) {
             val req = Request.Builder().url(url)
-            applyHeaders(req, headers, ua)
+            applyHeaders(req, effHeaders, ua)
             if (byteRange != null) {
                 req.header("Range", "bytes=${byteRange.first}-${byteRange.second}")
             } else if (rangeStart != null && rangeStart!! > 0L) {
@@ -649,8 +655,11 @@ object DownloadEngine {
                 }
             } catch (e: IOException) {
                 // A thrown 428 (via fetch paths that throw) also falls through.
-                if (!e.message.orEmpty().contains("428") || triedFresh || byteRange != null) throw e
-                code = 428
+                // A thrown 403 joins the header walk below while steps remain.
+                val m = e.message.orEmpty()
+                val walkable = m.contains("428") || m.contains("403")
+                if (!walkable || byteRange != null || (triedFresh && headerStep >= 2)) throw e
+                code = if (m.contains("403")) 403 else 428
             }
             if (code == 429) {
                 if (rateAttempts >= 4) throw IOException("HTTP 429")
@@ -661,6 +670,19 @@ object DownloadEngine {
                 continue
             }
             if (code == 428 && !triedFresh && byteRange == null) {
+                triedFresh = true
+                rangeStart = null
+                runCatching { if (file.exists()) file.delete() } // fresh, not resumed
+                kotlinx.coroutines.delay(400)
+                continue
+            }
+            if ((code == 428 || code == 403) && headerStep < 2 && byteRange == null) {
+                headerStep++
+                effHeaders = if (headerStep == 1) {
+                    effHeaders.filterKeys { !it.equals("Referer", ignoreCase = true) }
+                } else {
+                    effHeaders.filterKeys { it.equals("User-Agent", ignoreCase = true) }
+                }
                 triedFresh = true
                 rangeStart = null
                 runCatching { if (file.exists()) file.delete() } // fresh, not resumed

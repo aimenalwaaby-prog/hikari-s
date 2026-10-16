@@ -202,12 +202,22 @@ class PlayerActivity : ComponentActivity() {
         val providerName: String = "",
         /** Full provider-supplied server details (quality, size, audio, codec, flags, etc.). */
         val details: String = "",
+        /** Addon's filename for this torrent row (see StreamSource.torrentFileHint). */
+        val torrentFileHint: String? = null,
+        /** Same row's declared byte size (see StreamSource.torrentFileSize). */
+        val torrentFileSize: Long = 0L,
     ) {
         /** Identity across every merge/dedup in the player (see
-         *  [StreamSource.identityKey]): hash + file index for torrents, URL
-         *  otherwise — two files of one pack must never collapse to one row. */
+         *  [StreamSource.identityKey]): hash + file index for torrents, and
+         *  without an index the filename/name + size — two files of one pack
+         *  must never collapse to one row. */
         fun identityKey(): String =
-            infoHash?.takeIf { it.isNotBlank() }?.let { "h${it.lowercase()}#${fileIdx ?: 0}" } ?: "u$url"
+            infoHash?.takeIf { it.isNotBlank() }?.let { h ->
+                val idx = fileIdx?.let { "i$it" }
+                    ?: ("n:" + (torrentFileHint?.trim().orEmpty().ifBlank { name.trim() }.take(120) +
+                        (if (torrentFileSize > 0) "#$torrentFileSize" else "")))
+                "h${h.lowercase()}#$idx"
+            } ?: "u$url"
         /**
          * True when a probe has already been to this URL and come back with a
          * video / HLS / DASH answer — i.e. a server that is known to WORK, not
@@ -890,6 +900,8 @@ class PlayerActivity : ComponentActivity() {
         providerId = providerId,
         providerName = providerName,
         details = details,
+        torrentFileHint = torrentFileHint,
+        torrentFileSize = torrentFileSize,
     )
 
     /** The inverse of [toPlayerSource]: a player source as a data-layer source,
@@ -911,6 +923,8 @@ class PlayerActivity : ComponentActivity() {
         providerId = providerId,
         providerName = providerName,
         details = details,
+        torrentFileHint = torrentFileHint,
+        torrentFileSize = torrentFileSize,
     )
 
     /** Which header set the CURRENT source is being tried with, when a CDN
@@ -2544,6 +2558,8 @@ class PlayerActivity : ComponentActivity() {
                     providerId = o.optString("providerId"),
                     providerName = o.optString("providerName"),
                     details = o.optString("details"),
+                    torrentFileHint = o.optString("torrentFileHint").ifBlank { null },
+                    torrentFileSize = o.optLong("torrentFileSize", 0L),
                 )
                 }.getOrNull()
             }
@@ -11233,7 +11249,9 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /** Builds a magnet and asks the CloudStream runtime's Torrent engine to
-     *  turn it into a local streamable URL. */
+     *  turn it into a local streamable URL. When the addon gave no file index
+     *  the engine streams file 0 — too often a .nfo/poster — so the URL is
+     *  re-aimed at the row's own file first (see [retargetTorrentFile]). */
     private suspend fun transformTorrent(src: PlayerSource): com.lagradost.cloudstream3.utils.ExtractorLink {
         val magnet = buildMagnet(src)
         val link = com.lagradost.cloudstream3.utils.newExtractorLink(
@@ -11241,8 +11259,78 @@ class PlayerActivity : ComponentActivity() {
             name = src.name,
             url = magnet,
         )
-        val (playable, _) = com.lagradost.cloudstream3.ui.player.Torrent.transformLink(link)
+        val (playable, status) = com.lagradost.cloudstream3.ui.player.Torrent.transformLink(link)
+        if (src.fileIdx == null) {
+            val fixed = runCatching { retargetTorrentFile(playable.url, status, src) }.getOrNull()
+            if (!fixed.isNullOrBlank() && fixed != playable.url) {
+                return com.lagradost.cloudstream3.utils.newExtractorLink(
+                    source = playable.source,
+                    name = playable.name,
+                    url = fixed,
+                ) {
+                    this.referer = playable.referer
+                    this.quality = playable.quality
+                }
+            }
+        }
         return playable
+    }
+
+    /** Re-aims a TorrServer stream URL at the row's own file when the addon
+     *  sent no file index. The server's own file list (already fetched — the
+     *  torrent was just added) names every file with its byte size, so: an
+     *  exact filename/size hit wins, else the largest video file (never a
+     *  .nfo/.txt/image/subtitle sidecar). Returns the URL unchanged when
+     *  there is nothing to choose between. Pure string surgery on the
+     *  `index=` param — the path segment is display-only, the server keys off
+     *  link + index. */
+    private fun retargetTorrentFile(
+        playableUrl: String,
+        status: com.lagradost.cloudstream3.ui.player.Torrent.TorrentStatus,
+        src: PlayerSource,
+    ): String {
+        val stats = status.fileStats?.mapNotNull { it?.takeIf { !it.path.isNullOrBlank() } }
+            ?: return playableUrl
+        if (stats.size < 2) return playableUrl
+        var want: Int? = null
+        val hint = src.torrentFileHint?.trim().orEmpty()
+        if (hint.isNotBlank()) {
+            val pos = stats.indexOfFirst { s ->
+                val p = s.path!!.trim()
+                p.equals(hint, ignoreCase = true) ||
+                    p.endsWith("/$hint", ignoreCase = true) ||
+                    p.endsWith(hint, ignoreCase = true)
+            }
+            if (pos >= 0) want = stats[pos].id ?: pos
+            if (want == null && src.torrentFileSize > 0) {
+                val bySize = stats.indexOfFirst { (it.length ?: -1L) == src.torrentFileSize }
+                if (bySize >= 0) want = stats[bySize].id ?: bySize
+            }
+        }
+        if (want == null) {
+            val vid = setOf(
+                "mp4", "mkv", "webm", "avi", "mov", "m4v", "ts", "m2ts",
+                "wmv", "flv", "mpg", "mpeg", "3gp", "ogv", "m4s",
+            )
+            val best = stats.withIndex().filter { (_, s) ->
+                s.path!!.substringAfterLast('.', "").lowercase() in vid
+            }.maxByOrNull { (_, s) -> s.length ?: 0L }
+            if (best != null) want = best.value.id ?: best.index
+        }
+        if (want == null || want == 0) return playableUrl
+        val idxRe = Regex("[?&]index=\\d+")
+        val out = if (idxRe.containsMatchIn(playableUrl)) {
+            playableUrl.replace(idxRe) { m -> "${m.value[0]}index=$want" }
+        } else {
+            playableUrl + (if (playableUrl.contains("?")) "&" else "?") + "index=$want"
+        }
+        val who = stats.firstOrNull { (it.id ?: stats.indexOf(it)) == want }
+            ?.path?.substringAfterLast('/') ?: "file $want"
+        com.hikari.app.data.Logs.log(
+            "Player",
+            "torrent file auto-pick: index $want ($who) — addon gave no fileIdx",
+        )
+        return out
     }
 
     private fun buildMagnet(src: PlayerSource): String {
@@ -14020,7 +14108,22 @@ class PlayerActivity : ComponentActivity() {
                     lifecycleScope.launch(Dispatchers.IO) {
                         val diag = runCatching {
                             withTimeoutOrNull(10_000L) {
-                                val req = okhttp3.Request.Builder().url(failedUrl).get().build()
+                                // With the SAME headers playback used: the proxy
+                                // forwards whatever the player sent upstream, so
+                                // a header-less refetch diagnoses a different
+                                // request than the one that failed.
+                                val diagHeaders = loopbackQueryHeaders(failedUrl)
+                                val diagReqB = okhttp3.Request.Builder().url(failedUrl).get()
+                                for ((k, v) in diagHeaders) {
+                                    runCatching { diagReqB.header(k, v) }
+                                }
+                                runCatching {
+                                    diagReqB.header(
+                                        "User-Agent",
+                                        diagHeaders["User-Agent"]?.takeIf { it.isNotBlank() } ?: Http.UA,
+                                    )
+                                }
+                                val req = diagReqB.build()
                                 PlayerHttp.plainClient.newCall(req).execute().use { resp ->
                                     // Raw BYTES as hex, never readUtf8: the proxy's
                                     // answer starts 1F 8B (gzip), and a UTF-8 read

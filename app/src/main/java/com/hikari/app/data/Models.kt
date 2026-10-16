@@ -572,13 +572,28 @@ data class StreamSource(
      * [com.hikari.app.reader.source.HikariPageSource]).
      */
     val pageUrl: String = "",
+    /** Addon's filename for this torrent row (Stremio behaviorHints.filename,
+     *  else the row name when it names the file) — null unless parsed. Two
+     *  rows of one pack share the infoHash; without a file index this is what
+     *  tells them apart (1080p vs 720p), and what aims playback at the right
+     *  file when the addon sends no index. */
+    val torrentFileHint: String? = null,
+    /** Same row's declared byte size (behaviorHints.videoSize), 0 = unknown. */
+    val torrentFileSize: Long = 0L,
 ) {
     /** Identity across every merge/dedup in the app: a torrent is its
      *  infoHash PLUS its file index — two files of one pack share the hash
      *  but are different videos, and collapsing them ate Stremio's second
-     *  torrent row down to one — anything else its URL. */
+     *  torrent row down to one. Without an index the addon's filename (else
+     *  the row name + declared size) keeps two such rows distinct instead of
+     *  collapsing them to one row that plays file 0 — anything else its URL. */
     fun identityKey(): String =
-        infoHash?.takeIf { it.isNotBlank() }?.let { "h${it.lowercase()}#${fileIdx ?: 0}" } ?: "u$url"
+        infoHash?.takeIf { it.isNotBlank() }?.let { h ->
+            val idx = fileIdx?.let { "i$it" }
+                ?: ("n:" + (torrentFileHint?.trim().orEmpty().ifBlank { name.trim() }.take(120) +
+                    (if (torrentFileSize > 0) "#$torrentFileSize" else "")))
+            "h${h.lowercase()}#$idx"
+        } ?: "u$url"
 }
 
 data class CatalogRef(

@@ -1201,7 +1201,8 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
             val details = compactDetails(st.optString("description"), name)
             // Headers some addons require the stream to be fetched with
             // (behaviorHints.proxyHeaders.request, e.g. an auth header).
-            val proxyHeaders = st.optJSONObject("behaviorHints")
+            val hints = st.optJSONObject("behaviorHints")
+            val proxyHeaders = hints
                 ?.optJSONObject("proxyHeaders")
                 ?.optJSONObject("request")
                 ?.let { h ->
@@ -1213,6 +1214,17 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                     }
                     map
                 } ?: emptyMap()
+            // Which FILE of a torrent pack this row is, when the addon names
+            // it without a numeric fileIdx: behaviorHints.filename (else the
+            // row name, which for these addons IS the release filename) plus
+            // the declared byte size. Without either, two files of one pack
+            // share an identity and collapse to one row that plays file 0 —
+            // usually a .nfo — instead of two rows playing their own files.
+            val addonFileName = hints?.optString("filename")?.ifBlank { null }
+                ?: st.optString("filename").ifBlank { null }
+            val addonVideoSize = (hints?.optLong("videoSize", -1L) ?: -1L).takeIf { it > 0 }
+                ?: st.optLong("videoSize", -1L).takeIf { it > 0 } ?: 0L
+            val torrentHint = addonFileName ?: name.takeIf { it.isNotBlank() }
 
             when {
                 infoHash != null -> out += StreamSource(
@@ -1228,6 +1240,8 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                     // addresses file 0 (or collapses to one row downstream),
                     // so the surviving row plays the wrong file or fails.
                     fileIdx = topFileIdx(st) ?: hintsFileIdx(st),
+                    torrentFileHint = torrentHint,
+                    torrentFileSize = addonVideoSize,
                     trackers = stringArray(st, "sources"),
                 )
                 ytId != null -> out += StreamSource(
@@ -1252,6 +1266,8 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                     isTorrent = true,
                     infoHash = magnetHash(magnet),
                     fileIdx = magnetIndex(magnet),
+                    torrentFileHint = torrentHint,
+                    torrentFileSize = addonVideoSize,
                     trackers = magnetTrackers(magnet),
                 )
                 streamUrl != null -> out += StreamSource(

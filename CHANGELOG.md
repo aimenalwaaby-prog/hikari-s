@@ -1,3 +1,11 @@
+## 0.11.39 (continuous build only)
+
+### Fixed
+- MissAV /m3u8 proxy still failing every quality after the gunzip fix (log_30-proven: proxy answers 200/mpegurl with a bare `http://localhost:…/segment?…` line, never #EXTM3U): the loopback player now wraps such single-URL answers in a minimal manifest so the server plays instead of malformed-manifest; the proxy's declared Referer/UA are remembered per local authority and ride on its /segment fetches too (segment URLs carry no params of their own, and the proxy forwards whatever the player sent); the `loopback diag` line now refetches with the same headers playback used, so it diagnoses the request that actually failed
+- Stremio showing two torrent rows while Hikari showed one that played a .nfo and died "no extractor could read the stream" (screenshots + CloudStream Torrent source-proven): same-hash rows with no fileIdx shared one identity and collapsed everywhere, and the surviving row defaulted to file 0. The addon now also parses behaviorHints.filename/videoSize; identity keeps same-hash rows distinct by filename/name + size; and fileIdx-less playback re-aims the TorrServer URL at the row's own file (filename/size hit, else the largest video file — never a sidecar) instead of blind index 0
+- Servers found but not shown (log_31: "done → 34 servers" yet "none inside the current scope", empty chooser): with no per-extension pick for an engine the scope collapsed to the origin alone — an empty pick now means every repo of that engine, mirroring the no-origin branch
+- VidLink-style signed mp4 downloading "Failed" while the same URL played after the player's header walk (log_31 428×3 then play): direct downloads now walk full → no-Referer → UA-only on 428/403 (bounded, fresh each step) instead of failing on the first refusal
+
 ## 0.11.38 (continuous build only)
 
 ### Fixed

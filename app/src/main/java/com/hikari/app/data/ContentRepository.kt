@@ -3104,7 +3104,19 @@ class ContentRepository(private val manager: ProviderManager) {
                     all.filter { it.config.type == origin.config.type }.forEach { out += it.config.id }
                 } else {
                     val picked = SearchScope.pickedIdsFor(origin.config.type)
-                    all.filter { it.config.type == origin.config.type && it.config.id in picked }.forEach { out += it.config.id }
+                    if (picked.isEmpty()) {
+                        // No per-extension pick for this engine: the user
+                        // expressed no preference, so every repo of the engine
+                        // is in scope — mirroring the no-origin branch below
+                        // (empty pick = all). Without this, a title opened
+                        // from one Stremio addon hid the servers its sibling
+                        // addons found ("done → 34 servers" yet "none inside
+                        // the current scope"), and the player sat on an empty
+                        // chooser while the servers existed.
+                        all.filter { it.config.type == origin.config.type }.forEach { out += it.config.id }
+                    } else {
+                        all.filter { it.config.type == origin.config.type && it.config.id in picked }.forEach { out += it.config.id }
+                    }
                 }
                 if (origin.config.type == ProviderType.NUVIO && SearchScope.nuvioFamily) {
                     all.filter { it.config.type == ProviderType.NUVIO }.forEach { out += it.config.id }

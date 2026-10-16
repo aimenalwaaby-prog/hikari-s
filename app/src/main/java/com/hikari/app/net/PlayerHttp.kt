@@ -120,11 +120,59 @@ object PlayerHttp {
      * cannot break a healthy proxy. Playlist AND segments flow through the
      * same OkHttpDataSource factory, so one pass covers both.
      */
+    /** Upstream headers a loopback proxy declared in its /m3u8 URL
+     *  (referer/useragent query params), remembered per loopback authority so
+     *  the SAME headers ride on that proxy's /segment fetches too: segment
+     *  URLs carry no query params of their own, and the proxy forwards
+     *  whatever the player sent upstream — without them its upstream fetch
+     *  dies and the manifest it hands back is a single fallback URL line
+     *  instead of #EXTM3U (the MissAV "plays in the reference apps,
+     *  malformed here" class). */
+    private val loopbackHeadersByAuthority = ConcurrentHashMap<String, Map<String, String>>()
+
+    private fun rememberLoopbackHeaders(url: HttpUrl) {
+        if (url.host != "localhost" && url.host != "127.0.0.1" && url.host != "::1" && url.host != "[::1]") return
+        var ref: String? = null
+        var ua: String? = null
+        for (i in 0 until url.querySize) {
+            when (url.queryParameterName(i).lowercase()) {
+                "referer", "referrer" -> if (ref == null) ref = url.queryParameterValue(i)?.takeIf { it.isNotBlank() }
+                "useragent", "user-agent" -> if (ua == null) ua = url.queryParameterValue(i)?.takeIf { it.isNotBlank() }
+            }
+        }
+        if (ref == null && ua == null) return
+        val map = LinkedHashMap<String, String>()
+        if (ref != null) map["Referer"] = ref
+        if (ua != null) map["User-Agent"] = ua
+        loopbackHeadersByAuthority[url.host + ":" + url.port] = map
+    }
+
+    private fun isLoopbackUrl(url: HttpUrl): Boolean =
+        url.host == "localhost" || url.host == "127.0.0.1" || url.host == "::1" || url.host == "[::1]"
+
     val loopbackClient: OkHttpClient by lazy {
         plainClient.newBuilder().addInterceptor { chain ->
-            val resp = chain.proceed(chain.request())
+            var req = chain.request()
+            val reqUrl = req.url
+            val isLoopback = isLoopbackUrl(reqUrl)
+            if (isLoopback) {
+                // Segments inherit the /m3u8 URL's declared upstream headers.
+                rememberLoopbackHeaders(reqUrl)
+                val remembered = loopbackHeadersByAuthority[reqUrl.host + ":" + reqUrl.port]
+                if (remembered != null) {
+                    val b = req.newBuilder()
+                    var changed = false
+                    for ((k, v) in remembered) {
+                        if (req.header(k) == null) {
+                            runCatching { b.header(k, v) }.onSuccess { changed = true }
+                        }
+                    }
+                    if (changed) req = b.build()
+                }
+            }
+            val resp = chain.proceed(req)
             val body = resp.body
-            val out = runCatching {
+            val gunzipped = runCatching {
                 if (body == null) return@runCatching null
                 val src = body.source()
                 src.request(2)
@@ -136,8 +184,48 @@ object PlayerHttp {
                     override fun contentLength(): Long = -1L
                     override fun source(): okio.BufferedSource = gz.source().buffer()
                 }
-            }.getOrNull() ?: return@addInterceptor resp
-            resp.newBuilder().removeHeader("Content-Encoding").body(out).build()
+            }.getOrNull()
+            if (gunzipped != null) return@addInterceptor resp.newBuilder().removeHeader("Content-Encoding").body(gunzipped).build()
+            // Single-URL fallback repair: the proxy answered 200/mpegurl with
+            // a bare `http://…/segment?…` line (its upstream fetch died) — no
+            // ExoPlayer will ever parse that as HLS. Wrap the named URL(s) in
+            // a minimal manifest so the server fails over to playing instead
+            // of malformed-manifest on every quality. Genuine manifests start
+            // with #EXTM3U and never enter here.
+            val repaired = runCatching {
+                if (body == null) return@runCatching null
+                if (!isLoopback) return@runCatching null
+                if (!reqUrl.encodedPath.contains("m3u8", ignoreCase = true)) return@runCatching null
+                val src = body.source()
+                src.request(4)
+                val buf = src.buffer
+                if (buf.size < 4) return@runCatching null
+                if (buf[0] != 0x68.toByte() || buf[1] != 0x74.toByte() ||
+                    buf[2] != 0x74.toByte() || buf[3] != 0x70.toByte()
+                ) return@runCatching null
+                src.request(32_768)
+                val text = buf.clone().readUtf8().trim()
+                if (!text.startsWith("http", ignoreCase = true) || text.contains("#EXTM3U")) return@runCatching null
+                val urls = text.lines().map { it.trim() }
+                    .filter { it.startsWith("http://") || it.startsWith("https://") }.take(50)
+                if (urls.isEmpty()) return@runCatching null
+                val sb = StringBuilder(
+                    "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:0\n"
+                )
+                for (u in urls) sb.append("#EXTINF:10.0,\n").append(u).append('\n')
+                sb.append("#EXT-X-ENDLIST\n")
+                val bytes = sb.toString().toByteArray(Charsets.UTF_8)
+                object : okhttp3.ResponseBody() {
+                    override fun contentType(): okhttp3.MediaType? = body.contentType()
+                    override fun contentLength(): Long = bytes.size.toLong()
+                    override fun source(): okio.BufferedSource = okio.Buffer().write(bytes)
+                }
+            }.getOrNull()
+            if (repaired != null) {
+                runCatching { body?.close() }
+                return@addInterceptor resp.newBuilder().removeHeader("Content-Encoding").body(repaired).build()
+            }
+            resp
         }.build()
     }
 }

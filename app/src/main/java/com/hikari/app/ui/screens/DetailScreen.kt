@@ -6421,6 +6421,8 @@ private fun playerPayload(streams: List<StreamSource>): String? = runCatching {
                     .put("details", s.details)
                     .put("infoHash", s.infoHash ?: "")
                     .put("fileIdx", s.fileIdx ?: -1)
+                    .put("torrentFileHint", s.torrentFileHint ?: "")
+                    .put("torrentFileSize", s.torrentFileSize)
                     .put(
                         "trackers",
                         JSONArray().apply { s.trackers.forEach { put(it) } }
