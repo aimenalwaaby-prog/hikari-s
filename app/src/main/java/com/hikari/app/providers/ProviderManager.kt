@@ -183,7 +183,10 @@ class ProviderManager(private val store: AppStore, private val context: Context)
         ProviderType.NUVIO -> com.hikari.app.nuvio.NuvioScraper(c)
         ProviderType.SKYSTREAM -> com.hikari.app.skystream.SkyStreamProvider(c)
         ProviderType.ANIYOMI -> com.hikari.app.aniyomi.AniyomiProvider(c)
-        ProviderType.MANGA -> com.hikari.app.manga.MangaProvider(c)
+        // LNReader novel sources ride the MANGA type (manga tab, novel
+        // reader) under an `lnreader|` id prefix — no new ProviderType, so
+        // every exhaustive type when keeps compiling untouched.
+        ProviderType.MANGA -> if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(c.id)) com.hikari.app.lnreader.LnReaderProvider(c) else com.hikari.app.manga.MangaProvider(c)
         ProviderType.IPTV -> IptvProvider(c)
         ProviderType.VEGA -> com.hikari.app.providers.vega.VegaProvider(c)
         ProviderType.SORA -> com.hikari.app.sora.SoraProvider(c)

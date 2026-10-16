@@ -5763,7 +5763,9 @@ class ContentRepository(private val manager: ProviderManager) {
             ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider.streamErrors[p.config.id]
             ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[p.config.id]
         ProviderType.IPTV -> IptvProvider.iptvErrors[p.config.id]
-        ProviderType.MANGA -> com.hikari.app.manga.MangaProvider.lastOutcome[p.config.id]
+        // LNReader novel sources share the MANGA type under an `lnreader|`
+        // prefix but keep their own outcome map.
+        ProviderType.MANGA -> if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(p.config.id)) com.hikari.app.lnreader.LnReaderProvider.lastOutcome[p.config.id] else com.hikari.app.manga.MangaProvider.lastOutcome[p.config.id]
     }
 
     /** Minimal head start for the repos of the origin's own family — extended
@@ -6173,7 +6175,7 @@ class ContentRepository(private val manager: ProviderManager) {
             ProviderType.SORA -> com.hikari.app.sora.SoraProvider.streamErrors
             ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider.streamErrors
             ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider.lastOutcome
-            ProviderType.MANGA -> com.hikari.app.manga.MangaProvider.lastOutcome
+            ProviderType.MANGA -> if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(origin.config.id)) com.hikari.app.lnreader.LnReaderProvider.lastOutcome else com.hikari.app.manga.MangaProvider.lastOutcome
             ProviderType.IPTV -> IptvProvider.iptvErrors
         }
         if (message == null) map.remove(id) else map[id] = message

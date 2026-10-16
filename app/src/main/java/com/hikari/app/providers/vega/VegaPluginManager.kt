@@ -82,10 +82,14 @@ object VegaPluginManager {
 
     /**
      * The providers a Vega manifest lists. The manifest is a bare array of
-     * `{display_name, value, version, icon, disabled, hasSettings}`; `disabled`
-     * entries are the repo owner's tombstone for a provider that stopped
-     * working, so they are skipped rather than offered. `url` is the provider's
-     * dist folder (the install path appends `<name>.js` to it).
+     * `{display_name, value, version, icon, disabled, hasSettings}`.
+     * `disabled` entries are the repo owner's flag for a provider that stopped
+     * working — they are still LISTED (with a "disabled by repo" marker), never
+     * hidden: the reference app shows them too, and hiding them is what left
+     * repos reading short next to it. An install of one either works (its dist
+     * files are still served) or fails honestly when they are gone.
+     * `url` is the provider's dist folder (the install path appends `<name>.js`
+     * to it).
      */
     fun repoPlugins(manifestText: String, manifestUrl: String): List<Cs3RepoPlugin> {
         val arr = runCatching { JSONArray(manifestText) }.getOrNull() ?: return emptyList()
@@ -93,7 +97,6 @@ object VegaPluginManager {
         val out = LinkedHashMap<String, Cs3RepoPlugin>()
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            if (o.optBoolean("disabled", false)) continue
             val value = o.optString("value").trim()
             if (value.isBlank()) continue
             val name = o.optString("display_name").trim().ifBlank { value }
@@ -105,9 +108,13 @@ object VegaPluginManager {
                 .ifBlank { o.optString("logo") }
                 .ifBlank { null }
             val url = "$base/dist/$value"
+            val desc = listOfNotNull(
+                if (versionText.isNotBlank()) "v$versionText" else null,
+                if (o.optBoolean("disabled", false)) "disabled by repo" else null,
+            ).joinToString(" · ")
             out[url] = Cs3RepoPlugin(
                 name = name,
-                description = if (versionText.isNotBlank()) "v$versionText" else "",
+                description = desc,
                 url = url,
                 iconUrl = icon,
                 version = version,

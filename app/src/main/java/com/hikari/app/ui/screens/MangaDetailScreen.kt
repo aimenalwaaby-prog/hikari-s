@@ -245,6 +245,7 @@ fun MangaDetailScreen(
             // chapter-shaped outcome is shown; otherwise the honest generic.
             val outcome = MangaProvider.lastOutcome[providerId]
                 ?: com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[providerId]
+                ?: com.hikari.app.lnreader.LnReaderProvider.lastOutcome[providerId]
             error = if (outcome != null && outcome.contains("chapter", ignoreCase = true)) outcome
             else I18n.t("This engine returned no chapters. Pull refresh to try again.")
         }
@@ -672,7 +673,9 @@ private fun openChapter(
     chapter: MangaChapter,
 ) {
     // Novel rows open the text reader; manga rows the image reader.
-    val route = if (com.hikari.app.manga.MangaExtensionManager.isNovelId(providerId)) {
+    // LNReader rows (`lnreader|…`) are novels too — same reader.
+    val route = if (com.hikari.app.manga.MangaExtensionManager.isNovelId(providerId) ||
+        com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(providerId)) {
         Routes.novelReader(
             providerId = providerId,
             url = mangaUrl,

@@ -141,6 +141,7 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
     val engines = remember(all) {
         all.filter { p ->
             p is MangaProvider ||
+                p is com.hikari.app.lnreader.LnReaderProvider ||
                 p.config.type == com.hikari.app.data.ProviderType.ANYMEX_MANGA ||
                 (p.config.type == com.hikari.app.data.ProviderType.UNIVERSAL &&
                     com.hikari.app.providers.UniversalScraper.isImageMode(p.config))

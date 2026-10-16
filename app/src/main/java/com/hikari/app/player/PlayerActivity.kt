@@ -14230,6 +14230,11 @@ class PlayerActivity : ComponentActivity() {
             // never re-enter (the upstream is a remote URL).
             // A loopback HTTP 400 refused the proxy request itself — rescue
             // its upstream the same way (single-use tokens die proxy-side).
+            // The rescue plays DIRECTLY: the slot now holds a fully-resolved
+            // remote media URL, and playSource would route the row's still-
+            // aniyomi providerId back into resolveAniyomiAndPlay — where a
+            // direct URL resolves to null and is silently skipped to the next
+            // server, so the rescue never played anything.
             val loopback400Rescue = code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
                 httpStatus == 400 && isLoopbackHost(sources.getOrNull(currentIndex)?.url.orEmpty())
             if ((code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ||
@@ -14248,7 +14253,7 @@ class PlayerActivity : ComponentActivity() {
                     )
                     noSubsRetry = false
                     resetHeaderWalk()
-                    playSource(currentIndex)
+                    playDirect(currentIndex)
                     return
                 }
             }

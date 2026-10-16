@@ -1,3 +1,10 @@
+## 0.11.41 (continuous build only)
+
+### Fixed
+- Extension-proxy rescue never actually playing (0.11.40 log-proven: the "playing its upstream directly" line logged, then silence and the next server's 400): the rescued slot was replayed through the source router, which sent its still-aniyomi id back into the extension resolver — where a direct media URL resolves to nothing and is skipped without a line. The rescue now plays the resolved URL directly
+- LNReader novel sources now install and read: paste an LNReader repo (its plugins.min.json index, a `github.com/owner/repo` page, or the `lnreader` short name — pasting the `lnreader/lnreader` app URL lands on the plugins repo, which carries no plugins itself) into the new LNReader folder, install a source, and read it from the manga tab — Popular/Latest catalogues, search, chapters and the novel reader with its themes and saved position. Sources run in the same QuickJS + cheerio + fetch stack as the other script engines, one fresh engine per call
+- Vega repos reading short next to the reference app (DHR 35 of 58, Zenda 36 of 60): entries the repo flags `disabled` were hidden outright while the reference app lists them — they are listed now with a "disabled by repo" marker, still installable (their files either serve or the install says so honestly)
+
 ## 0.11.40 (continuous build only)
 
 ### Fixed

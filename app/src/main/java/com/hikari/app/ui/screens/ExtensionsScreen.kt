@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
@@ -1474,6 +1475,27 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         return removed
     }
 
+    /** Registers an LNReader novel-source repo (a plugins.min.json index, or
+     *  the `github.com/owner/repo` page that publishes it — see
+     *  [com.hikari.app.lnreader.LnReaderPluginManager.loadRepoPlugins]). */
+    suspend fun addLnReaderRepo(rawUrl: String): Result<Cs3Repo> = addRepo(rawUrl, RepoKind.LNREADER)
+
+    /** Installs one LNReader novel source: its `.js` is downloaded and
+     *  validated in the QuickJS runtime ([com.hikari.app.lnreader.LnReaderPluginManager.install]). */
+    suspend fun installLnReaderPlugin(plugin: Cs3RepoPlugin): Result<Int> =
+        com.hikari.app.lnreader.LnReaderPluginManager
+            .install(getApplication<Application>(), plugin)
+            .also { requestRefresh() }
+
+    /** Removes every LNREADER source installed from [pluginUrl]. Returns how
+     *  many installed sources were actually removed. */
+    suspend fun uninstallLnReaderPlugin(pluginUrl: String): Int {
+        val removed = com.hikari.app.lnreader.LnReaderPluginManager
+            .uninstall(getApplication<Application>(), pluginUrl)
+        requestRefresh()
+        return removed
+    }
+
     /** Registers a Sora (AnymeX) source URL — one `sourceName` + `scriptUrl`
      *  descriptor, or a JSON array of them (see
      *  [com.hikari.app.sora.SoraPluginManager.repoPlugins]). */
@@ -1999,8 +2021,13 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         // upstream one every Vega front end reads.
         fun vega(url: String) = RepoAlias(url, RepoKind.VEGA)
         fun anymex(url: String) = RepoAlias(url, RepoKind.ANYMEX)
+        fun lnreader(url: String) = RepoAlias(url, RepoKind.LNREADER)
         val vegaOfficial = vega(
             "https://raw.githubusercontent.com/Zenda-Cross/vega-providers/main/manifest.json"
+        )
+        // The official LNReader plugin index (a bare-array plugins.min.json).
+        val lnreaderOfficial = lnreader(
+            "https://raw.githubusercontent.com/lnreader/lnreader-plugins/plugins/v3.0.0/.dist/plugins.min.json"
         )
         val everyNuvio = listOf(yoru, gowaru, phisher, allInOne, animeNuvio, hindiNuvio, michat, spidey, saimuel, mooncrown, kenneth, eclipsia)
         put("megarepo", listOf(mega))
@@ -2095,6 +2122,10 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         put("vegaproviders", listOf(vegaOfficial))
         put("zendacross", listOf(vegaOfficial))
         put("zenda", listOf(vegaOfficial))
+        put("lnreader", listOf(lnreaderOfficial))
+        put("lnreaderplugins", listOf(lnreaderOfficial))
+        put("lnreaderrepo", listOf(lnreaderOfficial))
+        put("novels", listOf(lnreaderOfficial))
     }
 
     /** A pasted short name (case-insensitive) resolved to its repo(s), or null
@@ -2225,9 +2256,24 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             val body = text?.trim()
-                ?: throw Exception(
-                    "Nothing readable at that link — it is not a repo file, or the host is blocking"
-                )
+                ?: run {
+                    // A GitHub repo PAGE rather than a file: no repo.json-style
+                    // candidate can ever serve it, but it may still be an
+                    // LNReader plugin repo (the index is re-discovered from the
+                    // page). Anything else keeps the original error.
+                    val gh = com.hikari.app.lnreader.LnReaderPluginManager.githubRepoOf(trimmed)
+                    if (gh != null) {
+                        val loaded = com.hikari.app.lnreader.LnReaderPluginManager
+                            .loadRepoPlugins(trimmed).getOrNull()
+                        if (loaded != null && loaded.first.isNotEmpty()) {
+                            val repo = addRepo(loaded.second, RepoKind.LNREADER).getOrThrow()
+                            return@runCatching RepoLinkResult(repo)
+                        }
+                    }
+                    throw Exception(
+                        "Nothing readable at that link — it is not a repo file, or the host is blocking"
+                    )
+                }
             if (body.startsWith("{")) {
                 val o = runCatching { JSONObject(body) }.getOrNull()
                     ?: throw Exception("That file is not valid JSON")
@@ -2293,7 +2339,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 throw Exception(
                     "That file does not look like a repo Hikari can auto-add — open " +
                         "Extensions and paste it into the matching box (CloudStream / " +
-                        "Nuvio / SkyStream / Aniyomi / Vega / Sora / Anymex / Hikari / Stremio)"
+                        "Nuvio / SkyStream / Aniyomi / Vega / Sora / Anymex / Hikari / Stremio / LNReader)"
                 )
             }
             if (body.startsWith("[")) {
@@ -2303,6 +2349,16 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 }.getOrDefault(0)
                 if (aniyomiCount > 0) {
                     val repo = addAniyomiRepo(served).getOrThrow()
+                    return@runCatching RepoLinkResult(repo)
+                }
+                // LNReader plugin index (bare array of novel sources).
+                val lnReader = runCatching {
+                    if (com.hikari.app.lnreader.LnReaderPluginManager.looksLikeLnReader(body)) {
+                        com.hikari.app.lnreader.LnReaderPluginManager.repoPlugins(body, served)
+                    } else emptyList()
+                }.getOrDefault(emptyList())
+                if (lnReader.isNotEmpty()) {
+                    val repo = addRepo(served, RepoKind.LNREADER).getOrThrow()
                     return@runCatching RepoLinkResult(repo)
                 }
                 // Vega provider manifest (bare array of providers).
@@ -2315,7 +2371,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 throw Exception(
                     "That file is a JSON array Hikari does not recognise — Aniyomi " +
-                        "indexes and Vega manifests are supported"
+                        "indexes, Vega manifests and LNReader indexes are supported"
                 )
             }
             throw Exception("That file is not a repo Hikari understands (not JSON)")
@@ -2433,6 +2489,31 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                         kind = kind,
                     )
                     lastGoodRepoUrl = axGood
+                    store.addCs3Repo(repo)
+                    val saved = store.repos().firstOrNull {
+                        com.hikari.app.data.SourceUrls.repoKey(it.url) ==
+                            com.hikari.app.data.SourceUrls.repoKey(repo.url)
+                    }
+                    repos.value = store.repos()
+                    return@withContext Result.success(saved ?: repo)
+                }
+                if (kind == RepoKind.LNREADER) {
+                    // An LNReader repo is its plugin index (or the GitHub page
+                    // publishing it) — resolved by the manager, which also
+                    // picks the stored URL (the page for GitHub repos, so a
+                    // versioned index path never rots).
+                    val loaded = com.hikari.app.lnreader.LnReaderPluginManager
+                        .loadRepoPlugins(url).getOrElse { throw it }
+                    if (loaded.first.isEmpty()) {
+                        throw Exception("That file lists no LNReader sources")
+                    }
+                    val repo = Cs3Repo(
+                        url = loaded.second,
+                        name = niceRepoName(loaded.second, ""),
+                        description = "LNReader novel-source repository",
+                        kind = kind,
+                    )
+                    lastGoodRepoUrl = loaded.second
                     store.addCs3Repo(repo)
                     val saved = store.repos().firstOrNull {
                         com.hikari.app.data.SourceUrls.repoKey(it.url) ==
@@ -2679,6 +2760,15 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             com.hikari.app.providers.vega.VegaPluginManager.repoPlugins(text, repo.url)
                 .forEach { out[it.url] = it }
             return out.values.toList() to null
+        }
+        if (repo.kind == RepoKind.LNREADER) {
+            // An LNReader repo's index is a bare array of novel sources (see
+            // LnReaderPluginManager.repoPlugins); a stored GitHub page URL
+            // re-resolves to its current index on every refresh, so a
+            // versioned path never rots.
+            val loaded = com.hikari.app.lnreader.LnReaderPluginManager
+                .loadRepoPlugins(repo.url).getOrElse { throw it }
+            return loaded.first to null
         }
         if (repo.kind == RepoKind.ANYMEX) {
             val candidatesAx = listOfNotNull(repo.url, jsDelivrMirror(repo.url))
@@ -3177,6 +3267,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             RepoKind.ANIYOMI -> "extension"
             RepoKind.VEGA -> "provider"
             RepoKind.SORA -> "source"
+            RepoKind.LNREADER -> "source"
                                     RepoKind.ANYMEX -> "extension"
             RepoKind.CS3 -> "plugin"
         }
@@ -3214,6 +3305,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                                 RepoKind.SKYSTREAM -> installSkyStreamPlugin(p)
                                 RepoKind.ANIYOMI -> installAniyomiPlugin(p)
                                 RepoKind.VEGA -> installVegaPlugin(p)
+                                RepoKind.LNREADER -> installLnReaderPlugin(p)
                                 RepoKind.SORA -> installScriptPlugin(p, RepoKind.SORA)
                                 RepoKind.ANYMEX -> installScriptPlugin(p, RepoKind.ANYMEX)
                             }
@@ -3371,6 +3463,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                                 RepoKind.SKYSTREAM -> installSkyStreamPlugin(p)
                                 RepoKind.ANIYOMI -> installAniyomiPlugin(p)
                                 RepoKind.VEGA -> installVegaPlugin(p)
+                                RepoKind.LNREADER -> installLnReaderPlugin(p)
                                 RepoKind.SORA -> installScriptPlugin(p, RepoKind.SORA)
                                 RepoKind.ANYMEX -> installScriptPlugin(p, RepoKind.ANYMEX)
                             }
@@ -3669,7 +3762,11 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                     // and a settings dialog would be an empty lie.
                     infoProvider = p
                 }
-            ProviderType.ANIYOMI, ProviderType.MANGA -> schemaProvider = p
+            ProviderType.ANIYOMI, ProviderType.MANGA ->
+                // LNReader rows carry no extension preferences screen in
+                // their format — the gear gets the honest info dialog.
+                if (p is com.hikari.app.lnreader.LnReaderProvider) infoProvider = p
+                else schemaProvider = p
             ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA, ProviderType.SORA -> schemaProvider = p
             // A SkyStream plugin with mirror domains gets the mirror picker;
             // without domains there is nothing to configure (see the info
@@ -3769,6 +3866,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 RepoKind.SKYSTREAM -> vm.installSkyStreamPlugin(p)
                 RepoKind.ANIYOMI -> vm.installAniyomiPlugin(p)
                 RepoKind.VEGA -> vm.installVegaPlugin(p)
+                RepoKind.LNREADER -> vm.installLnReaderPlugin(p)
                 RepoKind.SORA -> vm.installScriptPlugin(p, RepoKind.SORA)
                 RepoKind.ANYMEX -> vm.installScriptPlugin(p, RepoKind.ANYMEX)
             }
@@ -3792,6 +3890,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 RepoKind.SKYSTREAM -> vm.uninstallSkyStreamPlugin(p.url)
                 RepoKind.ANIYOMI -> vm.uninstallAniyomiPlugin(p.url)
                 RepoKind.VEGA -> vm.uninstallVegaPlugin(p.url)
+                RepoKind.LNREADER -> vm.uninstallLnReaderPlugin(p.url)
                 RepoKind.SORA -> vm.uninstallSoraPlugin(p.url)
                  RepoKind.ANYMEX -> vm.uninstallAnymexPlugin(p.url)
             }
@@ -3944,6 +4043,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                     SourceFolder.SKYSTREAM -> RepoKind.SKYSTREAM
                     SourceFolder.ANIYOMI -> RepoKind.ANIYOMI
                     SourceFolder.VEGA -> RepoKind.VEGA
+                    SourceFolder.LNREADER -> RepoKind.LNREADER
                     SourceFolder.SORA -> RepoKind.SORA
                     SourceFolder.ANYMEX -> RepoKind.ANYMEX
                     SourceFolder.MANGAYOMI -> RepoKind.ANYMEX
@@ -4031,6 +4131,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             onAddSkyStreamRepo = { vm.clearStatus(); repoDialogKind = RepoKind.SKYSTREAM; showRepoDialog = true },
             onAddAniyomiRepo = { vm.clearStatus(); repoDialogKind = RepoKind.ANIYOMI; showRepoDialog = true },
             onAddVegaRepo = { vm.clearStatus(); repoDialogKind = RepoKind.VEGA; showRepoDialog = true },
+            onAddLnReaderRepo = { vm.clearStatus(); repoDialogKind = RepoKind.LNREADER; showRepoDialog = true },
             onAddSoraRepo = { vm.clearStatus(); repoDialogKind = RepoKind.SORA; showRepoDialog = true },
              onAddAnymexRepo = { vm.clearStatus(); repoDialogKind = RepoKind.ANYMEX; showRepoDialog = true },
             onAddStremio = { vm.clearStatus(); showStremio = true },
@@ -4134,6 +4235,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
         val isSky = repoDialogKind == RepoKind.SKYSTREAM
         val isAniyomi = repoDialogKind == RepoKind.ANIYOMI
         val isVega = repoDialogKind == RepoKind.VEGA
+        val isLnReader = repoDialogKind == RepoKind.LNREADER
         val isSora = repoDialogKind == RepoKind.SORA
         val isAnymex = repoDialogKind == RepoKind.ANYMEX
         AlertDialog(
@@ -4146,6 +4248,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         RepoKind.SKYSTREAM -> "Add SkyStream repo"
                         RepoKind.ANIYOMI -> "Add Aniyomi repo"
                         RepoKind.VEGA -> "Add Vega repo"
+                        RepoKind.LNREADER -> "Add LNReader repo"
                         RepoKind.SORA -> "Add Sora repo"
                          RepoKind.ANYMEX -> "Add Anymex repo"
                         RepoKind.CS3 -> "Add CloudStream repo"
@@ -4175,6 +4278,10 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 "Paste a Vega provider repo URL (a manifest.json — a JSON " +
                                     "array of the repo's providers). For example:\n" +
                                     "https://raw.githubusercontent.com/Zenda-Cross/vega-providers/main/manifest.json"
+                            isLnReader ->
+                                "Paste an LNReader novel-source repo — its plugins.min.json " +
+                                    "index, or just the GitHub repo page. For example:\n" +
+                                    "https://github.com/lnreader/lnreader-plugins"
                             isSora ->
                                 "Paste a Sora (AnymeX) source URL — one source descriptor " +
                                     "(a JSON with sourceName + scriptUrl, e.g. streamex.json) " +
@@ -4203,7 +4310,8 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 "mooncrown, kennethjys, eclipsia. SkyStream repos: skystream, " +
                                 "akash, skyourge, rougegz. Aniyomi repos: aniyomiext " +
                                 "(the official Aniyomi extensions repo). Vega repos: vega " +
-                                "(Zenda-Cross's official Vega providers)."
+                                "(Zenda-Cross's official Vega providers). LNReader repos: " +
+                                "lnreader (the official plugin index)."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -4219,6 +4327,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     when {
                                         isAniyomi -> "https://…/index.min.json"
                                         isVega -> "https://…/manifest.json"
+                                        isLnReader -> "https://…/plugins.min.json"
                                         isSora -> "https://…/streamex.json"
                                         isAnymex -> "https://…/anime_index.json"
                                         else -> "https://…/repo.json"
@@ -4257,6 +4366,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     RepoKind.SKYSTREAM -> vm.addSkyStreamRepo(repoUrl)
                                     RepoKind.ANIYOMI -> vm.addAniyomiRepo(repoUrl)
                                     RepoKind.VEGA -> vm.addVegaRepo(repoUrl)
+                                    RepoKind.LNREADER -> vm.addLnReaderRepo(repoUrl)
                                     RepoKind.SORA -> vm.addSoraRepo(repoUrl)
                                      RepoKind.ANYMEX -> vm.addAnymexRepo(repoUrl)
                                     RepoKind.CS3 -> vm.addCs3Repo(repoUrl)
@@ -5044,6 +5154,7 @@ private fun RepoBrowserView(
                                                 RepoKind.SKYSTREAM -> "SkyStream extension"
                                                 RepoKind.ANIYOMI -> "Aniyomi extension"
                                                 RepoKind.VEGA -> "Vega provider"
+                                                RepoKind.LNREADER -> "LNReader source"
                                                 RepoKind.SORA -> "Sora source"
                                                  RepoKind.ANYMEX -> "Anymex extension"
                                             }
@@ -5313,28 +5424,28 @@ private fun RepoBrowserView(
                         srcCard(Icons.Filled.Tv, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        srcCard(Icons.Filled.MenuBook, tr("LNReader repos"), tr("plugins.min.json · LNReader novel sources"), { onOpenFolder(SourceFolder.LNREADER) })
                         srcCard(AnymexA, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(StremioDiamond, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.LiveTv, tr("IPTV playlists"), tr("M3U / M3U8 links and files · live channels"), { onOpenFolder(SourceFolder.IPTV) })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Build, tr("Add universal scraper"), tr("JSON config · scriptable scraper"), onAddScraper)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Download, tr("Install .cs3 plugin"), tr("From a URL or a local file"), onAddCs3Url)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Add, tr("Install .hiki extension"), tr("From a URL or a local file"), onAddHikiUrl)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Add, tr("Install .sky extension"), tr("SkyStream plugin · from a URL or a local file"), onAddSkyStreamUrl)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Add, tr("Install Aniyomi extension (.apk)"), tr("Aniyomi extension · from a URL or a local file"), onAddAniyomiUrl)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Public, tr("Add website"), tr("Opens in the ad-free web view"), onAddSite)
-                        srcCard(Icons.Filled.Folder, tr("All installed repos"), tr("All repos you've added · ") + repos.size + " total", onOpenAllRepos)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        srcCard(Icons.Filled.Folder, tr("All installed repos"), tr("All repos you've added · ") + repos.size + " total", onOpenAllRepos)
                         srcCard(Icons.Filled.Extension, tr("Installed extensions"), tr("Manage, toggle & uninstall · ") + providers.size + " installed", onOpenInstalled)
-                        Spacer(Modifier.weight(1f))
                     }
                 }
             } else {
@@ -5384,6 +5495,13 @@ private fun RepoBrowserView(
                         title = tr("Vega repos"),
                         subtitle = tr("manifest.json · Vega providers"),
                         onClick = { onOpenFolder(SourceFolder.VEGA) }
+                    )
+                    SourceDivider()
+                    SourceActionRow(
+                        icon = Icons.Filled.MenuBook,
+                        title = tr("LNReader repos"),
+                        subtitle = tr("plugins.min.json · LNReader novel sources"),
+                        onClick = { onOpenFolder(SourceFolder.LNREADER) }
                     )
                     SourceDivider()
                     SourceActionRow(
@@ -5886,6 +6004,7 @@ private fun RepoPluginsView(
             RepoKind.SKYSTREAM -> "extension"
             RepoKind.ANIYOMI -> "extension"
             RepoKind.VEGA -> "provider"
+            RepoKind.LNREADER -> "source"
             RepoKind.SORA -> "source"
                                     RepoKind.ANYMEX -> "extension"
             RepoKind.CS3 -> "plugin"
@@ -6874,6 +6993,7 @@ private fun RepoCard(
                             RepoKind.SKYSTREAM -> "SkyStream"
                             RepoKind.ANIYOMI -> "Aniyomi"
                             RepoKind.VEGA -> "Vega"
+                            RepoKind.LNREADER -> "LNReader"
                             RepoKind.SORA -> "Sora"
                             RepoKind.ANYMEX -> "Anymex"
                         },
@@ -6897,6 +7017,7 @@ private fun RepoCard(
                                     RepoKind.SKYSTREAM -> "extension"
                                     RepoKind.ANIYOMI -> "extension"
                                     RepoKind.VEGA -> "provider"
+                                    RepoKind.LNREADER -> "source"
                                     RepoKind.SORA -> "source"
                                     RepoKind.ANYMEX -> "extension"
                                     else -> "plugin"
@@ -7358,7 +7479,11 @@ private fun pluginStatus(p: ContentProvider, iptvTick: Int = 0): String? {
             return "Extension file missing — reinstall this extension"
         }
         val err = if (manga) {
-            com.hikari.app.manga.MangaProvider.lastOutcome[p.config.id]
+            if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(p.config.id)) {
+                com.hikari.app.lnreader.LnReaderProvider.lastOutcome[p.config.id]
+            } else {
+                com.hikari.app.manga.MangaProvider.lastOutcome[p.config.id]
+            }
         } else {
             com.hikari.app.aniyomi.AniyomiProvider.catalogErrors[p.config.id]
         }
@@ -7518,7 +7643,7 @@ private fun isMangayomiRepo(repo: Cs3Repo): Boolean {
         (n.contains("mangayomi") && !n.contains("anymex") && !n.contains("kegareta"))
 }
 
-enum class SourceFolder { CLOUDSTREAM, HIKARI, NUVIO, SKYSTREAM, ANIYOMI, VEGA, SORA, ANYMEX, MANGAYOMI, ANYMEX_HOME, STREMIO, IPTV }
+enum class SourceFolder { CLOUDSTREAM, HIKARI, NUVIO, SKYSTREAM, ANIYOMI, VEGA, LNREADER, SORA, ANYMEX, MANGAYOMI, ANYMEX_HOME, STREMIO, IPTV }
 
 @Composable
 private fun SourceFolderView(
@@ -7570,6 +7695,7 @@ private fun SourceFolderView(
         SourceFolder.SKYSTREAM -> RepoKind.SKYSTREAM
         SourceFolder.ANIYOMI -> RepoKind.ANIYOMI
         SourceFolder.VEGA -> RepoKind.VEGA
+        SourceFolder.LNREADER -> RepoKind.LNREADER
         SourceFolder.SORA -> RepoKind.SORA
         SourceFolder.ANYMEX, SourceFolder.MANGAYOMI -> RepoKind.ANYMEX
         SourceFolder.STREMIO, SourceFolder.IPTV, SourceFolder.ANYMEX_HOME -> null
@@ -7581,6 +7707,7 @@ private fun SourceFolderView(
         SourceFolder.SKYSTREAM -> "SkyStream repos" to "repo.json · SkyStream extensions"
         SourceFolder.ANIYOMI -> "Aniyomi repos" to "index.min.json · Aniyomi extensions"
         SourceFolder.VEGA -> "Vega repos" to "manifest.json · Vega providers"
+        SourceFolder.LNREADER -> "LNReader repos" to "plugins.min.json · LNReader novel sources"
         SourceFolder.SORA -> "Sora repos" to "AnymeX script index · Sora sources"
         SourceFolder.ANYMEX -> "Anymex repos" to "index.json · Anymex / Kegareta"
         SourceFolder.MANGAYOMI -> "Mangayomi repos" to "index.json · Mangayomi extensions"
@@ -7595,6 +7722,7 @@ private fun SourceFolderView(
         SourceFolder.SKYSTREAM -> "SkyStream"
         SourceFolder.ANIYOMI -> "Aniyomi"
         SourceFolder.VEGA -> "Vega"
+        SourceFolder.LNREADER -> "LNReader"
         SourceFolder.SORA -> "Sora"
         SourceFolder.ANYMEX -> "Anymex"
         SourceFolder.MANGAYOMI -> "Mangayomi"
@@ -7904,6 +8032,10 @@ private fun SourceFolderView(
                 // folder, so its own installs belong here.)
                 val installedHere = when (folder) {
                     SourceFolder.SORA -> providers.filter { it.config.type == ProviderType.SORA }
+                    SourceFolder.LNREADER -> providers.filter {
+                        it.config.type == ProviderType.MANGA &&
+                            com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(it.config.id)
+                    }
                     SourceFolder.ANYMEX -> providers.filter {
                         it.config.type == ProviderType.ANYMEX ||
                             it.config.type == ProviderType.ANYMEX_MANGA
@@ -7986,6 +8118,7 @@ private fun SourceFolderView(
                 SourceFolder.STREMIO -> "Add Stremio addon"
                 SourceFolder.IPTV -> "Add IPTV playlist"
                 SourceFolder.SORA -> "Add Sora repo"
+                SourceFolder.LNREADER -> "Add LNReader repo"
                 SourceFolder.ANYMEX -> "Add Anymex repo"
                 SourceFolder.MANGAYOMI -> "Add Anymex repo"
                 SourceFolder.ANYMEX_HOME -> "Add Anymex / Sora repo"
@@ -8025,6 +8158,7 @@ private fun SourcesOverviewView(
     onAddSkyStreamRepo: () -> Unit,
     onAddAniyomiRepo: () -> Unit,
     onAddVegaRepo: () -> Unit,
+    onAddLnReaderRepo: () -> Unit,
     onAddSoraRepo: () -> Unit,
     onAddAnymexRepo: () -> Unit,
     onAddStremio: () -> Unit,
@@ -8064,6 +8198,7 @@ private fun SourcesOverviewView(
     val skyGroupTitle = tr("SkyStream")
     val aniyomiGroupTitle = tr("Aniyomi")
     val vegaGroupTitle = tr("Vega")
+    val lnreaderGroupTitle = tr("LNReader")
     val soraGroupTitle = tr("Sora")
     val anymexGroupTitle = tr("Anymex")
     Column(Modifier.fillMaxSize()) {
@@ -8188,6 +8323,16 @@ private fun SourcesOverviewView(
                 pluginsByRepo = pluginsByRepo,
                 repoState = repoState,
                 onAdd = onAddVegaRepo,
+                onOpenRepo = onOpenRepo,
+                onRefreshRepo = onRefreshRepo,
+                onRemoveRepo = onRemoveRepo,
+            )
+            repoGroup(
+                title = lnreaderGroupTitle,
+                groupRepos = repos.filter { it.kind == RepoKind.LNREADER },
+                pluginsByRepo = pluginsByRepo,
+                repoState = repoState,
+                onAdd = onAddLnReaderRepo,
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,

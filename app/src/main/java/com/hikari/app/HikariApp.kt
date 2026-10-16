@@ -736,6 +736,7 @@ class HikariApp : Application() {
                 com.hikari.app.providers.vega.VegaPluginManager.seedDefaults(this@HikariApp, store)
                 com.hikari.app.sora.SoraPluginManager.seedDefaults(this@HikariApp, store)
                 com.hikari.app.anymex.AnymexPluginManager.seedDefaults(this@HikariApp, store)
+                com.hikari.app.lnreader.LnReaderPluginManager.seedDefaults(this@HikariApp, store)
             }
             // First run: seed the Aniyomi extension repo (Aniyomi's official
             // index.min.json) so Aniyomi-extensions are installable from the
