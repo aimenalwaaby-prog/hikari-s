@@ -902,6 +902,16 @@ class HikariApp : Application() {
                     providers.refresh()
                 }
             }
+            // Dead manga/anime rows (extension file gone, nothing to play):
+            // without this they pile up as "Extension file missing" rows no
+            // uninstall can remove — the "100 copies" class. Once per launch.
+            runCatching {
+                val pruned = com.hikari.app.manga.MangaExtensionManager.pruneDeadFiles(this@HikariApp)
+                if (pruned > 0) {
+                    Logs.log("Providers", "pruned $pruned dead manga/anime row(s) — refreshing")
+                    providers.refresh()
+                }
+            }
             // SkyStream bundles (one JS, many feeds) installed before feed
             // rows existed expand into one row per feed here, once.
             runCatching {

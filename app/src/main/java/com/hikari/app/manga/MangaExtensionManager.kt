@@ -518,13 +518,44 @@ object MangaExtensionManager {
                 )
             }
             store.updateProviders { list ->
-                list.filterNot { it.type == ProviderType.MANGA && it.id.startsWith(prefix) } + fresh
+                // The canonical rows for this file — plus any LEGACY rows
+                // pointing at the same file under a different id scheme (an
+                // older build's naming): without the second half, every
+                // reinstall scheme change orphaned a full set of rows and the
+                // engine list grew "100 copies" of one install that no
+                // uninstall could ever remove (uninstall matches by source,
+                // and the orphans' source no longer matches anything).
+                list.filterNot {
+                    it.type == ProviderType.MANGA &&
+                        (it.id.startsWith(prefix) || it.url == target.absolutePath)
+                } + fresh
             }
             HikariApp.instance.providers.refresh()
             Result.success(fresh.size)
         } finally {
             if (temp.exists()) runCatching { temp.delete() }
         }
+    }
+
+    /**
+     * Drops MANGA/ANIYOMI rows whose extension file is gone (uninstalled
+     * outside the app, a cleared folder, a restore that did not carry the
+     * file): they can never play again, they read as "Extension file
+     * missing", and no uninstall matches them once their source is forgotten.
+     * Runs once per launch (see HikariApp); returns how many rows went.
+     */
+    suspend fun pruneDeadFiles(app: HikariApp): Int {
+        val root = app.filesDir.absolutePath
+        val store = app.store
+        val dead = runCatching { store.providers() }.getOrDefault(emptyList())
+            .filter {
+                (it.type == ProviderType.MANGA || it.type == ProviderType.ANIYOMI) &&
+                    it.url.startsWith(root) && !File(it.url).isFile
+            }
+            .map { it.id }.toSet()
+        if (dead.isEmpty()) return 0
+        store.updateProviders { list -> list.filterNot { it.id in dead } }
+        return dead.size
     }
 
     /** Removes every MANGA provider that came from [sourceUrl] plus its file. */

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
@@ -741,23 +743,71 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                             modifier = Modifier.padding(vertical = 8.dp),
                         )
                     }
-                    shownEngines.forEach { p ->
-                        EngineRow(
-                            engine = p,
-                            nav = nav,
-                            pinned = p.config.id in pinned,
-                            revealPin = pinReveal == p.config.id,
-                            onRevealPin = { pinReveal = if (pinReveal == p.config.id) null else p.config.id },
-                            onTogglePin = {
-                                val next = pinned.toMutableSet().apply {
-                                    if (!add(p.config.id)) remove(p.config.id)
+                    // Multi-source packs (one installed file publishing many
+                    // same-named sources — the "Akuma (8)…(15)" / "100 copies"
+                    // class) collapse into one header row per file with a
+                    // count, expanded to the per-source rows. Single-source
+                    // installs render exactly as before.
+                    var expandedPacks by remember { mutableStateOf(setOf<String>()) }
+                    val packs = remember(shownEngines) {
+                        val order = LinkedHashMap<String, MutableList<ContentProvider>>()
+                        for (p in shownEngines) {
+                            order.getOrPut(p.config.url.ifBlank { p.config.id }) { ArrayList() } += p
+                        }
+                        order.values.toList()
+                    }
+                    packs.forEach { g ->
+                        if (g.size <= 1) {
+                            val p = g[0]
+                            EngineRow(
+                                engine = p,
+                                nav = nav,
+                                pinned = p.config.id in pinned,
+                                revealPin = pinReveal == p.config.id,
+                                onRevealPin = { pinReveal = if (pinReveal == p.config.id) null else p.config.id },
+                                onTogglePin = {
+                                    val next = pinned.toMutableSet().apply {
+                                        if (!add(p.config.id)) remove(p.config.id)
+                                    }
+                                    pinReveal = null
+                                    scope.launch {
+                                        runCatching { app.store.setPinnedMangaEngines(next) }
+                                    }
+                                },
+                            )
+                        } else {
+                            val key = g[0].config.url.ifBlank { g[0].config.id }
+                            val open = key in expandedPacks
+                            EnginePackRow(
+                                name = packDisplayName(g.map { it.config.name }),
+                                count = g.size,
+                                open = open,
+                                onToggle = {
+                                    expandedPacks = if (open) expandedPacks - key else expandedPacks + key
+                                },
+                                engine = g[0],
+                            )
+                            if (open) {
+                                g.forEach { p ->
+                                    EngineRow(
+                                        engine = p,
+                                        nav = nav,
+                                        pinned = p.config.id in pinned,
+                                        revealPin = pinReveal == p.config.id,
+                                        onRevealPin = { pinReveal = if (pinReveal == p.config.id) null else p.config.id },
+                                        onTogglePin = {
+                                            val next = pinned.toMutableSet().apply {
+                                                if (!add(p.config.id)) remove(p.config.id)
+                                            }
+                                            pinReveal = null
+                                            scope.launch {
+                                                runCatching { app.store.setPinnedMangaEngines(next) }
+                                            }
+                                        },
+                                    )
                                 }
-                                pinReveal = null
-                                scope.launch {
-                                    runCatching { app.store.setPinnedMangaEngines(next) }
-                                }
-                            },
-                        )
+                            }
+                        }
                     }
                 }
             }
@@ -974,6 +1024,80 @@ private fun EngineRow(
             }
         }
     }
+}
+
+/**
+ * Header for one installed file publishing many same-named sources (the
+ * "Akuma (8)…(15)" class): the file's icon, its bare name, a count pill,
+ * and expand/collapse. A tap (or D-pad OK) toggles; the per-source
+ * [EngineRow]s underneath open exactly as before.
+ */
+@Composable
+private fun EnginePackRow(
+    name: String,
+    count: Int,
+    open: Boolean,
+    onToggle: () -> Unit,
+    engine: ContentProvider,
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                // The D-pad half, same as [EngineRow]: without this a remote
+                // could not expand a pack at all.
+                .tvPress(previewPass = false, onClick = onToggle)
+                .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MangaIcon(engine.config, size = 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            // The count is the point of the pack: how many same-named
+            // sources this one file publishes.
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+            ) {
+                Text(
+                    count.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+            Icon(
+                if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = tr(if (open) "Collapse" else "Expand"),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
+/** The pack header wears the file's bare name: the " (8)" numbering an
+ *  install stamps on same-named sources is the file's own bookkeeping, not
+ *  a fact about the source — and neither is a " • host" suffix. */
+private val packCountSuffix = Regex("""\s*\(\d+\)\s*\z""")
+
+private fun packDisplayName(names: List<String>): String {
+    val first = names.firstOrNull().orEmpty()
+    val bare = packCountSuffix.replace(first, "").substringBefore(" • ").trim()
+    return bare.ifBlank { first }
 }
 
 private fun openCatalog(

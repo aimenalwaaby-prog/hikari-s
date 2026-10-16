@@ -478,6 +478,10 @@ object Routes {
     private var lastTabNavAt = 0L
     private var lastTabNavRoute: String? = null
     fun navigateTab(nav: NavHostController, route: String) {
+        // Already there: a re-tap of the active tab must never re-navigate
+        // (a double-tap's echo used to land on Home). Scoped/query routes
+        // still pop back via the path below — this only skips the exact tab.
+        if (nav.currentDestination?.route == route) return
         val now = android.os.SystemClock.uptimeMillis()
         if (route == lastTabNavRoute && now - lastTabNavAt < 500L) return
         lastTabNavRoute = route
@@ -1069,18 +1073,24 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
         }
     }
     LaunchedEffect(tabRoute) { barExpanded = true }
-    LaunchedEffect(homeRequest, tabRoute) {
+    // Consume-once: keyed ONLY on the request counter, never on the tab.
+    // The old (homeRequest, tabRoute) keys re-fired on every tab switch, so
+    // a stale request bounced a later Manga/any-tab tap straight back Home;
+    // each counter value is now handled at most once.
+    var homeHandled by remember { mutableStateOf(0) }
+    LaunchedEffect(homeRequest) {
         // The home request is emitted by WebViewActivity's explicit "Go to app
         // home" action. Extension installation can briefly create/finish a
         // WebView-backed activity on some plugin paths; never let that global
         // request tear the user out of the Extensions tab while an extension
         // repo/install flow is active. Consumed after handling so a stale
         // request can never bounce a later repo tap back to Home.
-        if (homeRequest > 0 && tabRoute != Routes.EXTENSIONS) {
-            Routes.navigateTab(nav, Routes.HOME)
-        }
-        if (homeRequest > 0) {
+        if (homeRequest > 0 && homeRequest != homeHandled) {
+            homeHandled = homeRequest
             app.homeTabRequest.value = 0
+            if (tabRoute != Routes.EXTENSIONS) {
+                Routes.navigateTab(nav, Routes.HOME)
+            }
         }
     }
     LaunchedEffect(repoLinkRequest, tabRoute) {

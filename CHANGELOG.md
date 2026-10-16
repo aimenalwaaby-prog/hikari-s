@@ -1,3 +1,11 @@
+## 0.11.37 (continuous build only)
+
+### Fixed
+- Aniyomi extension-server links (MissAV localhost /m3u8 proxy, malformed-manifest "Server failed" while the same link plays in the reference apps): the player now defaults to the Referer/User-Agent the proxy itself declares in its own URL (its upstream needs those, and the reference server only forwards what the player sent), retries once with the reference player's UA on IO failures, and — when the proxy itself answers garbage — plays the upstream file it names directly with those headers instead of abandoning the server
+- VidLink rows via Stremio ("server failed" while the row plays in Stremio): same reference-UA retry — some stream CDNs serve the reference app and refuse a browser UA on media URLs; one bounded retry with the reference UA before the server is abandoned (CS3 keeps its verbatim single attempt, loopback/torrent/local rows excluded)
+- Manga engine list showing dozens of copies of one install (the "Akuma (8)…(15)" rows): reinstalls now drop legacy rows pointing at the same file, launch prunes rows whose extension file is gone, and one file publishing many same-named sources renders as a single expandable pack (bare name + count) instead of a wall of rows
+- Tapping Manga (or any tab) bouncing back to Home, and double-tapping a tab landing on Home: re-tapping the active tab no longer re-navigates at all, and the WebView "go to app home" request is consumed once (keyed on the request itself, never re-fired by a later tab switch)
+
 ## 0.11.36 (continuous build only)
 
 ### Fixed

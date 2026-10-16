@@ -915,6 +915,18 @@ class PlayerActivity : ComponentActivity() {
      *  bare request there is a guaranteed 403, so variants 1/2 keep Referer. */
     private var headerVariant = 0
 
+    /** The reference player's UA pass: 0 = the extractor/browser headers (as
+     *  today), 1 = the reference stack's own UA. Some stream CDNs serve the
+     *  reference app (ExoPlayer UA) and refuse a browser UA on media URLs —
+     *  the row plays in Stremio and dies here with an IO error. The retry is
+     *  rescue-only (see the error path): one attempt with the reference UA
+     *  before the server is abandoned. CS3 excluded (verbatim parity, like
+     *  the header walk above). */
+    private var uaVariant = 0
+
+    /** Reference UA, matching the bundled media3 (see libs.versions.toml). */
+    private val exoPlayerUa = "ExoPlayerLib/1.7.1"
+
     /** True while the current source is retried with text tracks disabled
      *  (its HLS manifest carried a garbage subtitle track that made media3
      *  crash with "Expected WEBVTT. Got 1"). */
@@ -10977,6 +10989,7 @@ class PlayerActivity : ComponentActivity() {
      *  since the source about to be tried is a new one. */
     private fun resetHeaderWalk() {
         headerVariant = 0
+        uaVariant = 0
         lastSavedSourceIndex = -1
         lastSavedVariant = -1
     }
@@ -10996,6 +11009,7 @@ class PlayerActivity : ComponentActivity() {
         torrentJob = null
         if (index != currentIndex) {
             headerVariant = 0
+            uaVariant = 0
             // A DIFFERENT server: the one attempt at a restart it is allowed
             // (see [firstFrameRetried]) resets with it. Staying on the same
             // server (a retry after an error, a restart) keeps the flag.
@@ -11471,6 +11485,10 @@ class PlayerActivity : ComponentActivity() {
             val isCs3Probe = src.providerId.startsWith("cs3|")
             val clean = if (isCs3Probe) sanitizeHeaders(src.headers)
                 else withKnownHotlinkReferer(src.url, sanitizeHeaders(src.headers))
+            // Same proxy-declared defaults as the play path (see baseHeaders):
+            // the probe classifies with the headers the server will see.
+            val base = if (isCs3Probe) clean
+                else loopbackQueryHeaders(src.url).let { if (it.isEmpty() || !isLoopbackHost(src.url)) clean else it + clean }
             val mandatoryRef = runCatching {
                 com.hikari.app.cs3.Cs3MainApiProvider.isRefererMandatory(src.url)
             }.getOrDefault(false)
@@ -11481,11 +11499,11 @@ class PlayerActivity : ComponentActivity() {
                 } catch (_: Throwable) { }
             }
             val headers = if (isCs3Probe) clean else when (headerVariant) {
-                1 -> if (mandatoryRef) clean else clean.filterKeys { !it.equals("Referer", ignoreCase = true) }
-                2 -> if (mandatoryRef) clean.filterKeys { it.equals("Referer", ignoreCase = true) || it.equals("User-Agent", ignoreCase = true) } else emptyMap()
-                else -> clean
+                1 -> if (mandatoryRef) base else base.filterKeys { !it.equals("Referer", ignoreCase = true) }
+                2 -> if (mandatoryRef) base.filterKeys { it.equals("Referer", ignoreCase = true) || it.equals("User-Agent", ignoreCase = true) } else emptyMap()
+                else -> base
             }
-            val ua = headers["User-Agent"]?.takeIf { it.isNotBlank() } ?: Http.UA
+            val ua = uaFor(headers)
             // The walk runs DETACHED (an `async`, awaited with a deadline): a
             // probe is a classification, and the queue of dead wrapper hops it
             // may have to walk is allowed to take its time — it is NOT allowed
@@ -11659,15 +11677,21 @@ class PlayerActivity : ComponentActivity() {
         val isCs3Source = src.providerId.startsWith("cs3|")
         val cleanHeaders = if (isCs3Source) sanitizeHeaders(src.headers)
             else withKnownHotlinkReferer(src.url, sanitizeHeaders(src.headers))
+        // An extension's proxy declares its upstream headers in its own URL
+        // (see loopbackQueryHeaders) — default to them so both server
+        // families (query-respecting and header-forwarding) are served.
+        // Explicit video headers still win (overlay order).
+        val baseHeaders = if (isCs3Source) cleanHeaders
+            else loopbackQueryHeaders(src.url).let { if (it.isEmpty() || !isLoopbackHost(src.url)) cleanHeaders else it + cleanHeaders }
         val mandatoryRef2 = runCatching {
             com.hikari.app.cs3.Cs3MainApiProvider.isRefererMandatory(src.url)
         }.getOrDefault(false)
         val sourceHeaders = if (isCs3Source) cleanHeaders else when (headerVariant) {
-            1 -> if (mandatoryRef2) cleanHeaders else cleanHeaders.filterKeys { !it.equals("Referer", ignoreCase = true) }
-            2 -> if (mandatoryRef2) cleanHeaders.filterKeys { it.equals("Referer", ignoreCase = true) || it.equals("User-Agent", ignoreCase = true) } else emptyMap()
-            else -> cleanHeaders
+            1 -> if (mandatoryRef2) baseHeaders else baseHeaders.filterKeys { !it.equals("Referer", ignoreCase = true) }
+            2 -> if (mandatoryRef2) baseHeaders.filterKeys { it.equals("Referer", ignoreCase = true) || it.equals("User-Agent", ignoreCase = true) } else emptyMap()
+            else -> baseHeaders
         }
-        val ua = sourceHeaders["User-Agent"]?.takeIf { it.isNotBlank() } ?: Http.UA
+        val ua = uaFor(sourceHeaders)
         // CloudStream parity for CloudStream sources (CS3-only): play through
         // CloudStream's OWN shared client (MainActivityKt.getApp().baseClient —
         // the exact client extraction used, same cookies/TLS/profile), plus
@@ -11682,8 +11706,7 @@ class PlayerActivity : ComponentActivity() {
         // these links. A loopback address can never need clearance cookies
         // or verification, so nothing is lost, and any stray state the
         // shared stack attaches is removed as a variable.
-        val isLoopbackUrl = runCatching { java.net.URI(src.url).host?.lowercase() }
-            .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
+        val isLoopbackUrl = isLoopbackHost(src.url)
         var playbackClient = when {
             isCs3Source -> com.hikari.app.cs3.Cs3MainApiProvider.cs3BaseClient()
             isLoopbackUrl -> PlayerHttp.plainClient
@@ -13916,8 +13939,7 @@ class PlayerActivity : ComponentActivity() {
             // failover path; a late answer changes nothing.
             if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
                 val failedUrl = sources.getOrNull(currentIndex)?.url.orEmpty()
-                val failedLoopback = runCatching { java.net.URI(failedUrl).host?.lowercase() }
-                    .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
+                val failedLoopback = isLoopbackHost(failedUrl)
                 if (failedLoopback && failedUrl.isNotBlank()) {
                     lifecycleScope.launch(Dispatchers.IO) {
                         val diag = runCatching {
@@ -14006,6 +14028,33 @@ class PlayerActivity : ComponentActivity() {
                 playSource(currentIndex)
                 return
             }
+            // An extension's local proxy answered garbage (its upstream fetch
+            // died inside the extension's own server — the "plays in Aniyomi,
+            // malformed here" class, e.g. MissAV's /m3u8 proxy). The proxy URL
+            // names its own upstream plus the headers upstream needs (see
+            // loopbackUpstream), so play that upstream DIRECTLY once, with
+            // those headers, before the server is abandoned. Rescue-only: runs
+            // only after the proxy already failed, and a rewritten slot can
+            // never re-enter (the upstream is a remote URL).
+            if ((code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ||
+                code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) &&
+                !terminalHostFailure
+            ) {
+                val cur = sources.getOrNull(currentIndex)
+                val rescue = if (cur != null) loopbackUpstream(cur) else null
+                if (rescue != null) {
+                    triedUrls.add(rescue.url)
+                    sources = sources.toMutableList().also { it[currentIndex] = rescue }
+                    com.hikari.app.data.Logs.log(
+                        "Player",
+                        "loopback proxy unusable — playing its upstream directly",
+                    )
+                    noSubsRetry = false
+                    resetHeaderWalk()
+                    playSource(currentIndex)
+                    return
+                }
+            }
             // Some CDNs 403 the request as long as it carries a Referer / other
             // extractor headers, even though the bare URL plays fine in a
             // browser. And some addons hand us a header with non-ASCII chars
@@ -14027,6 +14076,28 @@ class PlayerActivity : ComponentActivity() {
                 // Silent retry — same server, next header set down. The only
                 // message the user sees is "Server failed — trying next" once
                 // this server is finally abandoned.
+                noSubsRetry = false
+                playSource(currentIndex)
+                return
+            }
+            // The reference-UA pass (see uaVariant): some stream CDNs serve
+            // the reference app and refuse a browser UA on media URLs — the
+            // row plays in Stremio and dies here with an IO error. One retry
+            // with the reference UA before the server is abandoned. Same
+            // exclusions as the header walk (CS3 verbatim parity), plus
+            // loopback (the proxy owns that leg) and non-HTTP rows.
+            val failedSrc = sources.getOrNull(currentIndex)
+            if (!isCs3Failed && uaVariant < 1 && !terminalHostFailure && failedSrc != null &&
+                !failedSrc.torrentStream && !failedSrc.local && !isLoopbackHost(failedSrc.url) &&
+                (failedSrc.url.startsWith("http://", ignoreCase = true) ||
+                    failedSrc.url.startsWith("https://", ignoreCase = true)) &&
+                (code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                    code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                    code == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+                    code == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND)
+            ) {
+                uaVariant++
                 noSubsRetry = false
                 playSource(currentIndex)
                 return
@@ -14259,6 +14330,73 @@ class PlayerActivity : ComponentActivity() {
         if (h.keys.any { it.equals("Referer", ignoreCase = true) }) return h
         if (url.contains("fastream", ignoreCase = true)) return h + ("Referer" to "https://fastream.to")
         return h
+    }
+
+    /** True for an extension's own local server URL (its /m3u8 proxy, e.g.
+     *  MissAV): localhost in all its spellings. One predicate for every
+     *  loopback branch so they cannot drift apart. */
+    private fun isLoopbackHost(u: String): Boolean = runCatching { java.net.URI(u).host?.lowercase() }
+        .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
+
+    /** The UA the request carries: the extractor's own when it declares one,
+     *  else ours — except on the reference-UA pass (see [uaVariant]), which
+     *  sends the reference stack's UA instead. */
+    private fun uaFor(headers: Map<String, String>): String =
+        if (uaVariant == 1) exoPlayerUa
+        else headers["User-Agent"]?.takeIf { it.isNotBlank() } ?: Http.UA
+
+    /** Referer/User-Agent an extension's local proxy declares in its own URL
+     *  (`/m3u8?url=…&referer=…&useragent=…`): that is what its upstream needs,
+     *  so requests to the proxy default to them. Requests to the proxy are
+     *  the ONLY place these apply, and explicit video headers still win
+     *  (overlay order at the call sites). */
+    private fun loopbackQueryHeaders(proxyUrl: String): Map<String, String> {
+        val q = runCatching { java.net.URI(proxyUrl).query }.getOrNull().orEmpty()
+        if (q.isBlank()) return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        for (part in q.split('&')) {
+            val k = part.substringBefore('=').trim().lowercase()
+            val v = runCatching {
+                java.net.URLDecoder.decode(part.substringAfter('=', ""), "UTF-8")
+            }.getOrDefault("").trim()
+            if (v.isBlank()) continue
+            when (k) {
+                "referer", "referrer" -> out.putIfAbsent("Referer", v)
+                "useragent", "user-agent" -> out.putIfAbsent("User-Agent", v)
+            }
+        }
+        return out
+    }
+
+    /** The upstream file an extension's local proxy names in its own URL, or
+     *  null when this is not a proxy URL (or names nothing fetchable). Used
+     *  for the direct-upstream rescue: when the proxy itself answers garbage,
+     *  its upstream — fetched with the headers the proxy declares — is often
+     *  a perfectly playable file. Rescue-only: the caller runs this only
+     *  after the proxy already failed, once per proxy URL. */
+    private fun loopbackUpstream(src: PlayerSource): PlayerSource? {
+        if (src.torrentStream || src.local || !isLoopbackHost(src.url)) return null
+        val q = runCatching { java.net.URI(src.url).query }.getOrNull().orEmpty()
+        var up: String? = null
+        for (part in q.split('&')) {
+            if (!part.substringBefore('=').trim().equals("url", ignoreCase = true)) continue
+            val v = runCatching {
+                java.net.URLDecoder.decode(part.substringAfter('=', ""), "UTF-8")
+            }.getOrDefault("").trim()
+            if (v.startsWith("http://") || v.startsWith("https://")) {
+                up = v
+                break
+            }
+        }
+        val upstream = up ?: return null
+        if (upstream in triedUrls) return null
+        val headers = sanitizeHeaders(loopbackQueryHeaders(src.url) + src.headers)
+        return src.copy(
+            url = upstream,
+            headers = headers,
+            isM3u8 = upstream.contains(".m3u8", ignoreCase = true) || src.isM3u8,
+            isMpd = upstream.contains(".mpd", ignoreCase = true) || src.isMpd,
+        )
     }
 
     /**
