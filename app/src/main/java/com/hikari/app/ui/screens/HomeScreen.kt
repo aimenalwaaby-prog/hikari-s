@@ -3053,11 +3053,15 @@ private val HOME_KIND_CHIPS: List<Pair<String, String>> = listOf(
 )
 
 private fun homeKindKeep(item: MediaItem, kind: String): Boolean = when (kind) {
-    HOME_KIND_MOVIE -> item.type == MediaType.MOVIE && !item.looksAnime()
-    HOME_KIND_SERIES -> item.type == MediaType.SERIES && !item.looksAnime()
+    // UNKNOWN passes every non-anime kind: a site-scraper row honestly does
+    // not know its kind until its episode list is asked (see screenTypeFor),
+    // and a kind filter must never hide titles that are merely uncategorized
+    // yet — the detail page resolves each one on open.
+    HOME_KIND_MOVIE -> (item.type == MediaType.MOVIE || item.type == MediaType.UNKNOWN) && !item.looksAnime()
+    HOME_KIND_SERIES -> (item.type == MediaType.SERIES || item.type == MediaType.UNKNOWN) && !item.looksAnime()
     HOME_KIND_ANIME -> item.looksAnime()
     HOME_KIND_MOVIE_SERIES ->
-        (item.type == MediaType.MOVIE || item.type == MediaType.SERIES) && !item.looksAnime()
+        (item.type == MediaType.MOVIE || item.type == MediaType.SERIES || item.type == MediaType.UNKNOWN) && !item.looksAnime()
     else -> true
 }
 

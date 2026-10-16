@@ -469,16 +469,17 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
             providerId = config.id,
             id = id,
             title = runCatching { anime.title }.getOrDefault("").ifBlank { id },
-            // ALWAYS a series, never UNKNOWN. An Aniyomi source has no "movie"
-            // concept — a film is an anime with one episode — and UNKNOWN is not
-            // a neutral value in this app: `ContentRepository.episodesFor`
-            // returns null outright for an UNKNOWN item, so every title picked
-            // out of an Aniyomi catalogue came up with no episode list at all
-            // and (when its meta fetch also timed out, leaving the type
-            // untouched) played as though it were a film. Reporting the type the
-            // source really is keeps the episode grid, the S1E5 the user picked
-            // and the cross-extension episode match all working.
-            type = MediaType.SERIES,
+            // UNKNOWN until the episode list is known. An Aniyomi source has
+            // no "movie" concept at catalog time — a film is an anime with
+            // one episode — and claiming SERIES here is what painted the
+            // false "Series" chip on every single-video grid row (films,
+            // JAV, one-shots) and opened every one of them onto an Episodes
+            // page. UNKNOWN shows no chip (see PosterStyle) and the detail
+            // page corrects it the moment the list lands (one row = movie,
+            // two or more = series — see [screenTypeFor]); the episode
+            // lookup treats UNKNOWN exactly like SERIES (see
+            // ContentRepository.episodesForInner), so no list is ever lost.
+            type = MediaType.UNKNOWN,
             posterUrl = artUrl(runCatching { anime.thumbnail_url }.getOrNull()),
             overview = runCatching { anime.description }.getOrNull()?.takeIf { it.isNotBlank() },
             genres = runCatching { anime.getGenres() }.getOrNull().orEmpty(),
@@ -615,8 +616,13 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         // with a single episode, so a one-row list plays and tags as a movie
         // (no Series chip, no "Ep 1" pill, no Episodes (1) page) — the same
         // universal differential as [screenTypeFor].
+        //
+        // And an empty list proves nothing either way, so the row keeps the
+        // type it arrived with (UNKNOWN from the catalog — never a fresh
+        // SERIES claim): the detail page's movie probe decides instead of a
+        // guess here (see DetailViewModel).
         val type = screenTypeFor(item, episodes.size).takeUnless { episodes.isEmpty() }
-            ?: MediaType.SERIES
+            ?: item.type
         val out = MediaItem(
             providerId = item.providerId,
             id = item.id,
@@ -767,13 +773,26 @@ class AniyomiProvider(override val config: ProviderConfig) : ContentProvider {
         val src = source() ?: return fail("✗ ${missingReason()}")
         // An Aniyomi source has no "movie" concept — a film is an anime with a
         // single episode — so an item opened with no episode chosen plays its
-        // FIRST episode, exactly like the Aniyomi player does.
+        // FIRST episode, exactly like the Aniyomi player does. When even that
+        // list will not answer (a lone-video page — a film, a JAV release —
+        // whose list parser broke, or a runtime that missed), the title page
+        // itself is asked for its videos directly (AnymeX parity: a film is
+        // just an anime with episodes, and the title id is the last resort).
+        // A lone video page answers with its own video; a series page answers
+        // nothing useful (its videos live behind per-episode pages), so a
+        // genuine series keeps its honest error below.
         val chosen = episode ?: runCatching {
             episodesLocked(src, animeFor(item), item.id).firstOrNull()
         }.getOrNull()
-            ?: return fail("✗ This title has no playable episode.")
-
-        val se = episodeFor(chosen)
+        val se = if (chosen != null) {
+            episodeFor(chosen)
+        } else {
+            SEpisodeImpl().apply {
+                url = item.id
+                name = item.title
+                episode_number = 1f
+            }.also { lockedPut(episodeCache, item.id, it) }
+        }
         val videos = loadVideos(src, se)
         if (videos.isEmpty()) {
             return fail(

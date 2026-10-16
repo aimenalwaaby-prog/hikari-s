@@ -213,18 +213,19 @@ fun isSiteScraperProviderId(providerId: String): Boolean {
  * The type a row SHOULD show and play as, from its episode count — the
  * universal movie↔series differential.
  *
- * Site scrapers tag by shape: one listed episode reads as "series" on the
- * poster (Series chip, "Ep 1" pill) and opens an Episodes (1) page with Play
- * E1 for what is plainly a film (and the reverse: a multi-episode title
- * sitting under a Movie tag). [episodeCount] null = not loaded yet: keep the
- * declared type, never guess. Zero likewise keeps it (an unanswered lookup
- * is not evidence either way).
+ * Site scrapers tag by shape: a single listed episode is a film wearing the
+ * wrong tag (Series chip, "Ep 1" pill, an Episodes page with Play E1 for what
+ * is plainly one video), and a multi-episode title sitting under a Movie tag
+ * (or no tag at all — catalog rows from scraper engines honestly report
+ * UNKNOWN until the list is known) is a series. [episodeCount] null = not
+ * loaded yet: keep the declared type, never guess. Zero likewise keeps it
+ * (an unanswered lookup is not evidence either way).
  */
 fun screenTypeFor(item: MediaItem, episodeCount: Int?): MediaType {
     if (episodeCount == null || episodeCount <= 0) return item.type
     if (!isSiteScraperProviderId(item.providerId)) return item.type
     return when {
-        episodeCount == 1 && item.type == MediaType.SERIES -> MediaType.MOVIE
+        episodeCount == 1 && item.type != MediaType.MOVIE -> MediaType.MOVIE
         episodeCount >= 2 && item.type != MediaType.SERIES -> MediaType.SERIES
         else -> item.type
     }

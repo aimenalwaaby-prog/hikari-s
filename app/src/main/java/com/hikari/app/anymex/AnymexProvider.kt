@@ -479,11 +479,15 @@ private fun recordPosterReferer(url: String?, siteBase: String?) {
                     .ifBlank { o.optString("href") }.ifBlank { o.optString("id") }.trim()
             )
             if (link.isBlank()) continue
+            // UNKNOWN until the episode list is known (see AniyomiProvider):
+            // the source gives no movie/series signal at catalog time, and a
+            // SERIES claim here is what painted false "Series" chips on every
+            // single-video row and opened films onto an Episodes page.
             out += MediaItem(
                 providerId = config.id,
                 id = link,
                 title = name,
-                type = MediaType.SERIES,
+                type = MediaType.UNKNOWN,
                 posterUrl = absUrl(
                     o.optString("imageUrl").ifBlank { o.optString("image") }
                         .ifBlank { o.optString("cover") }.ifBlank { o.optString("poster") }

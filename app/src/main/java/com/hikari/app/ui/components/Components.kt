@@ -1472,7 +1472,14 @@ private fun ContinueWatchingCard(
                     .align(Alignment.BottomStart)
                     .padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
             ) {
-                if (h.episodeName.isNotBlank() || h.episodeId.isNotBlank()) {
+                // Movies wear no episode line: a film that was ever resolved
+                // through an episode path used to file "Episode 1" history,
+                // and the card repeated it under the title — a movie with an
+                // episode label. Series entries (and legacy movie entries
+                // filed before the type correction) keep theirs.
+                if ((h.episodeName.isNotBlank() || h.episodeId.isNotBlank()) &&
+                    h.type != com.hikari.app.data.MediaType.MOVIE
+                ) {
                     Text(
                         h.episodeName.ifBlank { "Episode" },
                         style = MaterialTheme.typography.labelSmall,

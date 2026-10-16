@@ -76,11 +76,13 @@ object AnymexHomepage {
             // word ("Today" → the NBC morning show).
             if (poster == null) continue
             seen += href
+            // UNKNOWN until the episode list is known (see AniyomiProvider):
+            // a scraped card carries no movie/series signal.
             out += MediaItem(
                 providerId = config.id,
                 id = href,
                 title = title,
-                type = MediaType.SERIES,
+                type = MediaType.UNKNOWN,
                 posterUrl = poster,
             )
         }

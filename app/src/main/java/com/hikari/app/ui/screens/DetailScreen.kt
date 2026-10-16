@@ -139,6 +139,7 @@ import com.hikari.app.data.LibraryCategory
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.screenTypeFor
+import com.hikari.app.data.isSiteScraperProviderId
 import com.hikari.app.data.ProviderType
 import com.hikari.app.data.RatingSource
 import com.hikari.app.data.RatingVerdict
@@ -850,6 +851,49 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
                         if (gen == episodeGeneration) {
                             _episodesLoading.value = false
                             _episodesLoaded.value = true
+                        }
+                    }
+                }
+                // The movie probe: a site-scraper title whose episode list
+                // came back EMPTY is not necessarily a broken series — a
+                // single-video page (a film, a JAV release) wears an episode
+                // UI it should never have had, and its list lookup fails
+                // instead of answering one row. One bounded movie-style
+                // server lookup decides it (cache-shared with the prefetch
+                // below, so an answered title costs nothing extra): servers
+                // mean "plays as a movie" — the type is corrected, which
+                // hides the Episodes (0) error, drops the Series chip and
+                // the "Ep 1" pills, and makes Play work on the first tap.
+                // A SERIES claim is only overturned by the title's OWN
+                // provider (a foreign mirror's embeds must never retype
+                // it); UNKNOWN claimed nothing, so any servers settle it.
+                // No servers: a genuinely broken series, which keeps the
+                // retry UI it already had.
+                if (gen == episodeGeneration) {
+                    val settled = _meta.value
+                    if (settled != null &&
+                        settled.type != MediaType.MOVIE &&
+                        _episodes.value.isNullOrEmpty() &&
+                        _episodesFailed.value &&
+                        isSiteScraperProviderId(settled.providerId)
+                    ) {
+                        val probe = runCatching {
+                            withTimeoutOrNull(MOVIE_PROBE_MS) {
+                                resolveStreams(settled.copy(type = MediaType.MOVIE), null)
+                            }?.servers
+                        }.getOrNull().orEmpty()
+                        if (probe.isNotEmpty() &&
+                            (settled.type == MediaType.UNKNOWN ||
+                                probe.any { it.providerId == settled.providerId }) &&
+                            gen == episodeGeneration
+                        ) {
+                            _meta.value = settled.copy(type = MediaType.MOVIE)
+                            _episodesFailed.value = false
+                            com.hikari.app.data.Logs.log(
+                                "Episodes",
+                                "\"${settled.title}\" plays movie-style " +
+                                    "(${probe.size} server(s)) — corrected to movie",
+                            )
                         }
                     }
                 }
@@ -1634,6 +1678,15 @@ private const val EPISODE_LOAD_TRIES = 3
 private const val EPISODE_LOAD_PAUSE_MS = 1_500L
 
 /**
+ * How long the movie probe may run (see DetailViewModel.load): a
+ * site-scraper title whose episode list came back empty gets one bounded
+ * movie-style server lookup before the page settles on "broken series".
+ * Shares its work with the page prefetch through StreamCache, so when the
+ * prefetch already answered this is a cache hit, not a second search.
+ */
+private const val MOVIE_PROBE_MS = 30_000L
+
+/**
  * Titles an automatic resume has ALREADY been started for, and when.
  *
  * The detail page auto-plays when it is opened FROM WATCH HISTORY with a saved
@@ -2240,7 +2293,12 @@ fun DetailScreen(
     val firstEpisodeOrNull: suspend () -> Episode? = {
         val t = (vm.meta.value ?: m)?.type
         val eps = vm.episodes.value
-        val mightBeSeries = t == MediaType.SERIES || (eps?.isNotEmpty() == true)
+        // UNKNOWN included: a catalog row that honestly does not know its
+        // kind yet (see the site-scraper providers) waits for episode 1
+        // exactly like a series — otherwise Play on a genuine series would
+        // fire a movie-style search before its list had landed.
+        val mightBeSeries = t == MediaType.SERIES || t == MediaType.UNKNOWN ||
+            (eps?.isNotEmpty() == true)
         if (mightBeSeries && eps == null && !vm.episodesLoaded.value) {
             withTimeoutOrNull(EPISODE_WAIT_MS) { vm.episodesLoaded.first { it } }
         }
@@ -3096,6 +3154,19 @@ fun DetailScreen(
         !episodesLoaded
     val detailIsSeries = m?.type == MediaType.SERIES ||
         detailUnknownVegaKind ||
+        // An UNKNOWN site-scraper row whose episodes are still resolving is
+        // a series-in-waiting (the spinner section, Play holding for episode
+        // 1): hiding the section until the lookup settles is what made every
+        // freshly-opened series flash "movie with no episodes". Once the
+        // lookup settles the truth below takes over — movies (including
+        // movie-probe corrections) drop the section, series keep it.
+        (m?.type == MediaType.UNKNOWN && !episodesLoaded) ||
+        // A failed lookup is not a verdict either way: the section stays so
+        // the page says so and offers its retry, instead of silently
+        // dropping to a Play button whose search just came back empty.
+        // (A probe-corrected movie clears episodesFailed, so movies never
+        // land here.)
+        (episodesFailed && (m?.type == MediaType.SERIES || m?.type == MediaType.UNKNOWN)) ||
         (episodes?.isNotEmpty() == true)
     val detailCanPlay = !detailIsSeries || episodes.isNullOrEmpty()
     // The Play button prefers an episode that is actually out: a season whose

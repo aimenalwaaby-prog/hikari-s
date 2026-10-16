@@ -151,13 +151,15 @@ class SoraProvider(override val config: ProviderConfig) : ContentProvider {
             val link = o.optString("href").trim()
             val title = o.optString("title").trim().ifBlank { o.optString("name").trim() }
             if (link.isBlank() || title.isBlank()) continue
-            // SERIES so ContentRepository.episodesFor actually asks the module
-            // (UNKNOWN used to short-circuit to null → "Play" only, no episodes).
+            // UNKNOWN until the episode list is known (see AniyomiProvider):
+            // the module gives no movie/series signal at catalog time. (The
+            // old comment's short-circuit is long gone — UNKNOWN gets the
+            // full lookup in ContentRepository.episodesForInner.)
             out += MediaItem(
                 providerId = config.id,
                 id = link,
                 title = title,
-                type = MediaType.SERIES,
+                type = MediaType.UNKNOWN,
                 posterUrl = o.optString("image").ifBlank { o.optString("imageURL") }
                     .ifBlank { o.optString("poster") }.ifBlank { null },
                 rawType = "anime",

@@ -595,11 +595,17 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
     }
 
     private fun catalogType(): MediaType {
-        val types = api?.supportedTypes ?: return MediaType.SERIES
+        // Row-level honesty: only a row whose plugin serves ONE kind keeps
+        // that kind. A mixed row (or one whose plugin reports nothing) is
+        // UNKNOWN — claiming SERIES is what tagged every film on it and
+        // opened each one onto an Episodes page. Per-item types already come
+        // from the plugin's own SearchResponse (see toMediaItem); the detail
+        // page corrects the rest once the episode list lands.
+        val types = api?.supportedTypes ?: return MediaType.UNKNOWN
         val movieOnly = types.isNotEmpty() && types.all {
             it == TvType.Movie || it == TvType.AnimeMovie || it == TvType.NSFW
         }
-        return if (movieOnly) MediaType.MOVIE else MediaType.SERIES
+        return if (movieOnly) MediaType.MOVIE else MediaType.UNKNOWN
     }
 
     /**

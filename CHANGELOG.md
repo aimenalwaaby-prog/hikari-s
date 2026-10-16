@@ -1,3 +1,11 @@
+## 0.11.35 (continuous build only)
+
+### Fixed
+- False "Series" tags on films in every scraper engine (Aniyomi, AnyMex, Sora, CloudStream rows): catalog rows that carry no movie/series signal now report UNKNOWN instead of claiming SERIES — no more Series chips on single videos (the MissAV/JAV class), no "Ep 1" pills, films stop opening onto an Episodes page; kind filters keep showing uncategorized rows, and each poster re-tags once its episode list is known (one row = movie, two or more = series)
+- Detail page movie probe: a site-scraper title whose episode list comes back empty gets one bounded movie-style server lookup (shared with the page prefetch, so an answered title costs nothing extra) — when it plays, the page corrects to movie, the Episodes (0) "couldn't load the episode list" error goes away and Play works on the first tap; a SERIES claim is only ever overturned by the title's own provider, and a genuinely broken series keeps its error + Try again UI
+- Aniyomi last-resort movie path (AnymeX parity): when the episode list will not answer at all, the title page itself is asked for its videos — a lone-video page plays instead of dying on "This title has no playable episode", while a series page still reports honestly
+- Continue Watching: movie entries no longer print an "Episode 1" line under the title
+
 ## 0.11.34 (continuous build only)
 
 ### Fixed
