@@ -816,11 +816,12 @@ object BackupManager {
      * working file (same rule as the embedded path above).
      */
     private suspend fun downloadRefFile(app: HikariApp, rel: String, url: String): Boolean {
-        val bytes = runCatching { Http.fetchBytesCancellable(url) }.getOrNull()
-        if (bytes.isNullOrEmpty() || bytes.size.toLong() > MAX_FILE_BYTES) {
+        val fetched: ByteArray? = runCatching { Http.fetchBytesCancellable(url) }.getOrNull()
+        if (fetched == null || fetched.isEmpty() || fetched.size.toLong() > MAX_FILE_BYTES) {
             Logs.log("Backup", "extension refetch failed for $rel (no answer)")
             return false
         }
+        val bytes: ByteArray = fetched
         val target = File(app.filesDir, rel)
         // Already there with identical bytes (a re-restore onto the same set):
         // skip the write like the embedded path does.

@@ -13914,7 +13914,7 @@ class PlayerActivity : ComponentActivity() {
             // only — never a remote CDN) records the real status line,
             // content type and first bytes into the shared log. Runs off the
             // failover path; a late answer changes nothing.
-            if (code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
+            if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
                 val failedUrl = sources.getOrNull(currentIndex)?.url.orEmpty()
                 val failedLoopback = runCatching { java.net.URI(failedUrl).host?.lowercase() }
                     .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
