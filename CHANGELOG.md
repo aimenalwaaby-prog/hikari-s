@@ -1,3 +1,9 @@
+## 0.11.38 (continuous build only)
+
+### Fixed
+- Extension-proxy links playing "Server failed" on every quality (MissAV /m3u8 class, log-proven): the proxy answers HTTP 200 labelled mpegurl while the body is GZIP bytes (first bytes 1F 8B, never #EXTM3U). The loopback player now gunzips gzip-magic responses itself — playlists and segments, streaming, plain responses untouched — and the `loopback diag` line logs raw byte hex instead of a UTF-8 read (the old line corrupted 8B into EF BF BD and made it look like the proxy's doing)
+- Torrent rows taking forever to start ("did not start streaming (no peers?)"): the first torrent row now warms its engine + peer discovery in the background while a server is still being chosen, so the tap skips straight to play; fallback trackers 6 → 20 (the engine's own working set — every tracker announces in parallel, so peers arrive in the first seconds instead of the twentieth)
+
 ## 0.11.37 (continuous build only)
 
 ### Fixed

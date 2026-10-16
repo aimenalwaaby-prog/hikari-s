@@ -709,6 +709,10 @@ class PlayerActivity : ComponentActivity() {
         // record it only when the user switched EPISODE, which is why a title
         // that was simply played showed no badge on its poster.
         rememberTitleQuality()
+        // A torrent row warms its engine + peers while the user is still
+        // choosing (see [maybePrefetchTorrent]): by the tap it is instant.
+        // Guarded and session-keyed inside; safe from any thread.
+        maybePrefetchTorrent()
         // Servers can be appended (and re-probed) from background threads, and a
         // watcher touches views — always rebuild on the main looper.
         //
@@ -1376,6 +1380,15 @@ class PlayerActivity : ComponentActivity() {
      *  one (see [playSource]), so a late answer can never pop its dialog over
      *  — or hijack playback back to — a server the user already left. */
     private var torrentJob: Job? = null
+    /** Warmed torrent URLs by server index (see [maybePrefetchTorrent]): the
+     *  engine boot + peer discovery for the first torrent row runs while the
+     *  user is still choosing, so the tap converts instantly. Keyed by
+     *  session (see [torrentPrefetchKey]) — a new video resets it. Indices
+     *  stay valid because the list only ever appends. */
+    private val torrentPrefetched =
+        java.util.concurrent.ConcurrentHashMap<Int, com.lagradost.cloudstream3.utils.ExtractorLink>()
+    @Volatile private var torrentPrefetchRunning = false
+    @Volatile private var torrentPrefetchKey: String? = null
 
     /** Drops the "starting torrent engine" box wherever it is: called on
      *  every new playback attempt and on the first rendered frame, so it can
@@ -11068,6 +11081,73 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** Warms the FIRST torrent row's engine + peer discovery in the
+     *  background while the user is still choosing a server: TorrServer boots
+     *  once (go binary + local HTTP + tracker announces), the `add` starts
+     *  finding peers and preloading, and the tap then skips straight to play.
+     *  One torrent per session, fire-and-forget — the server keeps it even if
+     *  the user picks another row (replay is then instant too). Called from
+     *  [notifySourcesChanged], so every list path is covered; the guards make
+     *  repeat calls free. */
+    private fun maybePrefetchTorrent() {
+        val key = (liveSessionId ?: "") + "|" + historyKey
+        if (torrentPrefetchKey != key) {
+            torrentPrefetchKey = key
+            torrentPrefetched.clear()
+            torrentPrefetchRunning = false
+        }
+        if (torrentPrefetchRunning) return
+        val idx = sources.indexOfFirst {
+            it.isTorrent && (it.infoHash != null || it.url.startsWith("magnet:", ignoreCase = true))
+        }
+        if (idx < 0 || torrentPrefetched.containsKey(idx)) return
+        torrentPrefetchRunning = true
+        val snap = sources[idx]
+        val myKey = key
+        lifecycleScope.launch(Dispatchers.IO) {
+            val playable = runCatching { transformTorrent(snap) }.getOrNull()
+            if (playable != null && torrentPrefetchKey == myKey) {
+                torrentPrefetched[idx] = playable
+                com.hikari.app.data.Logs.log("Player", "torrent prefetch ready — tap plays instantly")
+            }
+            torrentPrefetchRunning = false
+        }
+    }
+
+    /** Plays an already-resolved torrent URL (prefetch hit or fresh resolve):
+     *  converts the row to the TorrServer stream URL and hands it to ExoPlayer
+     *  to sniff (never forced m3u8 — see below). */
+    private fun playConvertedTorrent(
+        index: Int,
+        src: PlayerSource,
+        playable: com.lagradost.cloudstream3.utils.ExtractorLink,
+    ) {
+        // TorrServer's /stream/<file>?…&play endpoint serves the torrent
+        // file as RAW BYTES (progressive download with Range support) —
+        // NOT an HLS manifest. Forcing isM3u8 made ExoPlayer parse the
+        // video bytes as a playlist ("Input does not start with the
+        // #EXTM3U header"). Leave the mime unset and let ExoPlayer sniff
+        // the container, exactly like CloudStream/Aniyomi do.
+        val converted = src.copy(
+            url = playable.url,
+            headers = playable.referer?.takeIf { it.isNotBlank() }
+                ?.let { mapOf("Referer" to it) } ?: emptyMap(),
+            isM3u8 = false,
+            isTorrent = false,
+            torrentStream = true,
+        )
+        val list = sources.toMutableList()
+        list[index] = converted
+        sources = list
+        notifySourcesChanged()
+        Toast.makeText(
+            this@PlayerActivity,
+            I18n.t("Torrent ready — streaming from peers"),
+            Toast.LENGTH_SHORT
+        ).show()
+        playDirect(index)
+    }
+
     /**
      * Torrent source: builds a magnet link from the infoHash and hands it to the
      * CloudStream runtime's Torrent engine (TorrServer, bundled in the APK).
@@ -11082,6 +11162,16 @@ class PlayerActivity : ComponentActivity() {
         torrentJob?.cancel()
         torrentJob = null
         dismissTorrentDialog()
+        // Warmed while the user was choosing (see [maybePrefetchTorrent]):
+        // skip the whole engine-boot + peer-discovery wait. The identity
+        // check keeps a stale hit from ever converting the wrong row.
+        torrentPrefetched[index]?.let { playable ->
+            if (sources.getOrNull(index)?.url == src.url) {
+                playConvertedTorrent(index, src, playable)
+                return
+            }
+            torrentPrefetched.remove(index)
+        }
 
         var self: Job? = null
         self = lifecycleScope.launch {
@@ -11117,30 +11207,8 @@ class PlayerActivity : ComponentActivity() {
                 // converting a stale row now would rewrite a server list the
                 // new playback may already be reading.
                 if (currentIndex != index) return@onSuccess
-                // TorrServer's /stream/<file>?…&play endpoint serves the torrent
-                // file as RAW BYTES (progressive download with Range support) —
-                // NOT an HLS manifest. Forcing isM3u8 made ExoPlayer parse the
-                // video bytes as a playlist ("Input does not start with the
-                // #EXTM3U header"). Leave the mime unset and let ExoPlayer sniff
-                // the container, exactly like CloudStream/Aniyomi do.
-                val converted = src.copy(
-                    url = playable.url,
-                    headers = playable.referer?.takeIf { it.isNotBlank() }
-                        ?.let { mapOf("Referer" to it) } ?: emptyMap(),
-                    isM3u8 = false,
-                    isTorrent = false,
-                    torrentStream = true,
-                )
-                val list = sources.toMutableList()
-                list[index] = converted
-                sources = list
-                notifySourcesChanged()
-                Toast.makeText(
-                    this@PlayerActivity,
-                    I18n.t("Torrent ready — streaming from peers"),
-                    Toast.LENGTH_SHORT
-                ).show()
-                playDirect(index)
+                torrentPrefetched[index] = playable
+                playConvertedTorrent(index, src, playable)
             }
             res.onFailure { e ->
                 if (currentIndex != index) return@onFailure
@@ -11701,15 +11769,17 @@ class PlayerActivity : ComponentActivity() {
         // 403-vs-play difference on signed CDNs no header tweak can fix.
         // Every other engine keeps the stable path. Extension-server URLs (an
         // Aniyomi extension's own localhost HTTP server, e.g. its /m3u8
-        // proxy) play through the plain client: no shared cookie jar, no
+        // proxy) play through the loopback client: no shared cookie jar, no
         // Cloudflare-verifier interceptor — the reference apps' stack for
-        // these links. A loopback address can never need clearance cookies
-        // or verification, so nothing is lost, and any stray state the
-        // shared stack attaches is removed as a variable.
+        // these links — PLUS the gunzip-magic pass (the proxy answers gzip
+        // bytes labelled mpegurl; see PlayerHttp.loopbackClient). A loopback
+        // address can never need clearance cookies or verification, so
+        // nothing is lost, and any stray state the shared stack attaches is
+        // removed as a variable.
         val isLoopbackUrl = isLoopbackHost(src.url)
         var playbackClient = when {
             isCs3Source -> com.hikari.app.cs3.Cs3MainApiProvider.cs3BaseClient()
-            isLoopbackUrl -> PlayerHttp.plainClient
+            isLoopbackUrl -> PlayerHttp.loopbackClient
             else -> client
         }
         if (isCs3Source) {
@@ -13946,10 +14016,16 @@ class PlayerActivity : ComponentActivity() {
                             withTimeoutOrNull(10_000L) {
                                 val req = okhttp3.Request.Builder().url(failedUrl).get().build()
                                 PlayerHttp.plainClient.newCall(req).execute().use { resp ->
+                                    // Raw BYTES as hex, never readUtf8: the proxy's
+                                    // answer starts 1F 8B (gzip), and a UTF-8 read
+                                    // corrupts 8B into EF BF BD — the old line made
+                                    // the corruption look like the proxy's doing.
                                     val head = resp.body?.source()?.let { bufSrc ->
-                                        bufSrc.request(160)
-                                        bufSrc.buffer.clone().readUtf8(160)
-                                    }.orEmpty().replace("\n", " ").replace("\r", " ")
+                                        bufSrc.request(32)
+                                        val raw = bufSrc.buffer.clone()
+                                            .readByteArray(32L.coerceAtMost(bufSrc.buffer.size))
+                                        raw.joinToString("") { "%02x".format(it) }
+                                    }.orEmpty()
                                     resp.code.toString() + " " +
                                         (resp.header("Content-Type") ?: "-") + " | " + head
                                 }
@@ -15868,7 +15944,13 @@ class PlayerActivity : ComponentActivity() {
         private const val STATS_TICK_SECONDS = 10L
         private const val STATS_FLUSH_SECONDS = 60L
 
-        /** Fallback public trackers for addons that don't ship their own. */
+        /** Fallback public trackers for addons that don't ship their own.
+         *  Deliberately LONG: TorrServer announces to all of them in parallel,
+         *  and every extra working tracker is another swarm that can hand back
+         *  peers in the first seconds instead of the twentieth. Same working
+         *  set the CloudStream engine itself ships (see its Torrent.kt) —
+         *  magnet-supplied trackers ride the same announce, so nothing here
+         *  can crowd out an addon's own. */
         private val TORRENT_TRACKERS = listOf(
             "udp://tracker.opentrackr.org:1337/announce",
             "udp://open.demonii.com:1337/announce",
@@ -15876,6 +15958,20 @@ class PlayerActivity : ComponentActivity() {
             "udp://exodus.desync.com:6969/announce",
             "https://tracker.gbitt.info:443/announce",
             "http://tracker.openbittorrent.com:80/announce",
+            "udp://open.tracker.cl:1337/announce",
+            "udp://opentracker.i2p.rocks:6969/announce",
+            "udp://open.stealth.si:80/announce",
+            "udp://tracker.tiny-vps.com:6969/announce",
+            "udp://tracker.theoks.net:6969/announce",
+            "udp://tracker.dump.cl:6969/announce",
+            "udp://tracker.bittor.pw:1337/announce",
+            "udp://explodie.org:6969/announce",
+            "udp://uploads.gamecoast.net:6969/announce",
+            "udp://tracker1.bt.moack.co.kr:80/announce",
+            "https://tracker2.ctix.cn/announce",
+            "https://tracker1.520.jp:443/announce",
+            "udp://tracker-udp.gbitt.info:80/announce",
+            "http://tracker.gbitt.info:80/announce",
         )
     }
 }

@@ -8,6 +8,9 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import okio.buffer
+import okio.inputStream
+import okio.source
 
 /**
  * The one OkHttp client every video byte flows through.
@@ -104,5 +107,38 @@ object PlayerHttp {
      */
     val plainClient: OkHttpClient by lazy {
         client.newBuilder().apply { interceptors().clear() }.build()
+    }
+
+    /**
+     * Loopback-only playback client: [plainClient] plus a gunzip-magic pass.
+     * An extension's own local proxy answers HTTP 200 labelled `mpegurl`
+     * while the body is GZIP bytes (proven by the `loopback diag` line: first
+     * bytes 1F 8B, never #EXTM3U) — ExoPlayer compares the first bytes and
+     * dies malformed. The pass peeks the first two bytes of every response
+     * and, ONLY on gzip magic, swaps the body for a streaming gunzip of it
+     * (length unknown from there, encoding header dropped). Plain responses
+     * pass through untouched — the peek buffers, it never consumes — so this
+     * cannot break a healthy proxy. Playlist AND segments flow through the
+     * same OkHttpDataSource factory, so one pass covers both.
+     */
+    val loopbackClient: OkHttpClient by lazy {
+        plainClient.newBuilder().addInterceptor { chain ->
+            val resp = chain.proceed(chain.request())
+            val body = resp.body
+            val out = runCatching {
+                if (body == null) return@runCatching null
+                val src = body.source()
+                src.request(2)
+                val buf = src.buffer
+                if (buf.size < 2 || buf[0] != 0x1f.toByte() || buf[1] != 0x8b.toByte()) return@runCatching null
+                val gz = java.util.zip.GZIPInputStream(src.inputStream())
+                object : okhttp3.ResponseBody() {
+                    override fun contentType(): okhttp3.MediaType? = body.contentType()
+                    override fun contentLength(): Long = -1L
+                    override fun source(): okio.BufferedSource = gz.source().buffer()
+                }
+            }.getOrNull() ?: return@addInterceptor resp
+            resp.newBuilder().removeHeader("Content-Encoding").body(out).build()
+        }.build()
     }
 }
