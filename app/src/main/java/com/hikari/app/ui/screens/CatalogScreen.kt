@@ -571,7 +571,7 @@ fun CatalogScreen(
             // The chain also tries the install's own URLs, so a provider the
             // extension loader cannot read still opens its site.
             val site = withContext(Dispatchers.IO) {
-                hikari.providers.byId(providerId)?.let { webUrlChain(it) }
+                hikari.providers.byId(providerId)?.let { webUrlChainAsync(it) }
             }
             if (site.isNullOrBlank()) {
                 android.widget.Toast.makeText(

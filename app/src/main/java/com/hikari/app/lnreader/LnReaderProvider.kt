@@ -132,7 +132,19 @@ class LnReaderProvider(override val config: ProviderConfig) : ContentProvider {
         if (payload == null) return@gate fail("catalog failed: the source call was cancelled", emptyList())
         val data = okData(payload)
         if (data == null) return@gate fail("catalog failed: ${okError(payload)}", emptyList())
-        val items = if (data is JSONArray) novelItems(data) else emptyList()
+        val items = when (data) {
+            is JSONArray -> novelItems(data)
+            // Some sources wrap the list (`{novels: [...]}`) — take the first
+            // array-shaped field instead of reporting an empty catalogue.
+            is JSONObject -> listOfNotNull(
+                data.optJSONArray("novels"),
+                data.optJSONArray("list"),
+                data.optJSONArray("results"),
+                data.optJSONArray("data"),
+                data.optJSONArray("items"),
+            ).firstOrNull()?.let { novelItems(it) } ?: emptyList()
+            else -> emptyList()
+        }
         if (items.isEmpty()) {
             lastOutcome[config.id] = "✗ the source answered, but ${ref.name.lowercase()} came back with no titles (page $page)"
             return@gate emptyList()
@@ -150,7 +162,17 @@ class LnReaderProvider(override val config: ProviderConfig) : ContentProvider {
         if (payload == null) return@gate fail("search failed: the source call was cancelled", emptyList())
         val data = okData(payload)
         if (data == null) return@gate fail("search failed: ${okError(payload)}", emptyList())
-        val items = if (data is JSONArray) novelItems(data) else emptyList()
+        val items = when (data) {
+            is JSONArray -> novelItems(data)
+            is JSONObject -> listOfNotNull(
+                data.optJSONArray("novels"),
+                data.optJSONArray("list"),
+                data.optJSONArray("results"),
+                data.optJSONArray("data"),
+                data.optJSONArray("items"),
+            ).firstOrNull()?.let { novelItems(it) } ?: emptyList()
+            else -> emptyList()
+        }
         lastOutcome[config.id] = "✓ ${items.size} result(s)"
         items
     }
@@ -209,9 +231,18 @@ class LnReaderProvider(override val config: ProviderConfig) : ContentProvider {
                 title = data.optString("name").trim().ifBlank { item.title },
                 posterUrl = data.optString("cover").trim().ifBlank { null } ?: item.posterUrl,
                 overview = data.optString("summary").trim().ifBlank { null } ?: item.overview,
-                genres = data.optString("genres").trim()
-                    .split(',').map { it.trim() }.filter { it.isNotEmpty() }
-                    .ifEmpty { item.genres },
+                genres = runCatching {
+                    val arr = data.optJSONArray("genres")
+                    if (arr != null) {
+                        (0 until arr.length()).mapNotNull {
+                            arr.optString(it).trim().ifBlank { null }
+                        }.ifEmpty { item.genres }
+                    } else {
+                        data.optString("genres").trim()
+                            .split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                            .ifEmpty { item.genres }
+                    }
+                }.getOrDefault(item.genres),
                 rating = data.optDouble("rating", 0.0).takeIf { it > 0.0 } ?: item.rating,
             )
         } catch (t: Throwable) {

@@ -701,7 +701,7 @@ fun MangaReaderScreen(
             // site from one of the URLs the reader already holds.
             val site = withContext(Dispatchers.IO) {
                 runCatching {
-                    app.providers.byId(providerId)?.let { webUrlChain(it, chapter, activeChapterUrl, mangaUrl) }
+                    app.providers.byId(providerId)?.let { webUrlChainAsync(it, chapter, activeChapterUrl, mangaUrl) }
                 }.getOrNull()
             }
             if (site.isNullOrBlank()) {

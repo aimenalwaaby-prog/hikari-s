@@ -50,6 +50,37 @@ object LnReaderPluginManager {
     fun dirOf(config: ProviderConfig): File =
         pluginDir(HikariApp.instance, config.id.removePrefix(PREFIX))
 
+    /** The source's own site, as captured at install (see [install]). Sync —
+     *  a small local JSON read, safe wherever the globe button resolves. */
+    fun siteUrlOf(config: ProviderConfig): String? {
+        if (!LnReaderProvider.isLnReaderId(config.id)) return null
+        val site = runCatching {
+            JSONObject(File(dirOf(config), "meta.json").readText()).optString("site")
+        }.getOrNull()?.trim()
+        return site?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+    }
+
+    /**
+     * The source's own site, backfilling it from the plugin when an older
+     * install predates the capture. Suspend — runs the plugin once, then the
+     * capture is stored and [siteUrlOf] serves it.
+     */
+    suspend fun resolveSite(config: ProviderConfig): String? {
+        siteUrlOf(config)?.let { return it }
+        if (!LnReaderProvider.isLnReaderId(config.id)) return null
+        val file = File(config.url)
+        if (!file.exists()) return null
+        val site = LnReaderRuntime.siteUrl(file, config.id.removePrefix(PREFIX)).trim()
+        if (!(site.startsWith("http://") || site.startsWith("https://"))) return null
+        runCatching {
+            val meta = File(dirOf(config), "meta.json")
+            val o = runCatching { JSONObject(meta.readText()) }.getOrNull() ?: JSONObject()
+            o.put("site", site)
+            meta.writeText(o.toString())
+        }
+        return site
+    }
+
     fun safe(name: String): String =
         name.replace(Regex("[^A-Za-z0-9_.-]"), "_").ifBlank { "source" }.take(80)
 
@@ -256,11 +287,17 @@ object LnReaderPluginManager {
             val dir = pluginDir(context, safeId)
             runCatching { dir.mkdirs() }
             val wrote = runCatching {
-                File(dir, "plugin.js").writeText(source)
+                val script = File(dir, "plugin.js")
+                script.writeText(source)
+                // The globe/WebView button opens this, so capture it while the
+                // plugin is already at hand (older installs backfill it on
+                // first use — see [resolveSite]).
+                val site = LnReaderRuntime.siteUrl(script, safeId).trim()
                 JSONObject()
                     .put("name", plugin.name)
                     .put("remoteUrl", plugin.url)
                     .put("iconUrl", plugin.iconUrl ?: "")
+                    .put("site", site)
                     .put("at", System.currentTimeMillis())
                     .let { File(dir, "meta.json").writeText(it.toString()) }
                 true

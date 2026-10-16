@@ -6570,7 +6570,7 @@ private fun rememberVerifyAction(p: ContentProvider): (() -> Unit)? {
         {
             scope.launch {
                 val site = withContext(Dispatchers.IO) {
-                    runCatching { webUrlChain(p) }.getOrNull()
+                    runCatching { webUrlChainAsync(p) }.getOrNull()
                 }
                 if (site.isNullOrBlank()) {
                     Toast.makeText(

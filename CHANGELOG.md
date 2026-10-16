@@ -1,3 +1,9 @@
+## 0.11.42 (continuous build only)
+
+### Fixed
+- LNReader catalogues empty on every source ("Nothing here right now" on Popular/Latest, e.g. AllNovelFull, Beast Novels): two real causes, both in the app. First, every multisrc source parses its lists, details, chapters and chapter text with the `htmlparser2` streaming Parser — which threw "not supported", so every call failed before any network happened. It is a real implementation now (tags with quoted/unquoted attributes, entity decoding, script/style raw text, void elements, `onend`). Second, the front-page call passed empty filters while sources read their listing/genre defaults from their own `filters` — those are passed now
+- Globe "Couldn't determine this extension's site" on novel sources: a novel source's site lives in its own script, which the button never read. The plugin's site is captured at install (older installs backfill it on first open) and every globe button resolves it — catalogue, detail, reader, Extensions rows, Home header
+
 ## 0.11.41 (continuous build only)
 
 ### Fixed

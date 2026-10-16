@@ -918,7 +918,7 @@ fun HomeScreen(nav: NavHostController) {
             // host is the fallback, for the case where the selected extension
             // declares no site of its own.
             val own = withContext(Dispatchers.IO) {
-                providers.firstOrNull { it.config.id == selected }?.let { webUrlChain(it) }
+                providers.firstOrNull { it.config.id == selected }?.let { webUrlChainAsync(it) }
             }
             // The WebView button belongs to the selected extension. Never
             // fall back to the last Cloudflare-blocked host from another
@@ -2797,7 +2797,13 @@ internal fun webUrlFor(p: ContentProvider): String? = when (p.config.type) {
     ProviderType.HIKARI -> com.hikari.app.hiki.HikariRuntime.providerFor(p.config)?.mainUrl
     ProviderType.SKYSTREAM -> com.hikari.app.skystream.SkyStreamPluginManager.siteUrlOf(p.config)
     ProviderType.ANIYOMI -> com.hikari.app.aniyomi.AniyomiExtensionManager.siteUrlOf(p.config)
-    ProviderType.MANGA -> com.hikari.app.manga.MangaExtensionManager.siteUrlOf(p.config)
+    ProviderType.MANGA -> if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(p.config.id)) {
+        // Novel sources carry no extension to load a site from — the install
+        // captured the plugin's own site (see LnReaderPluginManager).
+        com.hikari.app.lnreader.LnReaderPluginManager.siteUrlOf(p.config)
+    } else {
+        com.hikari.app.manga.MangaExtensionManager.siteUrlOf(p.config)
+    }
     ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexPluginManager.siteUrlOf(p.config)
     ProviderType.SORA -> p.config.extra?.takeIf { it.startsWith("http") }?.let { src -> runCatching { val u = java.net.URI(src); u.scheme + "://" + u.host + "/" }.getOrNull() }
     ProviderType.NUVIO -> sourceSiteUrl(java.io.File(p.config.url), p.config.name)
@@ -2847,6 +2853,21 @@ internal fun webUrlChain(p: ContentProvider, vararg itemUrls: String?): String? 
     runCatching { webUrlFor(p) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
     webUrlRootOf(p.config.url)?.let { return it }
     webUrlRootOf(p.config.extra)?.let { return it }
+    return null
+}
+
+/**
+ * [webUrlChain] plus the lookups that need to run a plugin: an LNReader
+ * source's site lives in its own script, so an older install that predates
+ * the capture resolves it here (and stores it for the sync path). Suspend —
+ * call it from the IO context the globe buttons already use.
+ */
+internal suspend fun webUrlChainAsync(p: ContentProvider, vararg itemUrls: String?): String? {
+    webUrlChain(p, *itemUrls)?.let { return it }
+    if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(p.config.id)) {
+        runCatching { com.hikari.app.lnreader.LnReaderPluginManager.resolveSite(p.config) }
+            .getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+    }
     return null
 }
 

@@ -152,7 +152,7 @@ fun MangaDetailScreen(
             // extension will not load still opens its site from the title URL.
             val site = withContext(Dispatchers.IO) {
                 runCatching {
-                    provider?.let { webUrlChain(it, mangaUrl) }
+                    provider?.let { webUrlChainAsync(it, mangaUrl) }
                 }.getOrNull()
             }
             if (site.isNullOrBlank()) {

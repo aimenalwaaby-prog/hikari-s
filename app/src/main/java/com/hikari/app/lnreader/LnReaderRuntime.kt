@@ -37,11 +37,11 @@ import java.util.concurrent.ConcurrentHashMap
  * `isAbsoluteUrl`, `defaultCover`, `utils`) so a plugin's imports resolve to
  * working implementations instead of MODULE_NOT_FOUND.
  *
- * Deliberately v1: `fetchProto` (protobuf APIs — rare), `htmlparser2`
- * streaming and AES-GCM throw an honest "not supported" only if a plugin
- * actually reaches for them; `customJS`/`customCSS` are stored at install but
- * not executed (cosmetic page tweaks); plugin settings screens are not
- * exposed. None of that fails an install — a plugin that needs one of them
+ * Deliberately v1: `fetchProto` (protobuf APIs — rare) and AES-GCM throw
+ * an honest "not supported" only if a plugin actually reaches for them;
+ * `customJS`/`customCSS` are stored at install but not executed (cosmetic
+ * page tweaks); plugin settings screens are not exposed (their defaults
+ * apply). None of that fails an install — a plugin that needs one of them
  * reports its own error on the call that needs it.
  */
 object LnReaderRuntime {
@@ -134,7 +134,7 @@ object LnReaderRuntime {
             "  R('@libs/defaultCover', { defaultCover: '' });" +
             "  R('@libs/isAbsoluteUrl', { isUrlAbsolute: function (url) { return /^https?:\\/\\//i.test(String(url || '')); } });" +
             "  R('urlencode', { encode: function (s) { return encodeURIComponent(String(s)); }, decode: function (s) { try { return decodeURIComponent(String(s)); } catch (e) { return String(s); } } });" +
-            "  R('htmlparser2', { Parser: function () { throw new Error('htmlparser2 streaming is not supported in Hikari'); } });" +
+            "  R('htmlparser2', { Parser: globalThis.__lnreaderHtmlParser });" +
             "  R('@libs/aes', { gcm: function () { throw new Error('AES-protected sources are not supported in Hikari'); } });" +
             "  R('@libs/utils', {" +
             "    utf8ToBytes: function (s) { if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(String(s)); var u = unescape(encodeURIComponent(String(s))); var b = new Uint8Array(u.length); for (var i = 0; i < u.length; i++) b[i] = u.charCodeAt(i); return b; }," +
@@ -201,7 +201,129 @@ object LnReaderRuntime {
             "  };" +
             "};" +
             "globalThis.__lnreaderDayjs.extend = function () {};" +
-            "globalThis.__lnreaderDayjs.utc = function (i) { return globalThis.__lnreaderDayjs(i); };"
+            "globalThis.__lnreaderDayjs.utc = function (i) { return globalThis.__lnreaderDayjs(i); };" +
+            "globalThis.__lnreaderVoidElements = {area:1,base:1,br:1,col:1,embed:1,hr:1,img:1,input:1,link:1,meta:1,param:1,source:1,track:1,wbr:1};" +
+            "globalThis.__lnreaderRawText = {script:1,style:1,textarea:1,title:1};" +
+            "globalThis.__lnreaderDecodeEntities = function (s) {" +
+            "  return String(s).replace(/&(#\\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);/g, function (m, e) {" +
+            "    if (e.charAt(0) === '#') {" +
+            "      var c = e.charAt(1).toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);" +
+            "      return isNaN(c) ? m : String.fromCharCode(c);" +
+            "    }" +
+            "    var k = e.toLowerCase();" +
+            "    if (k === 'amp') return '&';" +
+            "    if (k === 'lt') return '<';" +
+            "    if (k === 'gt') return '>';" +
+            "    if (k === 'quot') return '\"';" +
+            "    if (k === 'apos') return \"'\";" +
+            "    if (k === 'nbsp') return ' ';" +
+            "    return m;" +
+            "  });" +
+            "};" +
+            "globalThis.__lnreaderHtmlParser = function (handlers, options) {" +
+            "  var h = handlers || {};" +
+            "  var buf = '';" +
+            "  function emitText(t) { if (t !== '' && h.ontext) h.ontext(globalThis.__lnreaderDecodeEntities(t)); }" +
+            "  function parseTag(s) {" +
+            "    var i = 0, n = s.length;" +
+            "    while (i < n && /\\s/.test(s.charAt(i))) i++;" +
+            "    var closing = false;" +
+            "    if (s.charAt(i) === '/') { closing = true; i++; }" +
+            "    while (i < n && /\\s/.test(s.charAt(i))) i++;" +
+            "    var name = '';" +
+            "    while (i < n && /[^\\s=\\/>]/.test(s.charAt(i))) { name += s.charAt(i); i++; }" +
+            "    name = name.toLowerCase();" +
+            "    var attrs = {};" +
+            "    var selfClose = false;" +
+            "    if (!closing) {" +
+            "      while (i < n) {" +
+            "        while (i < n && /\\s/.test(s.charAt(i))) i++;" +
+            "        if (i >= n) break;" +
+            "        if (s.charAt(i) === '/') { selfClose = true; i++; continue; }" +
+            "        var an = '';" +
+            "        while (i < n && /[^\\s=\\/>]/.test(s.charAt(i))) { an += s.charAt(i); i++; }" +
+            "        if (!an) { i++; continue; }" +
+            "        while (i < n && /\\s/.test(s.charAt(i))) i++;" +
+            "        var av = '';" +
+            "        if (s.charAt(i) === '=') {" +
+            "          i++;" +
+            "          while (i < n && /\\s/.test(s.charAt(i))) i++;" +
+            "          var q = s.charAt(i);" +
+            "          if (q === '\"' || q === \"'\") {" +
+            "            i++;" +
+            "            var v = '';" +
+            "            while (i < n && s.charAt(i) !== q) { v += s.charAt(i); i++; }" +
+            "            i++;" +
+            "            av = v;" +
+            "          } else {" +
+            "            var u = '';" +
+            "            while (i < n && !/[\\s>]/.test(s.charAt(i))) { u += s.charAt(i); i++; }" +
+            "            av = u;" +
+            "          }" +
+            "          av = globalThis.__lnreaderDecodeEntities(av);" +
+            "        }" +
+            "        attrs[an.toLowerCase()] = av;" +
+            "      }" +
+            "    }" +
+            "    return {closing: closing, name: name, attrs: attrs, selfClose: selfClose};" +
+            "  }" +
+            "  function tokenize(html) {" +
+            "    var i = 0, n = html.length, raw = null;" +
+            "    while (i < n) {" +
+            "      if (raw) {" +
+            "        var idx = html.toLowerCase().indexOf('</' + raw, i);" +
+            "        if (idx < 0) { emitText(html.slice(i)); i = n; raw = null; break; }" +
+            "        if (idx > i) emitText(html.slice(i, idx));" +
+            "        i = idx; raw = null; continue;" +
+            "      }" +
+            "      var lt = html.indexOf('<', i);" +
+            "      if (lt < 0) { emitText(html.slice(i)); break; }" +
+            "      if (lt > i) emitText(html.slice(i, lt));" +
+            "      if (html.startsWith('<!--', lt)) {" +
+            "        var ce = html.indexOf('-->', lt + 4);" +
+            "        if (h.oncomment) h.oncomment(ce < 0 ? html.slice(lt + 4) : html.slice(lt + 4, ce));" +
+            "        i = ce < 0 ? n : ce + 3; continue;" +
+            "      }" +
+            "      if (html.startsWith('<![CDATA[', lt)) {" +
+            "        var de = html.indexOf(']]>', lt + 9);" +
+            "        var data = de < 0 ? html.slice(lt + 9) : html.slice(lt + 9, de);" +
+            "        if (h.ontext) h.ontext(data);" +
+            "        i = de < 0 ? n : de + 3; continue;" +
+            "      }" +
+            "      if (html.startsWith('<!', lt) || html.startsWith('<?', lt)) {" +
+            "        var gt0 = html.indexOf('>', lt + 2);" +
+            "        i = gt0 < 0 ? n : gt0 + 1; continue;" +
+            "      }" +
+            "      var j = lt + 1, qq = null;" +
+            "      while (j < n) {" +
+            "        var ch = html.charAt(j);" +
+            "        if (qq) { if (ch === qq) qq = null; }" +
+            "        else if (ch === '\"' || ch === \"'\") qq = ch;" +
+            "        else if (ch === '>') break;" +
+            "        j++;" +
+            "      }" +
+            "      var t = parseTag(html.slice(lt + 1, j));" +
+            "      i = j < n ? j + 1 : n;" +
+            "      if (!t.name) continue;" +
+            "      if (t.closing) { if (h.onclosetag) h.onclosetag(t.name); continue; }" +
+            "      if (h.onopentag) h.onopentag(t.name, t.attrs);" +
+            "      if (globalThis.__lnreaderVoidElements[t.name]) { if (h.onclosetag) h.onclosetag(t.name); }" +
+            "      else if (!t.selfClose && globalThis.__lnreaderRawText[t.name]) raw = t.name;" +
+            "    }" +
+            "  }" +
+            "  return {" +
+            "    write: function (chunk) { buf += (chunk == null ? '' : String(chunk)); return this; }," +
+            "    end: function (chunk) {" +
+            "      if (chunk != null) buf += String(chunk);" +
+            "      var all = buf; buf = '';" +
+            "      tokenize(all);" +
+            "      if (h.onend) h.onend();" +
+            "      return this;" +
+            "    }," +
+            "    parseComplete: function (html) { tokenize(String(html == null ? '' : html)); }," +
+            "    isVoidElement: function (tag) { return !!globalThis.__lnreaderVoidElements[String(tag || '').toLowerCase()]; }" +
+            "  };" +
+            "};"
 
     /** Same bridge glue the nuvio engines get (fetch + completion + log),
      *  pointed at this runtime's own done callback. */
@@ -338,7 +460,7 @@ object LnReaderRuntime {
         runPlugin(
             pluginFile, pluginId,
             "if (!plugin || typeof plugin.popularNovels !== 'function') { " + doneMissing("popularNovels") + " }" +
-                " else { var r = await plugin.popularNovels($page, { showLatestNovels: " + (if (latest) "true" else "false") + ", filters: {} });" +
+                " else { var r = await plugin.popularNovels($page, { showLatestNovels: " + (if (latest) "true" else "false") + ", filters: ((plugin && plugin.filters) || {}) });" +
                 " if (r === undefined || r === null) r = [];" +
                 " " + doneOk("r") + " }",
         )
@@ -382,6 +504,18 @@ object LnReaderRuntime {
                 " if (r === undefined || r === null) r = '';" +
                 " " + doneOk("r") + " }",
         )
+
+    /** `plugin.site` — the source's own site, for the globe/WebView button. */
+    suspend fun siteUrl(pluginFile: File, pluginId: String): String {
+        val payload = runPlugin(
+            pluginFile, pluginId,
+            "var s = (plugin && (plugin.site || '')) || '';" +
+                " " + doneOk("String(s)"),
+        )
+        val o = runCatching { JSONObject(payload) }.getOrNull() ?: return ""
+        if (!o.optBoolean("ok", false)) return ""
+        return o.optString("data").trim()
+    }
 
     /**
      * True when the JS module loads and exports a usable LNReader source.
