@@ -27,10 +27,11 @@ import java.util.concurrent.ConcurrentHashMap
  * The plugin contract (see the lnreader-plugins docs) is a default-exported
  * instance with `popularNovels(page, options)`, `parseNovel(path)`,
  * `parseChapter(path)`, `searchNovels(term, page)` and an optional
- * `parsePage(novelPath, page)`, importing `cheerio` and `@libs/*` helpers
+ * `parsePage(novelPath, page)`, importing `cheerio` and the `@libs/`
+ * helpers
  * through `require(...)`. The harness already gives us a CommonJS `require`,
  * a standard `fetch` and cheerio; the [LNREADER_GLUE] below registers the
- * `@libs/*` modules on top of those (fetch wrappers over the harness fetch,
+ * `@libs/` modules on top of those (fetch wrappers over the harness fetch,
  * NovelStatus/FilterTypes enums with their documented wire values, a
  * file-backed `storage`, a small but real `dayjs`, `urlencode`,
  * `isAbsoluteUrl`, `defaultCover`, `utils`) so a plugin's imports resolve to
