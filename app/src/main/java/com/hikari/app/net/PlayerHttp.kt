@@ -129,7 +129,7 @@ object PlayerHttp {
                 val src = body.source()
                 src.request(2)
                 val buf = src.buffer
-                if (buf.size < 2 || buf.getByte(0) != 0x1f.toByte() || buf.getByte(1) != 0x8b.toByte()) return@runCatching null
+                if (buf.size < 2 || buf[0] != 0x1f.toByte() || buf[1] != 0x8b.toByte()) return@runCatching null
                 val gz = java.util.zip.GZIPInputStream(src.inputStream())
                 object : okhttp3.ResponseBody() {
                     override fun contentType(): okhttp3.MediaType? = body.contentType()
