@@ -3,6 +3,7 @@
 ### Fixed
 - Extension-proxy links playing "Server failed" on every quality (MissAV /m3u8 class, log-proven): the proxy answers HTTP 200 labelled mpegurl while the body is GZIP bytes (first bytes 1F 8B, never #EXTM3U). The loopback player now gunzips gzip-magic responses itself — playlists and segments, streaming, plain responses untouched — and the `loopback diag` line logs raw byte hex instead of a UTF-8 read (the old line corrupted 8B into EF BF BD and made it look like the proxy's doing)
 - Torrent rows taking forever to start ("did not start streaming (no peers?)"): the first torrent row now warms its engine + peer discovery in the background while a server is still being chosen, so the tap skips straight to play; fallback trackers 6 → 20 (the engine's own working set — every tracker announces in parallel, so peers arrive in the first seconds instead of the twentieth)
+- Stremio torrents collapsing two rows into one failing row (two qualities, one "Torrent (1)" that dies): every merge in the app keyed torrents by URL alone, and Stremio torrent rows carry url="" — the second row was dropped as a "duplicate". Identity is now infoHash + file index + URL everywhere (search merges, session, player list, chooser sync, labels), so both rows render and each addresses its own file; Stremio fileIdx also reads from behaviorHints when the addon nests it there
 
 ## 0.11.37 (continuous build only)
 

@@ -203,6 +203,11 @@ class PlayerActivity : ComponentActivity() {
         /** Full provider-supplied server details (quality, size, audio, codec, flags, etc.). */
         val details: String = "",
     ) {
+        /** Identity across every merge/dedup in the player (see
+         *  [StreamSource.identityKey]): hash + file index for torrents, URL
+         *  otherwise — two files of one pack must never collapse to one row. */
+        fun identityKey(): String =
+            infoHash?.takeIf { it.isNotBlank() }?.let { "h${it.lowercase()}#${fileIdx ?: 0}" } ?: "u$url"
         /**
          * True when a probe has already been to this URL and come back with a
          * video / HLS / DASH answer — i.e. a server that is known to WORK, not
@@ -2544,10 +2549,11 @@ class PlayerActivity : ComponentActivity() {
             }
         }.getOrDefault(emptyList())
             // The same video surfaced by both extraction engines / addons = one
-            // entry. Torrents carry url="" and share their identity by infoHash,
-            // so keying on url alone would collapse every torrent source into a
-            // single row.
-            .distinctBy { it.infoHash ?: it.url }
+            // entry. Torrents carry url="" and share their identity by infoHash
+            // + file index (two files of one pack share the hash but are
+            // different videos), so keying on url alone would collapse every
+            // torrent source into a single row.
+            .distinctBy { it.identityKey() }
             // The provider the user opened this title from goes to the FRONT, so
             // the server playback starts on (and the top of "Select server") is
             // one it actually came from — "on MovieBox, play MovieBox". Stable
@@ -2741,9 +2747,9 @@ class PlayerActivity : ComponentActivity() {
                         if (sources.isEmpty() && liveId != null) {
                             val current = StreamsLive.flow(liveId).value
                             if (current.isNotEmpty()) {
-                                val have = sources.mapTo(HashSet()) { it.infoHash ?: it.url }
+                                val have = sources.mapTo(HashSet()) { it.identityKey() }
                                 val fresh = current.mapNotNull { runCatching { it.toPlayerSource() }.getOrNull() }
-                                    .filter { (it.infoHash ?: it.url) !in have }
+                                    .filter { it.identityKey() !in have }
                                 if (fresh.isNotEmpty()) {
                                     sources = sources + fresh
                                     notifySourcesChanged()
@@ -2815,10 +2821,10 @@ class PlayerActivity : ComponentActivity() {
                 }
                 StreamsLive.flow(liveId).collect { incoming ->
                     if (incoming.isEmpty()) return@collect
-                    val have = sources.map { it.infoHash ?: it.url }.toHashSet()
+                    val have = sources.map { it.identityKey() }.toHashSet()
                     val fresh = incoming
                         .mapNotNull { runCatching { it.toPlayerSource() }.getOrNull() }
-                        .filter { (it.infoHash ?: it.url) !in have }
+                        .filter { it.identityKey() !in have }
                     if (fresh.isEmpty()) return@collect
                     sources = sources + fresh
                     notifySourcesChanged()
@@ -7218,13 +7224,13 @@ class PlayerActivity : ComponentActivity() {
         sources = playerSources
         notifySourcesChanged()
         currentIndex = prev?.let { p ->
-            val key = (p.infoHash ?: p.url).takeIf { it.isNotBlank() }
+            val key = p.identityKey().takeIf { it.isNotBlank() && it != "u" }
             playerSources.indexOfFirst { q ->
                 q.providerId == p.providerId && q.providerId.isNotBlank() &&
                     q.name == p.name && q.name.isNotBlank()
             }.takeIf { it >= 0 }
                 ?: key?.let { k ->
-                    playerSources.indexOfFirst { (it.infoHash ?: it.url) == k }.takeIf { it >= 0 }
+                    playerSources.indexOfFirst { it.identityKey() == k }.takeIf { it >= 0 }
                 }
         }?.takeIf { it >= 0 } ?: 0
         // An autoplay advance always plays directly: popping a server
@@ -7249,11 +7255,11 @@ class PlayerActivity : ComponentActivity() {
     private fun appendSources(cumulative: List<com.hikari.app.data.StreamSource>) {
         if (cumulative.isEmpty()) return
         val seen = HashSet<String>(sources.size + cumulative.size)
-        for (s in sources) seen.add(s.url)
+        for (s in sources) seen.add(s.identityKey())
         val out = sources.toMutableList()
         var added = false
         for (s in cumulative) {
-            if (!seen.add(s.url)) continue
+            if (!seen.add(s.identityKey())) continue
             // A single unconvertible row must never abort the batch (see the
             // snapshot parse): the list keeps whatever converts.
             out += runCatching { s.toPlayerSource() }.getOrNull() ?: continue
@@ -7468,7 +7474,7 @@ class PlayerActivity : ComponentActivity() {
         if (name.isBlank()) return name
         val twins = sources.filter { it.name == name }
         if (twins.size < 2) return name
-        val key = source.infoHash ?: source.url
+        val key = source.identityKey()
         val host = hostOf(source.url)
         if (host != null && host.isNotBlank() &&
             twins.count { hostOf(it.url) == host } == 1 &&
@@ -7476,7 +7482,7 @@ class PlayerActivity : ComponentActivity() {
         ) {
             return "$name \u00B7 $host"
         }
-        val ordinal = twins.indexOfFirst { (it.infoHash ?: it.url) == key } + 1
+        val ordinal = twins.indexOfFirst { it.identityKey() == key } + 1
         return "$name ($ordinal)"
     }
 
@@ -7590,11 +7596,11 @@ class PlayerActivity : ComponentActivity() {
             if (current.isEmpty()) return
             val hadBefore = sources.size
             val have = HashSet<String>(hadBefore + current.size)
-            for (s in sources) have.add(s.infoHash ?: s.url)
+            for (s in sources) have.add(s.identityKey())
             var added = false
             val out = sources.toMutableList()
             for (s in current) {
-                if (!have.add(s.infoHash ?: s.url)) continue
+                if (!have.add(s.identityKey())) continue
                 out += runCatching { s.toPlayerSource() }.getOrNull() ?: continue
                 added = true
             }
@@ -8192,7 +8198,7 @@ class PlayerActivity : ComponentActivity() {
             // devices kept rows perpetually mid-layout (visible after a touch,
             // blank again on the next tick). Identical ticks now touch nothing.
             var contentHash = 0
-            for (s in sources) contentHash = contentHash * 31 + (s.infoHash ?: s.url).hashCode()
+            for (s in sources) contentHash = contentHash * 31 + s.identityKey().hashCode()
             val paintSig = sources.size.toString() + "|" + contentHash + "|" + chip + "|" +
                 currentIndex + "|" + playbackCommitted
             if (paintSig == lastPaintSig && builtSig.isNotEmpty() && (list.childCount - 1) > 0) return

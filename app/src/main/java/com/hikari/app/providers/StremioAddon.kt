@@ -1222,7 +1222,12 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                     details = details,
                     isTorrent = true,
                     infoHash = infoHash,
-                    fileIdx = if (st.has("fileIdx") && !st.isNull("fileIdx")) st.optInt("fileIdx") else null,
+                    // Stremio names the file inside a multi-file torrent with
+                    // top-level `fileIdx`; some addons nest it under
+                    // behaviorHints instead. Without it every file of a pack
+                    // addresses file 0 (or collapses to one row downstream),
+                    // so the surviving row plays the wrong file or fails.
+                    fileIdx = topFileIdx(st) ?: hintsFileIdx(st),
                     trackers = stringArray(st, "sources"),
                 )
                 ytId != null -> out += StreamSource(
@@ -1271,6 +1276,16 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
     /** The `index=` a magnet carries — which file inside the torrent — or null. */
     private fun magnetIndex(magnet: String): Int? =
         Regex("[&?]index=(\\d+)").find(magnet)?.groupValues?.get(1)?.toIntOrNull()
+
+    /** Top-level `fileIdx` (the Stremio protocol's own field), or null. */
+    private fun topFileIdx(st: JSONObject): Int? =
+        if (st.has("fileIdx") && !st.isNull("fileIdx")) st.optInt("fileIdx") else null
+
+    /** `behaviorHints.fileIdx` — same meaning, nested by some addons — or null. */
+    private fun hintsFileIdx(st: JSONObject): Int? {
+        val h = st.optJSONObject("behaviorHints") ?: return null
+        return if (h.has("fileIdx") && !h.isNull("fileIdx")) h.optInt("fileIdx") else null
+    }
 
     /** The `tr=` trackers a magnet carries, URL-decoded. */
     private fun magnetTrackers(magnet: String): List<String> =

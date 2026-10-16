@@ -743,7 +743,7 @@ private fun recordPosterReferer(url: String?, siteBase: String?) {
         val seen = HashSet<String>()
         for ((s, got) in cracked) {
             if (got.isEmpty()) {
-                if (seen.add(s.url)) merged += s
+                if (seen.add(s.identityKey())) merged += s
                 continue
             }
             for (r in got) {
@@ -759,7 +759,7 @@ private fun recordPosterReferer(url: String?, siteBase: String?) {
                 )
             }
         }
-        for (s in found) if (seen.add(s.url)) merged += s
+        for (s in found) if (seen.add(s.identityKey())) merged += s
         return merged
     }
 

@@ -572,7 +572,14 @@ data class StreamSource(
      * [com.hikari.app.reader.source.HikariPageSource]).
      */
     val pageUrl: String = "",
-)
+) {
+    /** Identity across every merge/dedup in the app: a torrent is its
+     *  infoHash PLUS its file index — two files of one pack share the hash
+     *  but are different videos, and collapsing them ate Stremio's second
+     *  torrent row down to one — anything else its URL. */
+    fun identityKey(): String =
+        infoHash?.takeIf { it.isNotBlank() }?.let { "h${it.lowercase()}#${fileIdx ?: 0}" } ?: "u$url"
+}
 
 data class CatalogRef(
     val providerId: String,

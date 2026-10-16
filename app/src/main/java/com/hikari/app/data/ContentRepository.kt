@@ -3729,14 +3729,14 @@ class ContentRepository(private val manager: ProviderManager) {
                 // for — start the other extensions immediately instead of
                 // after the grace window.
                 val crossGrace = if (targets.isEmpty()) 0L else CROSS_EXT_GRACE_MS
-                // Merge EVERY provider's sources (deduped by url/infoHash): a
+                // Merge EVERY provider's sources (deduped by identity): a
                 // fast Stremio/CS3 answer no longer cuts the wait short — every
                 // installed nuvio provider gets its chance to add servers.
                 val merged = LinkedHashMap<String, StreamSource>()
                 fun merge(job: kotlinx.coroutines.Deferred<List<StreamSource>>) {
                     if (job.isCompleted) {
                         runCatching { job.getCompleted() }.getOrDefault(emptyList())
-                            .forEach { s -> merged.putIfAbsent(s.infoHash ?: s.url, s) }
+                            .forEach { s -> merged.putIfAbsent(s.identityKey(), s) }
                         // Kept up to date on every merge, not only at the end of
                         // the pass: the teardown in the `finally` uses this as the
                         // snapshot a background sweep starts from, and a pass that
@@ -4410,7 +4410,7 @@ class ContentRepository(private val manager: ProviderManager) {
             // which must never become a playable source (it would open a
             // w3.org page in the web view instead of playing).
             var finalResult = result.filterNot { isGarbageUrl(it.url) }
-                .distinctBy { it.infoHash ?: it.url }
+                .distinctBy { it.identityKey() }
             // (A bundled yt-dlp engine used to take one last shot at the page
             // here when every provider type came up empty. It was removed in
             // 0.9.1 — see the CHANGELOG. Everything above still applies; the
@@ -4442,13 +4442,13 @@ class ContentRepository(private val manager: ProviderManager) {
             // for an empty pass: what the user sees is the union, so a server
             // that played a minute ago cannot disappear by being unlucky.
             if (remembered != null) {
-                val have = finalResult.mapTo(HashSet<String>()) { it.infoHash ?: it.url }
+                val have = finalResult.mapTo(HashSet<String>()) { it.identityKey() }
                 // Scoped: the remembered list may hold sibling-engine servers a
                 // wider earlier lookup gathered — they must not re-enter a pass
                 // whose own switches say "only this extension" (see
                 // [filterToScope]).
                 val extra = filterToScope(item, remembered.list)
-                    .filterNot { (it.infoHash ?: it.url) in have }
+                    .filterNot { it.identityKey() in have }
                 if (extra.isNotEmpty()) {
                     val fresh = finalResult.size
                     finalResult = finalResult + extra
@@ -4618,7 +4618,7 @@ class ContentRepository(private val manager: ProviderManager) {
                 }
                 if (snapshot.isNotEmpty()) {
                     held.snapshot = (held.snapshot + snapshot)
-                        .distinctBy { it.infoHash ?: it.url }
+                        .distinctBy { it.identityKey() }
                 }
                 if (sink != null) held.sinks += sink
                 com.hikari.app.data.Logs.log(
@@ -4767,7 +4767,7 @@ class ContentRepository(private val manager: ProviderManager) {
     ) {
         val key = streamsRememberedKey(item, episode)
         val acc = LinkedHashMap<String, StreamSource>()
-        snapshot.forEach { acc[it.infoHash ?: it.url] = it }
+        snapshot.forEach { acc[it.identityKey()] = it }
         // …plus anything this video's servers were already known to be, so a
         // sweep that started from a cut-off pass (whose own snapshot is empty
         // because it never reached the line that records one) publishes the
@@ -4778,7 +4778,7 @@ class ContentRepository(private val manager: ProviderManager) {
         streamsRemembered[key]
             ?.takeIf { System.currentTimeMillis() - it.at < REMEMBERED_STREAMS_TTL_MS }
             ?.list
-            ?.forEach { acc.putIfAbsent(it.infoHash ?: it.url, it) }
+            ?.forEach { acc.putIfAbsent(it.identityKey(), it) }
         sweep.current = acc.values.toList()
         var lastEmitted = acc.size
         val budget = SWEEP_BUDGET_MS
@@ -4949,7 +4949,7 @@ class ContentRepository(private val manager: ProviderManager) {
                                 // Proven: asked first on every later lookup.
                                 crossProven.add(id)
                                 synchronized(acc) {
-                                    found.forEach { s -> acc.putIfAbsent(s.infoHash ?: s.url, s) }
+                                    found.forEach { s -> acc.putIfAbsent(s.identityKey(), s) }
                                 }
                                 com.hikari.app.data.Logs.log(
                                     "Search",
@@ -5057,7 +5057,7 @@ class ContentRepository(private val manager: ProviderManager) {
             // Proven: asked first on every later lookup of any title.
             crossProven.add(id)
             synchronized(acc) {
-                found.forEach { s -> acc.putIfAbsent(s.infoHash ?: s.url, s) }
+                found.forEach { s -> acc.putIfAbsent(s.identityKey(), s) }
             }
             com.hikari.app.data.Logs.log(
                 "Search",
