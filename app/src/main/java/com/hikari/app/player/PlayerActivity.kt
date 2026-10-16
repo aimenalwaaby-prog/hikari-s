@@ -11675,8 +11675,20 @@ class PlayerActivity : ComponentActivity() {
         // (MainAPI.getVideoInterceptor — CS3IPlayer honors it). A separate
         // playback-only client loses the extractor's session, which is a
         // 403-vs-play difference on signed CDNs no header tweak can fix.
-        // Every other engine keeps the stable path.
-        var playbackClient = if (isCs3Source) com.hikari.app.cs3.Cs3MainApiProvider.cs3BaseClient() else client
+        // Every other engine keeps the stable path. Extension-server URLs (an
+        // Aniyomi extension's own localhost HTTP server, e.g. its /m3u8
+        // proxy) play through the plain client: no shared cookie jar, no
+        // Cloudflare-verifier interceptor — the reference apps' stack for
+        // these links. A loopback address can never need clearance cookies
+        // or verification, so nothing is lost, and any stray state the
+        // shared stack attaches is removed as a variable.
+        val isLoopbackUrl = runCatching { java.net.URI(src.url).host?.lowercase() }
+            .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
+        var playbackClient = when {
+            isCs3Source -> com.hikari.app.cs3.Cs3MainApiProvider.cs3BaseClient()
+            isLoopbackUrl -> PlayerHttp.plainClient
+            else -> client
+        }
         if (isCs3Source) {
             runCatching {
                 com.hikari.app.cs3.Cs3MainApiProvider.videoInterceptorFor(src.url)
@@ -13896,6 +13908,35 @@ class PlayerActivity : ComponentActivity() {
                     "(server ${currentIndex + 1}/${sources.size}): " +
                     details.replace("\n", " | ").take(600),
             )
+            // A malformed manifest off an extension's own local server gets a
+            // bounded diagnostic refetch: "not #EXTM3U" cannot tell a dead
+            // link from a struggling server, so one plain GET (loopback
+            // only — never a remote CDN) records the real status line,
+            // content type and first bytes into the shared log. Runs off the
+            // failover path; a late answer changes nothing.
+            if (code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
+                val failedUrl = sources.getOrNull(currentIndex)?.url.orEmpty()
+                val failedLoopback = runCatching { java.net.URI(failedUrl).host?.lowercase() }
+                    .getOrNull()?.let { it == "localhost" || it == "127.0.0.1" || it == "::1" || it == "[::1]" } == true
+                if (failedLoopback && failedUrl.isNotBlank()) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val diag = runCatching {
+                            withTimeoutOrNull(10_000L) {
+                                val req = okhttp3.Request.Builder().url(failedUrl).get().build()
+                                PlayerHttp.plainClient.newCall(req).execute().use { resp ->
+                                    val head = resp.body?.source()?.let { bufSrc ->
+                                        bufSrc.request(160)
+                                        bufSrc.buffer.clone().readUtf8(160)
+                                    }.orEmpty().replace("\n", " ").replace("\r", " ")
+                                    resp.code.toString() + " " +
+                                        (resp.header("Content-Type") ?: "-") + " | " + head
+                                }
+                            }
+                        }.getOrNull() ?: "no answer"
+                        com.hikari.app.data.Logs.log("Player", "loopback diag: $diag".take(400))
+                    }
+                }
+            }
             // HLS manifests often declare a subtitle track whose URL returns
             // junk ("Expected WEBVTT. Got 1" / contentIsMalformed). media3
             // treats that as a fatal parse error — retry the SAME server with

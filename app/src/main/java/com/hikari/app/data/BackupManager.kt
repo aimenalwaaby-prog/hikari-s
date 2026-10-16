@@ -12,6 +12,7 @@ import java.io.OutputStream
 import com.hikari.app.BuildConfig
 import com.hikari.app.HikariApp
 import com.hikari.app.net.ExtensionVerifyGuard
+import com.hikari.app.net.Http
 import com.hikari.app.net.NetTuning
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,18 @@ import java.util.Locale
  *    phone's PIN lock and a phone's screen shape — the two things a transfer
  *    must never decide for the device receiving it.
  *
+ * Extension code travels as *references* (`{path, url}`), not bytes: every
+ * repo-installed extension can be fetched again from the source URL its
+ * provider row already remembers, so embedding all of them made backups
+ * hundreds of megabytes for no reason (a few hundred extensions reached
+ * ~235 MB of base64). Only files with no known source (sideloaded) still
+ * carry bytes, and Nuvio per-provider settings always do — they are user
+ * data, not re-downloadable code. The restore re-downloads the references in
+ * the background after reporting success; old backups that still embed every
+ * file restore exactly as before, and an older Hikari reading a new file
+ * simply restores the settings plus the sideloaded files (it skips the
+ * section it does not know).
+ *
  * The format is a plain JSON object so a support chat can be told "open it in a
  * text editor" and the user can see it contains no video and no app lock.
  */
@@ -86,6 +99,10 @@ object BackupManager {
      *  cap keeps a corrupt/hostile file from being expanded into the app's
      *  storage. */
     private const val MAX_FILE_BYTES = 12L * 1024L * 1024L
+
+    /** A hostile file could list references forever; the cap stops that from
+     *  becoming thousands of downloads. A real set is hundreds. */
+    private const val MAX_REFS = 5000
 
     data class Report(
         val ok: Boolean,
@@ -228,11 +245,36 @@ object BackupManager {
                 w.endObject()
             }
             w.endArray()
+            // Extension files used to be embedded below as base64 — with a
+            // few hundred installed that single array reached ~235 MB. A file
+            // the app can fetch again (every repo-installed extension: its
+            // provider row remembers the source URL — see
+            // [collectExtensionRefs]) now travels as a small {path, url}
+            // reference instead, and only files with no known source
+            // (sideloaded) still carry bytes. A typical backup is kilobytes
+            // again; the restore re-downloads the references.
+            val rels = collectFileRels(app.filesDir)
+            val refUrls = collectExtensionRefs(app)
+            val refEntries = ArrayList<Pair<String, String>>()
+            val embedRels = ArrayList<String>()
+            for (rel in rels) {
+                val u = refUrls[rel]
+                if (u != null) refEntries.add(rel to u) else embedRels.add(rel)
+            }
+            w.name("refs").beginArray()
+            for ((rel, u) in refEntries) {
+                w.beginObject()
+                w.name("path").value(rel)
+                w.name("url").value(u)
+                w.endObject()
+            }
+            w.endArray()
             w.name("files").beginArray()
             // Encoded off the writer thread in small parallel batches (see
             // [writeBackupFiles]): a large extension set used to back up at
             // single-core speed here — the "backup takes a minute" report.
-            writeBackupFiles(app, w, onProgress)
+            // Only sideloaded files reach this — see above.
+            writeBackupFiles(app, w, onProgress, embedRels)
             w.endArray()
             w.name("profiles").beginObject()
             val profiles = exportProfiles(app.filesDir)
@@ -264,17 +306,20 @@ object BackupManager {
     private const val BACKUP_ENCODE_PARALLEL = 16
 
     /**
-     * The `files` array of the backup: one object per extension file, emitted
-     * in walk order. Small batches encode concurrently while the writer
-     * itself stays strictly sequential (JsonWriter is not thread-safe — only
-     * this coroutine touches it).
+     * The `files` array of the backup: one object per sideloaded extension
+     * file, emitted in walk order. Small batches encode concurrently while
+     * the writer itself stays strictly sequential (JsonWriter is not
+     * thread-safe — only this coroutine touches it).
+     *
+     * [rels] arrives pre-partitioned (see the `refs` section above):
+     * repo-installed files travel as references and never reach this.
      */
     private suspend fun writeBackupFiles(
         app: HikariApp,
         w: JsonWriter,
         onProgress: ((done: Int, total: Int) -> Unit)?,
+        rels: List<String>,
     ) {
-        val rels = collectFileRels(app.filesDir)
         if (rels.isEmpty()) {
             onProgress?.invoke(0, 0)
             return
@@ -407,6 +452,35 @@ object BackupManager {
     }
 
     /**
+     * Installed extension file (relative path) -> the URL it can be fetched
+     * from again. Provider rows remember both halves: `url` is the local file
+     * (CS3, Hiki and Nuvio rows all store the absolute path there) and `extra`
+     * is the source URL it was installed from ([AppStore.sourceUrlOf] strips
+     * the Hiki `|index` suffix). Only files under the backed-up roots qualify,
+     * and Nuvio *settings* never do — they are user data, not re-downloadable
+     * code, so they stay embedded.
+     */
+    private suspend fun collectExtensionRefs(app: HikariApp): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        val providers = runCatching { app.store.providers() }.getOrDefault(emptyList())
+        for (p in providers) {
+            if (p.type != ProviderType.CS3 && p.type != ProviderType.HIKARI && p.type != ProviderType.NUVIO) continue
+            val url = runCatching { app.store.sourceUrlOf(p) }.getOrDefault("")
+            if (!url.startsWith("http://") && !url.startsWith("https://")) continue
+            if (p.url.isBlank()) continue
+            val rel = runCatching {
+                File(p.url).relativeTo(app.filesDir).invariantSeparatorsPath
+            }.getOrNull() ?: continue
+            if (!allowedPath(rel)) continue
+            if (rel == "nuvio/settings" || rel.startsWith("nuvio/settings/")) continue
+            // Several rows share one file (a .cs3 holds many providers, a
+            // .hiki holds a bundle): first wins, the rest add nothing.
+            out.putIfAbsent(rel, url)
+        }
+        return out
+    }
+
+    /**
      * Every profile snapshot plus the registry, as raw JSON text keyed by file
      * name. The live store export above is only ever the ACTIVE profile's
      * setup, so without this a backup carried one profile and restoring it
@@ -483,6 +557,7 @@ object BackupManager {
         var identical = 0
         val staged = ArrayList<Pair<File, File>>()
         val profileTexts = HashMap<String, String>()
+        val refs = ArrayList<Pair<String, String>>()
         fun cleanup() {
             for ((_, tmp) in staged) runCatching { tmp.delete() }
             staged.clear()
@@ -521,6 +596,43 @@ object BackupManager {
                                         continue
                                     }
                                     records.add(PrefRecord(key, type, value))
+                                }
+                                r.endArray()
+                            } catch (t: Throwable) {
+                                runCatching { r.skipValue() }
+                            }
+                        }
+                        "refs" -> {
+                            // Repo-installed extensions travel as {path, url}
+                            // references, not bytes (see the writer above). An
+                            // older Hikari never wrote this section and a newer
+                            // one reads old files without it — both directions
+                            // stay compatible because unknown sections are
+                            // skipped by the other side.
+                            sawSections = true
+                            try {
+                                r.beginArray()
+                                while (r.hasNext()) {
+                                    r.beginObject()
+                                    var rel = ""
+                                    var url: String? = null
+                                    while (r.hasNext()) {
+                                        when (r.nextName()) {
+                                            "path" -> rel = r.nextStringOrSkip().orEmpty()
+                                            "url" -> url = r.nextStringOrSkip()
+                                            else -> r.skipValue()
+                                        }
+                                    }
+                                    r.endObject()
+                                    val u = url?.trim().orEmpty()
+                                    if (!allowedPath(rel) ||
+                                        (!u.startsWith("http://") && !u.startsWith("https://")) ||
+                                        refs.size >= MAX_REFS
+                                    ) {
+                                        skipped++
+                                        continue
+                                    }
+                                    refs.add(rel to u)
                                 }
                                 r.endArray()
                             } catch (t: Throwable) {
@@ -648,7 +760,28 @@ object BackupManager {
             for ((k, v) in profileTexts) put(k, v)
         }
         val profilesLine = restoreProfiles(app.filesDir, profilesObj)
-        if (written > 0) {
+        var refTotal = 0
+        if (refs.isNotEmpty()) {
+            refTotal = refs.size
+            // The references resolve in the background (bounded, best-effort
+            // — one dead host must not fail the restore) and the providers
+            // reload once the pass ends. The restore itself already reported
+            // by then; the log carries the outcome.
+            refreshScope.launch {
+                var ok = 0
+                for (chunk in refs.chunked(6)) {
+                    val done = coroutineScope {
+                        chunk.map { (rel, url) -> async { downloadRefFile(app, rel, url) } }.awaitAll()
+                    }
+                    ok += done.count { it }
+                }
+                // Fetched builds may change provider-opaque episode payloads.
+                runCatching { MetaCache.bumpEpisodesEpoch() }
+                runCatching { app.providers.refresh() }
+                Logs.log("Backup", "background extension fetch — $ok/${refs.size} restored")
+            }
+        }
+        if (written > 0 || refTotal > 0) {
             // New bytes are on disk: the light settings apply now and the
             // extension reload happens in the background, so the success
             // shows instantly instead of after every runtime cold-loads.
@@ -662,13 +795,53 @@ object BackupManager {
             " · files: $written" +
             (if (identical > 0) " · unchanged: $identical" else "") +
             (if (skipped > 0) " · skipped: $skipped" else "") +
+            (if (refTotal > 0) " · extensions: $refTotal downloading" else "") +
             " · from $fromName $fromCode"
         Logs.log("Backup", "restore ok — $detail")
         Report(
             true,
-            if (written > 0) "Restored. Your sources are reloading." else "Restored your settings.",
+            when {
+                refTotal > 0 -> "Restored. Your sources are downloading."
+                written > 0 -> "Restored. Your sources are reloading."
+                else -> "Restored your settings."
+            },
             detail,
         )
+    }
+
+    /**
+     * One referenced extension file, fetched back after a restore.
+     * Best-effort by design: the backup already restored without it, so a
+     * dead host just logs. Temp + rename so a half-download never replaces a
+     * working file (same rule as the embedded path above).
+     */
+    private suspend fun downloadRefFile(app: HikariApp, rel: String, url: String): Boolean {
+        val bytes = runCatching { Http.fetchBytesCancellable(url) }.getOrNull()
+        if (bytes.isNullOrEmpty() || bytes.size.toLong() > MAX_FILE_BYTES) {
+            Logs.log("Backup", "extension refetch failed for $rel (no answer)")
+            return false
+        }
+        val target = File(app.filesDir, rel)
+        // Already there with identical bytes (a re-restore onto the same set):
+        // skip the write like the embedded path does.
+        if (target.isFile && target.length() == bytes.size.toLong() &&
+            runCatching { target.readBytes().contentEquals(bytes) }.getOrDefault(false)
+        ) return true
+        return runCatching {
+            target.parentFile?.mkdirs()
+            val tmp = File(target.parentFile, target.name + ".restore-part")
+            tmp.writeBytes(bytes)
+            if (tmp.renameTo(target)) {
+                true
+            } else {
+                // renameTo silently fails across filesystems / odd OEMs.
+                tmp.inputStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+                runCatching { tmp.delete() }
+                target.isFile
+            }
+        }.getOrDefault(false).also { ok ->
+            if (!ok) Logs.log("Backup", "extension refetch failed for $rel (write)")
+        }
     }
 
     private fun JsonReader.nextStringOrSkip(): String? {

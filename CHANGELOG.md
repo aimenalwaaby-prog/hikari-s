@@ -1,3 +1,10 @@
+## 0.11.36 (continuous build only)
+
+### Fixed
+- Backups are kilobytes again (was: ~235MB for a few hundred extensions): repo-installed extensions now travel as small {path, url} references — every provider row already remembers its source URL — and only sideloaded files with no known source still carry bytes; Nuvio per-provider settings stay embedded (user data, tiny). Restores re-download the references in the background after reporting success, then reload the providers; old giant backups still restore exactly as before
+- Aniyomi extension-server links (the extension's own localhost /m3u8 proxy, e.g. MissAV) playing "Server failed" while the same link plays in the reference apps: those URLs now play through the plain client — no shared cookie jar, no Cloudflare-verifier interceptor — matching the reference stack; a loopback address can never need either
+- Same failure now leaves a `loopback diag` line in the shared log (real status + content type + first bytes of what the local server answered), so a still-failing link names its cause instead of another round of guessing
+
 ## 0.11.35 (continuous build only)
 
 ### Fixed
