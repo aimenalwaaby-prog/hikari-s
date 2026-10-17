@@ -1306,6 +1306,21 @@ object TrackerApi {
                     if (id <= 0 || !seen.add(id.toString())) continue
                     val name = o.optString("title")
                     val year = o.optInt("year", 0)
+                    // The searched spelling is rarely the catalogue's (a Spanish
+                    // title against the English entry, pinyin against the
+                    // translation): score every spelling the record carries,
+                    // not just its display title.
+                    val altNames = buildList {
+                        o.optString("original_title").takeIf { it.isNotBlank() }?.let { add(it) }
+                        o.optJSONArray("aliases")?.let { arr ->
+                            for (a in 0 until arr.length()) {
+                                arr.optString(a).takeIf { it.isNotBlank() }?.let { add(it) }
+                            }
+                        }
+                    }
+                    val bestScore = (listOf(name) + altNames)
+                        .filter { it.isNotBlank() }
+                        .maxOfOrNull { matchScoreAny(title, it, media.year, year) } ?: 0.0
                     out.add(
                         TrackerMatch(
                             id = id.toString(),
@@ -1314,7 +1329,7 @@ object TrackerApi {
                             // The path the result came from is what tells the push
                             // which Simkl collection to write into.
                             category = if (path == "anime") "anime" else o.optString("type", path),
-                            score = matchScoreAny(title, name, media.year, year),
+                            score = bestScore,
                             year = year,
                         )
                     )
@@ -1459,13 +1474,32 @@ object TrackerApi {
                     if (tid <= 0 || !seen.add(kind + tid)) continue
                     val name = node.optString("title")
                     val year = node.optInt("year", 0)
+                    // Same multi-spelling scoring as Simkl above: a Spanish
+                    // title against the English entry must still match.
+                    val traktAlt = buildList {
+                        node.optString("original_title").takeIf { it.isNotBlank() }?.let { add(it) }
+                        node.optJSONArray("aliases")?.let { arr ->
+                            for (a in 0 until arr.length()) {
+                                val entry = arr.opt(a)
+                                val text = when (entry) {
+                                    is String -> entry
+                                    is JSONObject -> entry.optString("title")
+                                    else -> ""
+                                }
+                                text.takeIf { it.isNotBlank() }?.let { add(it) }
+                            }
+                        }
+                    }
+                    val traktScore = (listOf(name) + traktAlt)
+                        .filter { it.isNotBlank() }
+                        .maxOfOrNull { matchScoreAny(title, it, media.year, year) } ?: 0.0
                     out.add(
                         TrackerMatch(
                             id = tid.toString(),
                             title = name,
                             total = node.optInt("aired_episodes", 0),
                             category = kind,
-                            score = matchScoreAny(title, name, media.year, year),
+                            score = traktScore,
                             year = year,
                         )
                     )

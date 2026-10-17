@@ -1,3 +1,14 @@
+## 0.11.43 (continuous build only)
+
+### Fixed
+- Tracker sync "no confident match" for donghua seasons (Battle Through the Heavens Season 5 vs Dou Po Cangqiong entries): every season scored 1.0 through the shared alias and the tie-breaker gave up and reported no match. Same-show seasons now separate by release-year order (the Nth-earliest same-show entry is season N), bare-number markers ("Jade Dynasty 4") count as season markers, and only a tie on every signal is still reported as unmatched — same fix covers Spanish-vs-English titles on Simkl/Trakt (all spellings a record carries are scored now, not just its display title) plus 8 more donghua alias pairs
+- Home losing its place after entering a personal-catalog folder (Back landed at the bottom): the feed scroll position is saved on leaving and restored once the rows are back
+- Novel reader opening the next chapter scrolled to the bottom (the old chapter's scroll position carried over) and never resuming where it was left (the open-mark overwrote the saved page with 0 before it was read): the chapter resets to the top, and the saved page is read before the mark now
+- Novel reader highlighter: Highlight mode + 6 colors, tap a paragraph to mark it (tap again to remove), saved per novel+chapter and restored on reopen
+- Narrowed-search dead end ("Playback failed … only the extension this title came from is searched", e.g. an origin returning only page-links): the empty sheet now offers "Search all my servers instead", re-running the same title across the user's selected servers
+- Torrent-only extensions starting slow (rows resolving one by one): every torrent row warms its peer discovery in parallel while choosing, and the tap plays whichever row is ready first instead of cold-starting one row
+- Installed extensions listed inside the Sora/Anymex/LNReader repo folders while Nuvio never did: repo folders list repos only now — installs live on the global Installed page
+
 ## 0.11.42 (continuous build only)
 
 ### Fixed

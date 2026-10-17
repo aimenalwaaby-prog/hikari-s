@@ -41,6 +41,27 @@ data class MangaChapter(
     val label: String get() = name.ifBlank { if (number >= 0f) "Chapter $number" else "Chapter" }
 }
 
+/** One highlighted paragraph in the novel reader (see [MangaStore.highlightsFor]). */
+data class NovelHighlight(
+    val mangaKey: String,
+    val chapterUrl: String,
+    val paraIndex: Int,
+    /** ARGB color int. */
+    val color: Int,
+) {
+    companion object {
+        /** The palette the reader offers. */
+        val COLORS = listOf(
+            0xFFFFFF00.toInt(), // yellow
+            0xFF4CAF50.toInt(), // green
+            0xFFE91E63.toInt(), // pink
+            0xFF2196F3.toInt(), // blue
+            0xFFFF9800.toInt(), // orange
+            0xFF9C27B6.toInt(), // purple
+        )
+    }
+}
+
 /** Where the reader left off in one manga. */
 data class MangaProgress(
     val mangaKey: String,
@@ -232,6 +253,86 @@ object MangaStore {
     fun dropChapters(mangaKey: String) {
         chapters.remove(mangaKey)
         runCatching { chaptersFile(ctx(), mangaKey).delete() }
+    }
+
+    // ---- Novel highlights ----
+
+    /** Paragraph highlights in the novel reader, per novel key. Kept in one
+     *  small JSON file per novel (same pattern as the chapter lists), so they
+     *  survive restarts and are never mixed into the progress file. */
+    @Volatile
+    private var highlightsCache: MutableMap<String, MutableList<NovelHighlight>>? = null
+
+    private fun highlightsFile(context: Context, key: String) =
+        File(dir(context), "highlights-" + key.hashCode().toUInt().toString(16) + ".json")
+
+    fun highlightsFor(mangaKey: String): List<NovelHighlight> =
+        highlightsMap()[mangaKey]?.toList().orEmpty()
+
+    fun setHighlight(mangaKey: String, h: NovelHighlight) {
+        val map = highlightsMap()
+        val list = map.getOrPut(mangaKey) { mutableListOf() }
+        list.removeAll { it.chapterUrl == h.chapterUrl && it.paraIndex == h.paraIndex }
+        list.add(h)
+        highlightsCache = map
+        saveHighlights(mangaKey, list)
+        ping()
+    }
+
+    fun clearHighlight(mangaKey: String, chapterUrl: String, paraIndex: Int) {
+        val map = highlightsMap()
+        val list = map[mangaKey] ?: return
+        if (list.removeAll { it.chapterUrl == chapterUrl && it.paraIndex == paraIndex }) {
+            highlightsCache = map
+            saveHighlights(mangaKey, list)
+            ping()
+        }
+    }
+
+    private fun highlightsMap(): MutableMap<String, MutableList<NovelHighlight>> {
+        highlightsCache?.let { return it }
+        val map = HashMap<String, MutableList<NovelHighlight>>()
+        runCatching {
+            val d = dir(ctx())
+            d.listFiles { f -> f.name.startsWith("highlights-") && f.name.endsWith(".json") }
+                .orEmpty()
+                .forEach { f ->
+                    runCatching {
+                        val arr = JSONArray(f.readText())
+                        for (i in 0 until arr.length()) {
+                            val o = arr.getJSONObject(i)
+                            val h = NovelHighlight(
+                                mangaKey = o.optString("mangaKey"),
+                                chapterUrl = o.optString("chapterUrl"),
+                                paraIndex = o.optInt("paraIndex", -1),
+                                color = o.optInt("color", 0xFFFFFF00.toInt()),
+                            )
+                            if (h.mangaKey.isNotBlank() && h.paraIndex >= 0) {
+                                map.getOrPut(h.mangaKey) { mutableListOf() }.add(h)
+                            }
+                        }
+                    }
+                }
+        }
+        highlightsCache = map
+        return map
+    }
+
+    private fun saveHighlights(mangaKey: String, list: List<NovelHighlight>) {
+        runCatching {
+            val arr = JSONArray()
+            list.forEach {
+                arr.put(
+                    JSONObject().apply {
+                        put("mangaKey", it.mangaKey)
+                        put("chapterUrl", it.chapterUrl)
+                        put("paraIndex", it.paraIndex)
+                        put("color", it.color)
+                    }
+                )
+            }
+            highlightsFile(ctx(), mangaKey).writeText(arr.toString())
+        }
     }
 
     // ---- JSON ----

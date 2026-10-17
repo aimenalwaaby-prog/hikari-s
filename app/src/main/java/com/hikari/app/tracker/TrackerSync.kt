@@ -202,20 +202,47 @@ object TrackerSync {
         if (rivals.isNotEmpty()) {
             // Several seasons of one show all tie here (every sequel tail
             // strips to the same base, e.g. "Jade Dynasty Season 4" against
-            // "Jade Dynasty" and "Jade Dynasty Final"). The unstripped score
-            // still separates them — "Final" outscores the bare base title —
-            // so the raw title decides instead of reporting no match.
+            // "Jade Dynasty" and "Jade Dynasty Final" — and every donghua
+            // season scores 1.0 through the shared alias, e.g. "Battle
+            // Through the Heavens Season 5" against every "Dou Po Cangqiong"
+            // entry whose own title carries no season number). The old code
+            // reported "no confident match" for all of them. Instead the raw
+            // title decides, then the season marker, then release-year
+            // closeness and episode coverage — and only a tie on EVERY
+            // signal is still reported as unmatched.
             val ranked = pool.sortedWith(
                 compareByDescending<TrackerMatch> { it.score }
                     .thenByDescending { com.hikari.app.data.matchScore(media.title, it.title, media.year, it.year) }
                     .thenByDescending { seasonMarkerScore(media, it) }
+                    .thenByDescending { yearCloseness(media, it) }
                     .thenByDescending { coversEpisode(media, it) },
             )
             val winner = ranked.first()
+            // A known season picks by release order: the Nth-earliest entry
+            // of the same show is season N. Donghua sequel entries often
+            // carry no number at all ("Nian Fan" is season 5), so no marker
+            // can separate them — but they release in order, and the year
+            // the tracker lists says which is which.
+            if (media.season >= 2) {
+                val wantedBase = com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(media.title))
+                val sameShow = pool.filter {
+                    com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(it.title)) == wantedBase
+                }
+                if (media.season <= sameShow.size) {
+                    val ordered = sameShow.sortedWith(
+                        compareBy({ it.year.takeIf { y -> y > 0 } ?: Int.MAX_VALUE }, { it.id })
+                    )
+                    val pick = ordered.getOrNull(media.season - 1)
+                    if (pick != null && pick.score >= TRACKER_AUTO_THRESHOLD - 0.1) return pick
+                }
+            }
             val runnerUp = ranked.firstOrNull { it.id != winner.id }
             if (runnerUp != null && runnerUp.score >= winner.score - 0.02 &&
                 com.hikari.app.data.matchScore(media.title, runnerUp.title, media.year, runnerUp.year) >=
-                com.hikari.app.data.matchScore(media.title, winner.title, media.year, winner.year)
+                com.hikari.app.data.matchScore(media.title, winner.title, media.year, winner.year) &&
+                seasonMarkerScore(media, runnerUp) >= seasonMarkerScore(media, winner) &&
+                yearCloseness(media, runnerUp) >= yearCloseness(media, winner) &&
+                coversEpisode(media, runnerUp) == coversEpisode(media, winner)
             ) return null
             return winner
         }
@@ -238,11 +265,22 @@ object TrackerSync {
 
     /** 1 when the candidate's own title carries the watched season's marker
      *  ("Season 5", "Part 2", "S3"), else 0 — the tie-break that picks the
-     *  right season entry when every season strips to the same base. */
+     *  right season entry when every season strips to the same base. A bare
+     *  number that IS the season ("Jade Dynasty 4", "Douluo Dalu 2") counts
+     *  too: sequel entries are often numbered that way. */
     private fun seasonMarkerScore(media: TrackerMedia, c: TrackerMatch): Int {
         val s = media.season
         if (s <= 1) return 0
-        return if (Regex("""(?i)\b(s|season|part|cour)\s*0?$s\b""").containsMatchIn(c.title)) 1 else 0
+        if (Regex("""(?i)\b(s|season|part|cour)\s*0?$s\b""").containsMatchIn(c.title)) return 1
+        if (Regex("""(?i)(?:^|[\s:_\-])0?$s(?:$|[\s:_\-])""").containsMatchIn(c.title)) return 1
+        return 0
+    }
+
+    /** Release-year closeness, for the same tie: nearer year wins. Zero when
+     *  either side has no year, so it never separates on missing data. */
+    private fun yearCloseness(media: TrackerMedia, c: TrackerMatch): Int {
+        if (media.year <= 0 || c.year <= 0) return 0
+        return -kotlin.math.abs(media.year - c.year)
     }
 
     /** True when the watched episode fits inside the candidate's total. */

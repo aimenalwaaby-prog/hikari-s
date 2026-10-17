@@ -320,7 +320,7 @@ fun sequelBase(normalized: String): String {
  * loose translation), and an extension's spelling is rarely the tracker's.
  */
 private val TITLE_ALIASES = listOf(
-    setOf("doupo cangqiong", "battle through heavens", "fights break sphere", "fight sphere"),
+    setOf("doupo cangqiong", "battle through heavens", "fights break sphere", "fight sphere", "btth"),
     setOf("zhu xian", "jade dynasty"),
     setOf("xian ni", "renegade immortal"),
     setOf("a record of mortal journey to immortality", "a mortal journey to immortality"),
@@ -330,6 +330,14 @@ private val TITLE_ALIASES = listOf(
     setOf("against sky supreme", "against the sky supreme"),
     setOf("stellar transformations", "stars transformation", "xing chen bian"),
     setOf("link click", "shiguang dailiren"),
+    setOf("soul land", "douluo dalu", "douluo continent"),
+    setOf("perfect world", "wanmei shijie"),
+    setOf("swallowed star", "tunshi xingkong"),
+    setOf("throne of seal", "shen yin wangzuo", "shen yin wang zuo"),
+    setOf("tales of demons and gods", "yaoshenji", "yao shen ji"),
+    setOf("a will eternal", "yi nian yongheng"),
+    setOf("apotheosis", "bai lian cheng shen"),
+    setOf("shrouding the heavens", "zhe tian"),
 )
 
 /** Every spelling of [title] worth searching and scoring: the title itself,

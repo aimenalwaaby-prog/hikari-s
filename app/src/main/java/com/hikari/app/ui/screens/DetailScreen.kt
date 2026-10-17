@@ -2117,6 +2117,10 @@ fun DetailScreen(
     var scopeAskShow by remember { mutableStateOf(false) }
     var scopeAskPending by remember { mutableStateOf<Triple<Episode?, Long, Boolean>?>(null) }
     var scopeAskArmed by remember { mutableStateOf(false) }
+    // The last finished search ran narrowed ("this extension only"): when it
+    // ends with nothing playable, the empty sheet offers widening it instead
+    // of leaving that dead end.
+    var lastSearchNarrowed by remember { mutableStateOf(false) }
     var pendingNarrowTo by remember { mutableStateOf<String?>(null) }
     // Servers the player must know about before it starts. 1 = "as soon as the
     // first server is found" (the default).
@@ -2317,6 +2321,7 @@ fun DetailScreen(
         scopeAskArmed = false
         val narrowTo = pendingNarrowTo
         pendingNarrowTo = null
+        lastSearchNarrowed = (narrowTo != null)
         // Open the PLAYER on the very first frame of the tap (Nuvio/Stremio
         // style). The player has its own title-card screen, so instead of the
         // detail page sitting on a spinner for several seconds while the first
@@ -5435,6 +5440,24 @@ fun DetailScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 6.dp)
                         )
+                    }
+                    if (lastSearchNarrowed) {
+                        // The narrowed pass ("this extension only") found
+                        // nothing playable — offer the same title across the
+                        // user's selected servers instead of leaving the dead
+                        // end ("Playback failed … only the extension this
+                        // title came from is searched").
+                        Button(
+                            onClick = {
+                                com.hikari.app.data.SearchScope.oneShotOriginOnly = null
+                                scopeAskArmed = true
+                                lastSearchNarrowed = false
+                                openStreams(selectedEp, 0L, false)
+                            },
+                            modifier = Modifier.padding(top = 12.dp),
+                        ) {
+                            Text(tr("Search all my servers instead"))
+                        }
                     }
                     if (searchedProviders > 0) {
                         Text(

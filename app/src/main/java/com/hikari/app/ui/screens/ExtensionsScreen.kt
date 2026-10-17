@@ -8025,43 +8025,9 @@ private fun SourceFolderView(
                         onRemoveRepo = { onRemoveRepo(repo.url) }
                     )
                 }
-                // The Anymex family's new folder UI: the repos above, plus the
-                // extensions already installed from them below — browsed and
-                // managed in the one place, like the Anymex home above it.
-                // (The home keeps repos inside Sora / Anymex; this is the leaf
-                // folder, so its own installs belong here.)
-                val installedHere = when (folder) {
-                    SourceFolder.SORA -> providers.filter { it.config.type == ProviderType.SORA }
-                    SourceFolder.LNREADER -> providers.filter {
-                        it.config.type == ProviderType.MANGA &&
-                            com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(it.config.id)
-                    }
-                    SourceFolder.ANYMEX -> providers.filter {
-                        it.config.type == ProviderType.ANYMEX ||
-                            it.config.type == ProviderType.ANYMEX_MANGA
-                    }
-                    else -> emptyList()
-                }.distinctBy { it.config.id }
-                if (installedHere.isNotEmpty()) {
-                    item(key = "anymex-installed-head") {
-                        Text(
-                            tr("Installed"),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp)
-                        )
-                    }
-                    items(installedHere, key = { "anymex-installed-" + it.config.id }) { p ->
-                        ProviderCard(
-                            p = p,
-                            status = pluginStatus(p, iptvTick),
-                            onToggle = { enabled -> onToggleProvider(p.config.id, enabled) },
-                            onDelete = { onDeleteProvider(p.config.id) },
-                            onSettings = { onOpenSettings(p) },
-                            onVerify = rememberVerifyAction(p),
-                        )
-                    }
-                }
+                // Installed extensions live ONLY outside the repo folders (the
+                // global "Installed extensions" page) — a repo folder lists
+                // repos, never installs (like the Nuvio folder already did).
             } else if (folder == SourceFolder.IPTV) {
                 if (iptvProviders.isEmpty()) {
                     item {

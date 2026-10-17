@@ -1400,7 +1400,7 @@ class PlayerActivity : ComponentActivity() {
      *  — or hijack playback back to — a server the user already left. */
     private var torrentJob: Job? = null
     /** Warmed torrent URLs by server index (see [maybePrefetchTorrent]): the
-     *  engine boot + peer discovery for the first torrent row runs while the
+     *  engine boot + peer discovery for every torrent row runs while the
      *  user is still choosing, so the tap converts instantly. Keyed by
      *  session (see [torrentPrefetchKey]) — a new video resets it. Indices
      *  stay valid because the list only ever appends. */
@@ -11103,14 +11103,14 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    /** Warms the FIRST torrent row's engine + peer discovery in the
+    /** Warms EVERY torrent row's engine + peer discovery in parallel in the
      *  background while the user is still choosing a server: TorrServer boots
-     *  once (go binary + local HTTP + tracker announces), the `add` starts
+     *  once (go binary + local HTTP + tracker announces), each `add` starts
      *  finding peers and preloading, and the tap then skips straight to play.
-     *  One torrent per session, fire-and-forget — the server keeps it even if
-     *  the user picks another row (replay is then instant too). Called from
-     *  [notifySourcesChanged], so every list path is covered; the guards make
-     *  repeat calls free. */
+     *  One torrent per session-keyed map entry, fire-and-forget — the server
+     *  keeps them even if the user picks another row (replay is then instant
+     *  too). Called from [notifySourcesChanged], so every list path is
+     *  covered; the guards make repeat calls free. */
     private fun maybePrefetchTorrent() {
         val key = (liveSessionId ?: "") + "|" + historyKey
         if (torrentPrefetchKey != key) {
@@ -11119,20 +11119,28 @@ class PlayerActivity : ComponentActivity() {
             torrentPrefetchRunning = false
         }
         if (torrentPrefetchRunning) return
-        val idx = sources.indexOfFirst {
-            it.isTorrent && (it.infoHash != null || it.url.startsWith("magnet:", ignoreCase = true))
+        val snaps = sources.indices.mapNotNull { i ->
+            val s = sources[i]
+            if (s.isTorrent && (s.infoHash != null || s.url.startsWith("magnet:", ignoreCase = true)) &&
+                !torrentPrefetched.containsKey(i)
+            ) i to s else null
         }
-        if (idx < 0 || torrentPrefetched.containsKey(idx)) return
+        if (snaps.isEmpty()) return
         torrentPrefetchRunning = true
-        val snap = sources[idx]
         val myKey = key
         lifecycleScope.launch(Dispatchers.IO) {
-            val playable = runCatching { transformTorrent(snap) }.getOrNull()
-            if (playable != null && torrentPrefetchKey == myKey) {
-                torrentPrefetched[idx] = playable
-                com.hikari.app.data.Logs.log("Player", "torrent prefetch ready — tap plays instantly")
+            coroutineScope {
+                snaps.map { (idx, snap) ->
+                    async {
+                        val playable = runCatching { transformTorrent(snap) }.getOrNull()
+                        if (playable != null && torrentPrefetchKey == myKey) {
+                            torrentPrefetched[idx] = playable
+                            com.hikari.app.data.Logs.log("Player", "torrent prefetch ready — tap plays instantly")
+                        }
+                    }
+                }.awaitAll()
             }
-            torrentPrefetchRunning = false
+            if (torrentPrefetchKey == myKey) torrentPrefetchRunning = false
         }
     }
 
@@ -11193,6 +11201,25 @@ class PlayerActivity : ComponentActivity() {
                 return
             }
             torrentPrefetched.remove(index)
+        }
+        // A sibling torrent warmed first (parallel prefetch above): play the
+        // ready one instead of cold-starting this row — first-ready wins, so
+        // a torrent-only extension starts on whichever server found peers
+        // fastest rather than waiting out this row's discovery.
+        torrentPrefetched.entries.firstOrNull { (idx, _) ->
+            idx != index && sources.getOrNull(idx)?.let { sib ->
+                sib.isTorrent && (sib.infoHash != null || sib.url.startsWith("magnet:", ignoreCase = true))
+            } == true
+        }?.let { (sibIdx, playable) ->
+            val sib = sources.getOrNull(sibIdx)
+            if (sib != null) {
+                com.hikari.app.data.Logs.log(
+                    "Player",
+                    "torrent row $index cold but sibling $sibIdx ready — playing first-ready",
+                )
+                playConvertedTorrent(sibIdx, sib, playable)
+                return
+            }
         }
 
         var self: Job? = null

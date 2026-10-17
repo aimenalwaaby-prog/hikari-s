@@ -46,6 +46,7 @@ import com.hikari.app.data.MediaType
 import com.hikari.app.manga.MangaChapter
 import com.hikari.app.manga.MangaProgress
 import com.hikari.app.manga.MangaStore
+import com.hikari.app.manga.NovelHighlight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -93,6 +94,12 @@ fun NovelReaderScreen(
     // 0 = dark, 1 = sepia, 2 = light.
     var theme by remember { mutableIntStateOf(0) }
     var showChapters by remember { mutableStateOf(false) }
+    // Highlighter: tap paragraphs to mark them in the picked color. Saved per
+    // novel+chapter (see [MangaStore.highlightsFor]) so the marks are still
+    // there when the chapter is reopened.
+    var highlightMode by remember { mutableStateOf(false) }
+    var highlightColor by remember { mutableIntStateOf(NovelHighlight.COLORS.first()) }
+    var highlightMap by remember { mutableStateOf(mapOf<Int, Int>()) }
 
     val item = remember(providerId, mangaUrl, title, posterUrl) {
         MediaItem(
@@ -123,6 +130,11 @@ fun NovelReaderScreen(
         paragraphs = emptyList()
         error = null
         loading = true
+        // The new chapter reuses this list state: drop the old chapter's
+        // scroll position NOW, so a chapter opened from the bottom does not
+        // paint from the bottom while its text loads.
+        runCatching { listState.scrollToItem(0) }
+        highlightMap = emptyMap()
         val p = app.providers.byId(providerId)
         if (p == null) {
             error = "This novel engine is not installed"
@@ -152,6 +164,10 @@ fun NovelReaderScreen(
             .filter { it.isNotBlank() }
         paragraphs = paras
         loading = false
+        // Read the saved position BEFORE marking the chapter open: the mark
+        // below overwrites this chapter's row with page 0, so reading after
+        // it always found 0 and a chapter was never resumed where it was left.
+        val prior = MangaStore.progressFor(key)?.takeIf { it.chapterUrl == chapter }
         // Mark the chapter open (progress), then restore + follow the position.
         val chName = ch?.label ?: chapter
         MangaStore.setProgress(
@@ -169,9 +185,13 @@ fun NovelReaderScreen(
                 at = System.currentTimeMillis(),
             )
         )
-        val saved = MangaStore.progressFor(key)?.takeIf { it.chapterUrl == chapter }
-        if (saved != null && saved.page in paras.indices && saved.page > 0) {
-            runCatching { listState.scrollToItem(saved.page) }
+        highlightMap = MangaStore.highlightsFor(key)
+            .filter { it.chapterUrl == chapter }
+            .associate { it.paraIndex to it.color }
+        if (prior != null && prior.page in paras.indices && prior.page > 0) {
+            runCatching { listState.scrollToItem(prior.page) }
+        } else {
+            runCatching { listState.scrollToItem(0) }
         }
         var last = -1
         while (true) {
@@ -261,6 +281,12 @@ fun NovelReaderScreen(
                 onClick = { fontSize = (fontSize + 2f).coerceAtMost(28f) },
                 enabled = fontSize < 28f,
             ) { Text("A+", color = fg) }
+            TextButton(onClick = { highlightMode = !highlightMode }) {
+                Text(
+                    text = if (highlightMode) "Done" else "Highlight",
+                    color = if (highlightMode) MaterialTheme.colorScheme.primary else fg,
+                )
+            }
         }
         // Chapter navigation.
         Row(
@@ -291,6 +317,41 @@ fun NovelReaderScreen(
             }
         }
         Spacer(Modifier.height(2.dp))
+        if (highlightMode) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+            ) {
+                Text(
+                    text = "Tap a paragraph to highlight it — tap a marked one to remove it.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = dim,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    NovelHighlight.COLORS.forEach { c ->
+                        Text(
+                            text = "●",
+                            fontSize = 30.sp,
+                            color = Color(c),
+                            modifier = Modifier
+                                .clickable { highlightColor = c }
+                                .background(
+                                    if (c == highlightColor) fg.copy(alpha = 0.25f)
+                                    else Color.Transparent,
+                                )
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
         when {
             loading -> {
                 Box(
@@ -326,13 +387,38 @@ fun NovelReaderScreen(
                             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
                         )
                     }
-                    items(paragraphs) { para ->
+                    items(paragraphs.size, key = { it }) { idx ->
+                        val para = paragraphs[idx]
+                        val hl = highlightMap[idx]
+                        var paraMod: Modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 14.dp)
+                        if (hl != null) {
+                            paraMod = Modifier
+                                .fillMaxWidth()
+                                .background(Color(hl).copy(alpha = 0.35f))
+                                .padding(bottom = 14.dp)
+                        }
+                        if (highlightMode) {
+                            paraMod = paraMod.clickable {
+                                if (highlightMap.containsKey(idx)) {
+                                    MangaStore.clearHighlight(key, chapter, idx)
+                                    highlightMap = highlightMap - idx
+                                } else {
+                                    MangaStore.setHighlight(
+                                        key,
+                                        NovelHighlight(key, chapter, idx, highlightColor),
+                                    )
+                                    highlightMap = highlightMap + (idx to highlightColor)
+                                }
+                            }
+                        }
                         Text(
                             text = para,
                             fontSize = fontSize.sp,
                             lineHeight = (fontSize + 8f).sp,
                             color = fg,
-                            modifier = Modifier.padding(bottom = 14.dp),
+                            modifier = paraMod,
                         )
                     }
                     item { Spacer(Modifier.height(48.dp)) }

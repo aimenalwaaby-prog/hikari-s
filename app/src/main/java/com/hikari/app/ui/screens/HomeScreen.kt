@@ -73,6 +73,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -668,6 +669,28 @@ fun HomeScreen(nav: NavHostController) {
     // com.hikari.app.data.TmdbBrowse), so it has rows to show like any other
     // extension; if TMDB is unreachable it says so in its own empty state.
     val activeProviders = providers.filter { it.config.enabled }
+    // The feed's scroll state, hoisted so Back from a folder returns to the
+    // folder that was entered (see [HomeFeedScroll]). Restored ONCE per visit
+    // — re-applying it on every rows change would yank the list while the
+    // user is scrolling a background refresh.
+    val feedState = rememberLazyListState()
+    var feedRestored by remember { mutableStateOf(false) }
+    LaunchedEffect(rows) {
+        if (!feedRestored && rows.isNotEmpty() &&
+            (HomeFeedScroll.index > 0 || HomeFeedScroll.offset > 0)
+        ) {
+            feedRestored = true
+            runCatching { feedState.scrollToItem(HomeFeedScroll.index, HomeFeedScroll.offset) }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching {
+                HomeFeedScroll.index = feedState.firstVisibleItemIndex
+                HomeFeedScroll.offset = feedState.firstVisibleItemScrollOffset
+            }
+        }
+    }
     // The picker's engine filter ("All", "CloudStream", "Hikari", "Nuvio",
     // "Stremio"). Purely a narrowing device: it never changes what Home shows.
     var providerFilter by remember { mutableStateOf<com.hikari.app.data.ProviderType?>(null) }
@@ -971,6 +994,7 @@ fun HomeScreen(nav: NavHostController) {
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
+            state = feedState,
             modifier = Modifier.fillMaxSize(),
             // The taskbar floats over the feed, so the feed has to end below it
             // rather than above a reserved strip (see LocalTaskbarInset).
@@ -2984,6 +3008,16 @@ private fun HomeHeader(
  * is already on. Every access happens on the main thread (the loader's own
  * dispatcher), so it needs no locking.
  */
+/** Home feed scroll position across folder visits: entering a personal-catalog
+ *  folder pushes a new screen and this composable is disposed, so its Lazy
+ *  state would be lost and Back landed at the bottom instead of the folder
+ *  that was entered. The position is saved on dispose and restored once the
+ *  rows are back (see HomeScreen). */
+private object HomeFeedScroll {
+    var index = 0
+    var offset = 0
+}
+
 private object HomeFeedCache {
     val rows = object : LinkedHashMap<String, List<CatalogRow>>() {
         override fun removeEldestEntry(eldest: Map.Entry<String, List<CatalogRow>>): Boolean = size > 80
