@@ -346,7 +346,10 @@ fun TrackerLoginDialog(
         client = effective
         idField = effective.id
         secretField = effective.secret
-        credentialsDone = effective.ready
+        // Kitsu takes the account itself (password grant): there is no app
+        // registration for it at all, so the credential fields must never
+        // show — the sign-in step (e-mail + password) opens straight away.
+        credentialsDone = effective.ready || kind.flow == TrackerFlow.PASSWORD
         loading = false
     }
 
@@ -916,6 +919,9 @@ fun TrackerLoginDialog(
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(4.dp))
+                // Password-grant services (Kitsu) have no app id at all, so
+                // there is nothing different to use.
+                if (kind.flow != TrackerFlow.PASSWORD) {
                 TextButton(onClick = {
                     // A wrong app id, or one belonging to another service: back to
                     // the fields, keeping what was typed.
@@ -925,6 +931,7 @@ fun TrackerLoginDialog(
                     error = null
                     status = null
                 }) { Text(tr("Use a different app id")) }
+                }
             }
         },
         confirmButton = {

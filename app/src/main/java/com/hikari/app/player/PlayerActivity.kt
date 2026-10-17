@@ -302,6 +302,9 @@ class PlayerActivity : ComponentActivity() {
      */
     private var dropCount = 0
 
+    /** Last cumulative drop count a log line was written for (see [dropWatcher]). */
+    private var lastLoggedDrops = 0
+
     /** True while Android's battery saver skips video effects this session.
      *  Effects only — resolution and rendition are never touched. */
     private var batterySaverOn = false
@@ -317,6 +320,19 @@ class PlayerActivity : ComponentActivity() {
         ) {
             if (droppedFrames <= 0) return
             dropCount += droppedFrames
+            // Evidence, not noise: a line every 25 dropped frames names the
+            // decoder doing the work and the position it fell behind at, so a
+            // "frames drop on this device" report is answerable from the log
+            // (decoder + pattern, not just a total).
+            if (dropCount - lastLoggedDrops >= 25) {
+                lastLoggedDrops = dropCount
+                com.hikari.app.data.Logs.log(
+                    "Player",
+                    "dropped frames total=$dropCount (+$droppedFrames) " +
+                        "decoder=${videoDecoderName ?: "?"} " +
+                        "pos=${player?.currentPosition ?: -1}",
+                )
+            }
             maybeEscapeSoftwareDecode()
         }
 
@@ -12031,6 +12047,7 @@ class PlayerActivity : ComponentActivity() {
         noVideoLastPosition = -1L
         // A new source restarts the drop tally (see [dropWatcher]).
         dropCount = 0
+        lastLoggedDrops = 0
         // ...and earns its own shift-to-Best prompt booking (see
         // [maybePromptDecoderShift]): a No on the last server must not mute
         // the next one.

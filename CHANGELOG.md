@@ -1,3 +1,10 @@
+## 0.11.52 (continuous build only)
+
+### Fixed
+- Kitsu asking for a client id: it signs in with the account's own email + password and has no app registration at all — the credential step never shows for it now, and neither does the "different app id" row
+- Dead-end searches sitting on zero servers while servers exist elsewhere: a pass that reaches a real empty verdict with a narrowed scope now fires one widened wave on its own (explicit "this extension only" or the "only this extension" setting — preference gates lifted for that single pass, then restored; IPTV/exception/originless scopes untouched), feeding the same live session the player and sheet already listen on, with an honest note when even the widened pass finds nothing
+- Frame drops undiagnosable: every 25 dropped frames now logs decoder name + position, so the next report names the cause instead of just a total
+
 ## 0.11.51 (continuous build only)
 
 ### Fixed

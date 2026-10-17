@@ -2122,6 +2122,12 @@ fun DetailScreen(
     // ends with nothing playable, the empty sheet offers widening it instead
     // of leaving that dead end.
     var lastSearchNarrowed by remember { mutableStateOf(false) }
+    // The dead-end widen already fired for the current tap chain (see the
+    // verdict block in [openStreams]): one automatic widened wave per tap, so
+    // a widened pass that also ends empty can never re-trigger itself.
+    // Atomic: the verdict runs on the app scope while taps land on the main
+    // thread.
+    val autoWidenFired = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var pendingNarrowTo by remember { mutableStateOf<String?>(null) }
     // Servers the player must know about before it starts. 1 = "as soon as the
     // first server is found" (the default).
@@ -2323,6 +2329,10 @@ fun DetailScreen(
         val narrowTo = pendingNarrowTo
         pendingNarrowTo = null
         lastSearchNarrowed = (narrowTo != null)
+        // A fresh tap earns its own automatic widened wave (see the verdict
+        // block below): a widened pass that also ends empty must not widen
+        // again, but the NEXT tap starts over.
+        autoWidenFired.set(false)
         // Open the PLAYER on the very first frame of the tap (Nuvio/Stremio
         // style). The player has its own title-card screen, so instead of the
         // detail page sitting on a spinner for several seconds while the first
@@ -2768,7 +2778,10 @@ fun DetailScreen(
                 // the search is declared finished, so this is what turns an
                 // empty result into a clear message within a second instead
                 // of a minute and a half of nothing.
-                val foundCount = playableEvery(found).size
+                val foundCount0 = playableEvery(found).size
+                // Reassigned when the dead-end widen below finds servers, so
+                // every status branch under this reads the widened count.
+                var foundCount = foundCount0
                 // Is a background sweep still asking repos this lookup did not
                 // really finish — the ones the pass never reached, or the ones it
                 // answered out of the session's "no such title" record after
@@ -2787,6 +2800,76 @@ fun DetailScreen(
                 // exists precisely to find the other 34 is still running is what
                 // made the count look like it came out of nowhere.
                 val sweepBusy = vm.backgroundSweepBusy(searchedEpisode)
+                // Dead-end rescue: a pass that reached a REAL verdict (not cut
+                // short), with nothing still running behind it, and zero
+                // playable servers — while the scope was narrowed (an explicit
+                // "this extension only" tap, or the "only this extension"
+                // setting with the origin engine's family switch off) — fires
+                // ONE widened wave automatically instead of sitting on the dead
+                // end. The wave feeds the same live session the player is
+                // already listening on (and the sheet's list), so an open
+                // "still searching" cover resolves into servers instead of
+                // hanging. Structural narrowness is never lifted: IPTV
+                // playlists, exception-repo collapses, tracker and originless
+                // lookups keep their scope — only the user's preference gates
+                // (all-extensions + the origin engine's family) are widened,
+                // for this one pass, then restored.
+                var widenedRan = false
+                if (foundCount == 0 && lookupComplete && !sweepBusy &&
+                    autoWidenFired.compareAndSet(false, true)
+                ) {
+                    val originId = m?.providerId ?: providerId
+                    val origin = providers.firstOrNull { it.config.id == originId }
+                    val settingsNarrow = narrowTo == null &&
+                        !com.hikari.app.data.SearchScope.allExtensions &&
+                        origin != null && origin.config.enabled &&
+                        !com.hikari.app.data.IptvMark.isIptvProvider(originId) &&
+                        !com.hikari.app.data.SearchScope.isException(originId)
+                    if (narrowTo != null || settingsNarrow) {
+                        var savedAll = true
+                        var savedFamilies: Set<String> = emptySet()
+                        if (settingsNarrow) {
+                            savedAll = com.hikari.app.data.SearchScope.allExtensions
+                            savedFamilies = com.hikari.app.data.SearchScope.engineFamilies
+                            com.hikari.app.data.SearchScope.allExtensions = true
+                            val engineName = origin?.config?.type?.name
+                            if (engineName != null) {
+                                com.hikari.app.data.SearchScope.engineFamilies =
+                                    savedFamilies + engineName
+                            }
+                            com.hikari.app.data.Logs.log(
+                                "Search",
+                                "dead end with narrowed scope — widening to all servers for one pass " +
+                                    "\"${m?.title.orEmpty().take(60)}\"",
+                            )
+                        }
+                        try {
+                            StreamsLive.setStatus(sid, "Nothing in scope — widening to all servers…")
+                            val re = runCatching {
+                                vm.getStreamsLookup(episode = searchedEpisode, force = true)
+                            }.getOrNull()
+                            val playable = if (re == null) emptyList() else playableEvery(re.servers)
+                            if (playable.isNotEmpty()) {
+                                found = re!!.servers
+                                onUi { streams = re.servers }
+                                StreamProbe.warmAsync(playable)
+                                StreamsLive.append(sid, playable)
+                                StreamsLive.setStatus(
+                                    sid,
+                                    "Widened search found " + playable.size + " server" +
+                                        (if (playable.size == 1) "" else "s") + ".",
+                                )
+                                foundCount = playable.size
+                            }
+                        } finally {
+                            if (settingsNarrow) {
+                                com.hikari.app.data.SearchScope.allExtensions = savedAll
+                                com.hikari.app.data.SearchScope.engineFamilies = savedFamilies
+                            }
+                        }
+                        widenedRan = true
+                    }
+                }
                 // The "nothing playable, and that is a real answer" note, built as
                 // a lambda so the sweep's own watcher below can use the very same
                 // wording if the sweep comes back empty a minute later.
@@ -2827,6 +2910,13 @@ fun DetailScreen(
                                     ", but none could be turned into a video — they point at " +
                                         "a page rather than a file (open that page to watch it)."
                                 )
+                            }
+                            // The widened wave above ran and still found
+                            // nothing: say that, or the "extension this title
+                            // came from" line below would deny a search that
+                            // already covered every server.
+                            widenedRan && foundCount == 0 -> {
+                                append("No playable server found, even after widening to all servers")
                             }
                             originless && enabledN == 0 -> {
                                 append("No playback extension is switched on, so there was ")
