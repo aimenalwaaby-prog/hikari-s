@@ -1,5 +1,6 @@
 package com.hikari.app.lnreader
 
+import android.os.SystemClock
 import com.hikari.app.data.CatalogRef
 import com.hikari.app.data.Episode
 import com.hikari.app.data.Logs
@@ -339,8 +340,11 @@ class LnReaderProvider(override val config: ProviderConfig) : ContentProvider {
         gate(ProviderGate.Lane.INTERACTIVE) {
             if (!pluginFile.exists()) return@gate fail(missingReason(), emptyList())
             val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
+            val lt0 = SystemClock.elapsedRealtime()
+            Logs.log("LnReader", "${config.name} novel chapter start id=${chapter.id.take(80)}")
             try {
                 val payload = LnReaderRuntime.parseChapter(pluginFile, pluginId, chapter.id)
+                Logs.log("LnReader", "${config.name} novel parseChapter id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - lt0}ms payloadChars=${payload.length}")
                 val data = okData(payload)
                 val html = when (data) {
                     is String -> data
@@ -351,6 +355,7 @@ class LnReaderProvider(override val config: ProviderConfig) : ContentProvider {
                 val text = htmlToText(html)
                 if (text.isBlank()) return@gate fail("chapter text unavailable", emptyList())
                 lastOutcome[config.id] = "✓ 1 part"
+                Logs.log("LnReader", "${config.name} novel chapter OK id=${chapter.id.take(60)} htmlChars=${html.length} textChars=${text.length} in ${SystemClock.elapsedRealtime() - lt0}ms")
                 listOf(
                     StreamSource(
                         name = chapter.name ?: "Chapter",

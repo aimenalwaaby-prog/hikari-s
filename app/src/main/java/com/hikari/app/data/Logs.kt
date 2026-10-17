@@ -197,6 +197,31 @@ object Logs {
     }
 
     /**
+     * Standing rule, enforced by convention (see docs/LOGGING.md): EVERY
+     * user-visible flow logs its start, its end with wall-clock duration, and
+     * its outcome/failure through [log] — a bug report must be answerable
+     * from Settings → Logs, never from a screenshot. New features use this
+     * helper so the start/end/duration lines exist from day one; a flow with
+     * inner stages logs each stage the same way at its own call site.
+     */
+    suspend fun <T> timed(tag: String, label: String, block: suspend () -> T): T {
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        log(tag, "$label start")
+        try {
+            val v = block()
+            log(tag, "$label end in ${android.os.SystemClock.elapsedRealtime() - t0}ms")
+            return v
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) {
+                log(tag, "$label CANCELLED after ${android.os.SystemClock.elapsedRealtime() - t0}ms")
+            } else {
+                logError(tag, "$label FAILED after ${android.os.SystemClock.elapsedRealtime() - t0}ms", t)
+            }
+            throw t
+        }
+    }
+
+    /**
      * Write the full crash report for an uncaught exception. Returns the report
      * text so the caller can surface it in the in-app crash banner.
      *

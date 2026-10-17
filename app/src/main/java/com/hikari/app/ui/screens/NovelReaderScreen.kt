@@ -1,5 +1,6 @@
 package com.hikari.app.ui.screens
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.hikari.app.HikariApp
 import com.hikari.app.data.Episode
+import com.hikari.app.data.Logs
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.manga.MangaChapter
@@ -121,11 +123,18 @@ fun NovelReaderScreen(
     // spin its first paint forever.
     LaunchedEffect(key) {
         if (chapters.isNotEmpty()) return@LaunchedEffect
-        val p = app.providers.byId(providerId) ?: return@LaunchedEffect
-        withContext(Dispatchers.IO) {
+        Logs.log("Novel", "chapters [$providerId] ${mangaUrl.take(80)} start (cache empty)")
+        val ct0 = SystemClock.elapsedRealtime()
+        val p = app.providers.byId(providerId)
+        if (p == null) {
+            Logs.log("Novel", "chapters [$providerId] ${mangaUrl.take(80)} FAIL engine not installed")
+            return@LaunchedEffect
+        }
+        val got = withContext(Dispatchers.IO) {
             withTimeoutOrNull(60_000L) { runCatching { p.getEpisodes(item) } }
         }
         chapters = MangaStore.chaptersFor(key).orEmpty()
+        Logs.log("Novel", "chapters [$providerId] ${mangaUrl.take(80)} end in ${SystemClock.elapsedRealtime() - ct0}ms count=${chapters.size} timeout=${got == null}")
         if (chapter.isBlank()) chapter = chapters.firstOrNull()?.url.orEmpty()
     }
 
@@ -135,6 +144,9 @@ fun NovelReaderScreen(
         paragraphs = emptyList()
         error = null
         loading = true
+        val idx0 = chapters.indexOfFirst { it.url == chapter }
+        Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} tap idx=$idx0/${chapters.size} id=${chapter.take(80)} attempt=$reload")
+        val xt0 = SystemClock.elapsedRealtime()
         // The new chapter reuses this list state: drop the old chapter's
         // scroll position NOW, so a chapter opened from the bottom does not
         // paint from the bottom while its text loads.
@@ -142,6 +154,7 @@ fun NovelReaderScreen(
         highlightMap = emptyMap()
         val p = app.providers.byId(providerId)
         if (p == null) {
+            Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} FAIL engine not installed")
             error = "This novel engine is not installed"
             loading = false
             return@LaunchedEffect
@@ -169,12 +182,14 @@ fun NovelReaderScreen(
             // Covers both the timeout above and a genuinely textless
             // chapter: either way the spinner must end on the error card,
             // where Try-again re-runs the load.
+            Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)} FAIL empty/timeout in ${SystemClock.elapsedRealtime() - xt0}ms")
             error = "Chapter text unavailable"
             loading = false
             return@LaunchedEffect
         }
         val parts = streams.mapNotNull { it.text.takeIf { t -> t.isNotBlank() } }
         if (parts.isEmpty()) {
+            Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)} FAIL ${streams.size} stream(s) but no text in ${SystemClock.elapsedRealtime() - xt0}ms")
             error = "Chapter text unavailable"
             loading = false
             return@LaunchedEffect
@@ -182,6 +197,7 @@ fun NovelReaderScreen(
         val paras = parts.flatMap { it.split("\n\n") }
             .map { it.trim() }
             .filter { it.isNotBlank() }
+        Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)} OK parts=${parts.size} paras=${paras.size} chars=${paras.sumOf { it.length }} in ${SystemClock.elapsedRealtime() - xt0}ms")
         paragraphs = paras
         loading = false
         // Read the saved position BEFORE marking the chapter open: the mark
@@ -241,7 +257,10 @@ fun NovelReaderScreen(
     fun stepChapter(next: Boolean) {
         if (chapters.isEmpty() || chapterIndex < 0) return
         val to = if (next) chapterIndex + 1 else chapterIndex - 1
-        chapters.getOrNull(to)?.let { chapter = it.url }
+        chapters.getOrNull(to)?.let {
+            Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} step ${if (next) "next" else "prev"} $chapterIndex->$to id=${it.url.take(60)}")
+            chapter = it.url
+        }
     }
 
     val bg = when (theme) {
@@ -387,7 +406,10 @@ fun NovelReaderScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(error.orEmpty(), color = fg)
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { reload++ }) { Text("Try again") }
+                        TextButton(onClick = {
+                            Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)} retry tap (attempt=${reload + 1})")
+                            reload++
+                        }) { Text("Try again") }
                     }
                 }
             }
@@ -458,6 +480,7 @@ fun NovelReaderScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
+                                    Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} picker id=${ch.url.take(60)}")
                                     chapter = ch.url
                                     showChapters = false
                                 }

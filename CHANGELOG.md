@@ -1,3 +1,9 @@
+## 0.11.45 (continuous build only)
+
+### Fixed
+- Novel reader still undiagnosable from logs (chapter taps, page calls and timeouts left no lines — a spinner could never be answered from Settings → Logs): every novel stage now logs start/end/duration — reader tap + chapter-list load + chapter text load with parts/paragraphs/chars, every page-list and page-text call with per-call ms + timeout flag, the single-text fallback, prev/next/picker navigation and every Try-again attempt — on both plain-source (Manga tag) and LNReader (LnReader tag) engines
+- Logging is now a standing rule, not a per-batch favour: new `Logs.timed()` helper (start/end/duration/failure in one call) plus `docs/LOGGING.md` — every user-visible flow, including any feature added in future, must log start, end with duration, each stage's timing + timeout flag, and every failure with retry attempt; tag registry included
+
 ## 0.11.44 (continuous build only)
 
 ### Fixed

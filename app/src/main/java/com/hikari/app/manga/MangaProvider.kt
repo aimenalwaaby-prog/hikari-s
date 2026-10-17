@@ -1,6 +1,7 @@
 package com.hikari.app.manga
 
 import android.content.Context
+import android.os.SystemClock
 import com.hikari.app.HikariApp
 import com.hikari.app.data.CatalogRef
 import com.hikari.app.data.Episode
@@ -672,6 +673,8 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         if (isNovel) {
             val nsrc = novelSrc() ?: return@gate fail(missingReason(), emptyList())
             val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
+            val nt0 = SystemClock.elapsedRealtime()
+            Logs.log("Manga", "${config.name} novel chapter start id=${chapter.id.take(80)}")
             return@gate try {
                 val sch = ch(chapter.id).apply { name = chapter.name.orEmpty() }
                 // Bounded: a dead page (or a host that never answers) must
@@ -679,13 +682,19 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 // 30s per call, 150s for the whole chapter — a real book
                 // chapter that needs longer is vanishingly rare, and the
                 // reader's Try-again re-runs the whole thing anyway.
-                val pages = withTimeoutOrNull(NOVEL_CALL_MS) {
+                val pt0 = SystemClock.elapsedRealtime()
+                val pageListRaw = withTimeoutOrNull(NOVEL_CALL_MS) {
                     runCatching { nsrc.getPageList(sch) }.getOrNull()
-                }.orEmpty()
+                }
+                val pages = pageListRaw.orEmpty()
+                Logs.log("Manga", "${config.name} novel pageList id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - pt0}ms pages=${pages.size} timeout=${pageListRaw == null}")
                 val parts = pages.mapIndexedNotNull { i, pg ->
-                    val text = withTimeoutOrNull(NOVEL_CALL_MS) {
+                    val ft0 = SystemClock.elapsedRealtime()
+                    val raw = withTimeoutOrNull(NOVEL_CALL_MS) {
                         runCatching { nsrc.fetchPageText(pg) }.getOrNull()
-                    }?.trim().orEmpty()
+                    }
+                    val text = raw?.trim().orEmpty()
+                    Logs.log("Manga", "${config.name} novel page ${i + 1}/${pages.size} id=${chapter.id.take(40)} in ${SystemClock.elapsedRealtime() - ft0}ms chars=${text.length} timeout=${raw == null}")
                     if (text.isBlank()) null else StreamSource(
                         name = "Part ${i + 1}",
                         url = "",
@@ -695,16 +704,22 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 }
                 if (parts.isNotEmpty()) {
                     lastOutcome[config.id] = "✓ ${parts.size} part(s)"
+                    Logs.log("Manga", "${config.name} novel chapter OK id=${chapter.id.take(60)} parts=${parts.size} chars=${parts.sumOf { it.text.length }} in ${SystemClock.elapsedRealtime() - nt0}ms")
                     parts
                 } else {
                     // Single-text fallback: some novel sources serve the whole
                     // chapter as one page.
-                    val text = withTimeoutOrNull(NOVEL_CALL_MS) {
+                    Logs.log("Manga", "${config.name} novel fallback single-text id=${chapter.id.take(60)}")
+                    val st0 = SystemClock.elapsedRealtime()
+                    val sraw = withTimeoutOrNull(NOVEL_CALL_MS) {
                         runCatching { nsrc.fetchPageText(Page(0, chapter.id)) }.getOrNull()
-                    }?.trim().orEmpty()
+                    }
+                    val text = sraw?.trim().orEmpty()
+                    Logs.log("Manga", "${config.name} novel fallback id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - st0}ms chars=${text.length} timeout=${sraw == null}")
                     if (text.isBlank()) fail("chapter text unavailable", emptyList())
                     else {
                         lastOutcome[config.id] = "✓ 1 part"
+                        Logs.log("Manga", "${config.name} novel chapter OK id=${chapter.id.take(60)} parts=1 chars=${text.length} in ${SystemClock.elapsedRealtime() - nt0}ms")
                         listOf(
                             StreamSource(
                                 name = chapter.name ?: "Chapter",
