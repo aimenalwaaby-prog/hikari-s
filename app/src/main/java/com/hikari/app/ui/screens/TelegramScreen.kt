@@ -3,6 +3,9 @@ package com.hikari.app.ui.screens
 import com.hikari.app.ui.components.LocalHideHelp
 
 import android.content.Intent
+import android.widget.Toast
+import com.hikari.app.data.Logs
+import com.hikari.app.i18n.I18n
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -2849,7 +2852,9 @@ private fun playTdVideo(context: android.content.Context, video: Td.ChatVideo) {
     // cold-start cost of a Telegram video, so getting it going while the player
     // is still being built is what makes playback start on the first frame
     // instead of on the first download.
-    Td.prewarm(video.fileId)
+    // Warmup must never break playback: a prewarm throw used to sit OUTSIDE
+    // the guard below and crashed the app on tap instead of playing.
+    runCatching { Td.prewarm(video.fileId) }
     val sources = JSONArray().put(
         JSONObject()
             .put("name", "Telegram")
@@ -2866,13 +2871,21 @@ private fun playTdVideo(context: android.content.Context, video: Td.ChatVideo) {
             .put("isMpd", false)
             .put("subtitles", JSONArray())
     )
-    runCatching {
+    // This launch must never fail silently: it used to be a bare runCatching
+    // with no fallback, so a tap that could not open the player did NOTHING —
+    // the exact "telegram video unclickable" report, with no log line to
+    // answer it.
+    val opened = runCatching {
         context.startActivity(
             Intent(context, com.hikari.app.player.PlayerActivity::class.java).apply {
                 putExtra("title", video.title)
                 putExtra("sources", sources.toString())
             }
         )
+    }
+    if (opened.isFailure) {
+        Logs.log("Telegram", "player would not open: " + (opened.exceptionOrNull()?.message ?: "unknown"))
+        Toast.makeText(context, I18n.t("Couldn't open the player"), Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2895,12 +2908,18 @@ private fun playTelegramVideo(context: android.content.Context, video: TelegramV
             .put("isMpd", false)
             .put("subtitles", JSONArray())
     )
-    runCatching {
+    // Same never-silent rule as [playTdVideo] above: a tap that cannot open
+    // the player says so instead of doing nothing.
+    val opened = runCatching {
         context.startActivity(
             Intent(context, com.hikari.app.player.PlayerActivity::class.java).apply {
                 putExtra("title", video.title)
                 putExtra("sources", sources.toString())
             }
         )
+    }
+    if (opened.isFailure) {
+        Logs.log("Telegram", "player would not open: " + (opened.exceptionOrNull()?.message ?: "unknown"))
+        Toast.makeText(context, I18n.t("Couldn't open the player"), Toast.LENGTH_SHORT).show()
     }
 }

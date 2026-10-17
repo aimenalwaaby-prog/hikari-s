@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,12 +54,15 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -3211,6 +3215,40 @@ private fun HomeSearchOverlay(
     var searching by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
+    // Search-bar translator: the same control the Search tab carries on its
+    // search bar (tap = EN <-> target language, long-press = pick the target
+    // language). A translated query is applied straight away so the sweep
+    // re-runs on it; typing clears the "show original" state.
+    var translatedFrom by remember { mutableStateOf<String?>(null) }
+    var targetLang by rememberSaveable { mutableStateOf("zh-CN") }
+    var langMenu by remember { mutableStateOf(false) }
+    var translating by remember { mutableStateOf(false) }
+    val translateScope = rememberCoroutineScope()
+    fun toggleTranslate() {
+        if (translating) return
+        val restore = translatedFrom
+        if (restore != null) {
+            translatedFrom = null
+            typed = restore
+            applied = restore.trim()
+            return
+        }
+        val src = typed.trim()
+        if (src.isEmpty()) return
+        translateScope.launch {
+            translating = true
+            val out = runCatching {
+                com.hikari.app.data.Translator.translateTo(src, targetLang)
+            }.getOrDefault("")
+            translating = false
+            if (out.isNotBlank() && out != src) {
+                translatedFrom = src
+                typed = out
+                applied = out.trim()
+            }
+        }
+    }
+
     // The keypad is what the user came for: open with the caret already in the
     // box. (On a television focus has to be given explicitly for the same
     // reason — a remote has no pointer to tap the field with.)
@@ -3270,7 +3308,7 @@ private fun HomeSearchOverlay(
                 }
                 OutlinedTextField(
                     value = typed,
-                    onValueChange = { typed = it },
+                    onValueChange = { typed = it; translatedFrom = null },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium,
                     placeholder = {
@@ -3287,6 +3325,54 @@ private fun HomeSearchOverlay(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
+                    },
+                    trailingIcon = {
+                        // Same translator the Search tab has: tap toggles the
+                        // translation, long-press picks the target language.
+                        Box {
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .tvPress { toggleTranslate() }
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = { toggleTranslate() },
+                                            onLongPress = { langMenu = true },
+                                        )
+                                    }
+                                    .padding(10.dp)
+                            ) {
+                                if (translating) {
+                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Translate,
+                                        contentDescription = if (translatedFrom != null)
+                                            "Show original" else "Translate to $targetLang",
+                                        tint = if (translatedFrom != null) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = langMenu,
+                                onDismissRequest = { langMenu = false },
+                            ) {
+                                com.hikari.app.data.Translator.LANGUAGES.forEach { (code, langLabel) ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(if (code == targetLang) "$langLabel  ✓" else langLabel)
+                                        },
+                                        onClick = {
+                                            targetLang = code
+                                            langMenu = false
+                                            translatedFrom = null
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     },
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier

@@ -111,10 +111,24 @@ fun openCommunity(context: Context, url: String): Boolean = openUrl(context, url
  * logins and passwords, they are built for a real browser, and doing them in
  * Hikari's WebView would also mean the app's own redirect/cookie rules applying
  * to somebody else's sign-in flow.
+ *
+ * Never silent: false means "nothing was opened" (no handler on the device,
+ * or the launch threw) and every caller must fall back or say so — a tap
+ * that dies inside here is the whole class of "dead link" reports.
  */
 fun openUrl(context: Context, url: String): Boolean {
     if (url.isBlank()) return false
-    if (launch(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))) return true
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    // Honest up front: if nothing on the device handles the link, say so
+    // instead of firing an intent the system drops on the floor.
+    val resolves = runCatching {
+        intent.resolveActivity(context.packageManager) != null
+    }.getOrDefault(true)
+    if (!resolves) {
+        Toast.makeText(context, I18n.t("Couldn't open the link"), Toast.LENGTH_SHORT).show()
+        return false
+    }
+    if (launch(context, intent)) return true
     Toast.makeText(context, I18n.t("Couldn't open the link"), Toast.LENGTH_SHORT).show()
     return false
 }

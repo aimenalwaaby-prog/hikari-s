@@ -1,3 +1,14 @@
+## 0.11.53 (continuous build only)
+
+### Fixed
+- Webview-site Open buttons dead: saved websites were rerouted to the outside browser, where the tap became a no-op — they open in Hikari's own ad-free WebView again, which is what the section is for (outside browser stays as the last-resort fallback)
+- Home's per-extension search missing the translator: its search bar now carries the same translate button the Search tab has (tap toggles the translation, long-press picks the target language)
+- Tracker sign-in links dying silently ("Open the confirmation page" / "Reopen the page" doing nothing, token field with no address anywhere): the service login page now opens in the dialog's own in-app view first — guaranteed to appear on every device — with the real browser one tap away underneath, and the page address is always shown with its own copy button so a token/code can always be fetched by hand
+- Extension-settings Google login stuck on "Waiting for Google...": config pages are user-driven setup, not video sites, so their login popups (Google GIS, debrid flows) are no longer dropped for missing a gesture the WebView credits — the login finishes in the view like a real browser
+- Telegram videos silently not playing: opening the player can no longer fail without a word — a failure now says so out loud and is logged (a warmup throw that used to crash the tap is also contained)
+- Source sheet looking like it appears all at once: while the sweep still runs, the list carries a live "Found N — still searching…" header over the rows arriving one by one
+- WebView "Blocked popup" dead-ends: a popup your tap opened now asks what to do — Allow once, Always allow that site, or Cancel — instead of just dropping it with a toast
+
 ## 0.11.52 (continuous build only)
 
 ### Fixed

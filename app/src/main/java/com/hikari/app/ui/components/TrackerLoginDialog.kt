@@ -5,6 +5,7 @@ import com.hikari.app.i18n.tr
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -44,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hikari.app.HikariApp
@@ -56,6 +58,7 @@ import com.hikari.app.net.Http
 import com.hikari.app.tracker.TrackerApi
 import com.hikari.app.tracker.TrackerRedirect
 import com.hikari.app.ui.openUrl
+import com.hikari.app.web.WebViewActivity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.hikari.app.tv.tvTextFieldKeys
@@ -71,13 +74,13 @@ import com.hikari.app.tv.tvTextFieldKeys
  * shipped does the dialog ask for an app of the user's own (the exact page
  * to create it and the exact redirect URI to paste into it), because a
  * client id belongs to whoever registered it. After that the sign-in is
- * whatever that service uses: the service's own login page in the user's own
- * browser ([TrackerFlow.CODE]/[TrackerFlow.TOKEN]), the account's own
+ * whatever that service uses: the service's own login page in the dialog's
+ * own in-app view ([TrackerFlow.CODE]/[TrackerFlow.TOKEN]), the account's own
  * credentials ([TrackerFlow.PASSWORD]), or a short code the user confirms on the
- * service's own site ([TrackerFlow.PIN]/[TrackerFlow.DEVICE]). The browser is
- * deliberate: these are account pages with logins and Cloudflare checks, built
- * for a real browser — the in-app WebView stays only as the fallback when the
- * device has no browser to open.
+ * service's own site ([TrackerFlow.PIN]/[TrackerFlow.DEVICE]). In-app first is
+ * deliberate: it appears on every device, guaranteed, while an
+ * outside-browser tap can silently go nowhere — the real browser stays one
+ * tap away under the view for the bot checks a WebView cannot pass.
  *
  * Every path ends in a sentence — the sign-in either works and names the account
  * it signed in as, or it says what the service refused. There is no state where
@@ -225,22 +228,17 @@ fun TrackerLoginDialog(
                             TrackerApi.Pending(kind, client.id, loginState)
                         )
                     }
-                    // The login page opens in the user's own browser, never
-                    // in Hikari's WebView: these are account pages (logins,
-                    // passwords, Cloudflare Turnstile — AniList's sits in
-                    // front of its login), built for a real browser, and a
-                    // WebView is exactly what the bot checks are suspicious
-                    // of. The redirect/paste path below finishes the sign-in;
-                    // the WebView stays only as the fallback when the device
-                    // has no browser to open.
+                    // The login page opens HERE first, in the dialog's
+                    // own in-app view (below): it appears on every device,
+                    // guaranteed — an outside-browser tap that silently goes
+                    // nowhere used to leave the user staring at "the page is
+                    // open in your browser" with no page anywhere and no
+                    // address to recover it with. The real browser stays one
+                    // tap away under the view, for the bot checks a WebView
+                    // cannot pass.
                     lastAuthUrl = url
-                    if (openUrl(context, url)) {
-                        webUrl = null
-                        browserOpened = true
-                    } else {
-                        browserOpened = false
-                        webUrl = url
-                    }
+                    webUrl = url
+                    browserOpened = false
                 }
             }
         }
@@ -595,17 +593,30 @@ fun TrackerLoginDialog(
                             TextButton(onClick = {
                                 Logs.log("Trackers", "${kind.label} confirm tap url=" + login.verifyUrl.take(160))
                                 if (!openUrl(context, login.verifyUrl)) {
-                                    // The tap must never die silently: the
-                                    // address is copied so the sign-in can be
-                                    // finished by hand in any browser, and the
-                                    // failure is logged + said out loud.
-                                    Logs.log("Trackers", "${kind.label} confirm external open failed — address copied instead")
-                                    copy(login.verifyUrl)
-                                    error = I18n.t(
-                                        "The browser would not open, so the confirmation address " +
-                                            "was copied — paste it into your browser, then type " +
-                                            "the code there."
-                                    )
+                                    // No browser to open: the same page in our
+                                    // own web view, so the tap still lands
+                                    // somewhere instead of dying silently.
+                                    val inApp = runCatching {
+                                        context.startActivity(
+                                            Intent(context, WebViewActivity::class.java).apply {
+                                                putExtra("url", login.verifyUrl)
+                                                putExtra("title", kind.label)
+                                            }
+                                        )
+                                    }.isSuccess
+                                    if (!inApp) {
+                                        // The tap must never die silently: the
+                                        // address is copied so the sign-in can be
+                                        // finished by hand in any browser, and the
+                                        // failure is logged + said out loud.
+                                        Logs.log("Trackers", "${kind.label} confirm open failed everywhere — address copied instead")
+                                        copy(login.verifyUrl)
+                                        error = I18n.t(
+                                            "Nothing on this device would open the page, so the confirmation address " +
+                                                "was copied — paste it into your browser, then type " +
+                                                "the code there."
+                                        )
+                                    }
                                 }
                             }) {
                                 Text(tr("Open the confirmation page"))
@@ -650,8 +661,37 @@ fun TrackerLoginDialog(
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 val auth = lastAuthUrl.orEmpty()
+                                // The address itself, always: when the browser
+                                // tap goes nowhere the user still sees WHERE
+                                // the page lives and can copy it by hand —
+                                // "no URL, nowhere to get the token" was the
+                                // whole of that report.
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = { openUrl(context, auth) }) {
+                                    Text(
+                                        auth,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(onClick = { copy(auth) }) {
+                                        Icon(
+                                            Icons.Filled.ContentCopy,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = {
+                                        if (openUrl(context, auth)) {
+                                            webUrl = null
+                                            browserOpened = true
+                                        } else {
+                                            webUrl = auth
+                                        }
+                                    }) {
                                         Text(tr("Reopen the page"))
                                     }
                                     TextButton(onClick = { webUrl = auth }) {

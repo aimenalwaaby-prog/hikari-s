@@ -1,6 +1,7 @@
 package com.hikari.app.web
 
 import com.hikari.app.i18n.I18n
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -166,7 +167,9 @@ class WebViewActivity : ComponentActivity() {
     //    it was opened for — ad-hijack redirects (ad.twinrdengine.com & co)
     //    are cancelled before they load.
     //  - popupProtection: window.open() popups are only relayed into the view
-    //    when they belong to the same site; ad popups/popunders are dropped.
+    //    when they belong to the same site; a popup the user's own tap opened
+    //    to a foreign site asks (Allow once / Always / Cancel) instead of
+    //    being dropped, and automatic popunders are still dropped unasked.
     @Volatile
     private var redirectProtection = true
     @Volatile
@@ -257,6 +260,59 @@ class WebViewActivity : ComponentActivity() {
     // window" if a popup's transport targets the parent WebView itself, so the
     // popup URL is captured in a throwaway child and loaded in the main view.
     private var popupChild: WebView? = null
+
+    /**
+     * Popup hosts the user chose "Always allow" for (see [askPopupPermission]):
+     * a blocked popup from one of these opens without asking again. Kept in
+     * this view's own preferences (not the store): it is a per-device browsing
+     * choice, exactly like a browser's pop-up exceptions list.
+     */
+    private val popupAllowPrefs by lazy {
+        getSharedPreferences("webview_popup_allow", MODE_PRIVATE)
+    }
+
+    private fun isPopupHostAllowed(host: String?): Boolean {
+        if (host.isNullOrBlank()) return false
+        return popupAllowPrefs.getStringSet("hosts", emptySet()).orEmpty()
+            .contains(host.lowercase())
+    }
+
+    private fun rememberPopupHost(host: String) {
+        val allow = popupAllowPrefs.getStringSet("hosts", emptySet()).orEmpty()
+            .toMutableSet()
+        if (allow.add(host.lowercase())) {
+            popupAllowPrefs.edit().putStringSet("hosts", allow).apply()
+        }
+    }
+
+    /**
+     * A popup the user's own tap opened, but protection would drop: instead of
+     * a "Blocked popup" toast and a dead end, the tap gets a choice — Allow
+     * once, Always allow this site, or Cancel (which just drops it, like
+     * before). Only ever called for popups a real tap produced: automatic
+     * popunders never reach here, so they can never nag.
+     */
+    private fun askPopupPermission(url: String, host: String?, onAllow: (String) -> Unit) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            AlertDialog.Builder(this@WebViewActivity)
+                .setTitle(I18n.t("Open this popup?"))
+                .setMessage(
+                    I18n.t("This page tried to open a popup:") + "\n" + (host ?: url)
+                )
+                .setPositiveButton(I18n.t("Allow once")) { d, _ ->
+                    d.dismiss()
+                    onAllow(url)
+                }
+                .setNegativeButton(I18n.t("Always allow")) { d, _ ->
+                    d.dismiss()
+                    if (!host.isNullOrBlank()) rememberPopupHost(host)
+                    onAllow(url)
+                }
+                .setNeutralButton(I18n.t("Cancel")) { d, _ -> d.dismiss() }
+                .show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Never allow a window title bar — the app draws no header anywhere.
@@ -816,7 +872,16 @@ class WebViewActivity : ComponentActivity() {
                 // ad appears after the site loads" report. Only a
                 // gesture-driven window.open (a real click, e.g. a player's
                 // "open in new window") is relayed.
-                if (popupProtection && !isUserGesture) {
+                //
+                // An addon's config page is exempt: it is user-driven setup,
+                // not a video site, and its login buttons (Google "Sign in"
+                // via GIS, debrid API-key flows) pop their windows WITHOUT a
+                // gesture the WebView credits — the script opens them from a
+                // cross-origin frame, so isUserGesture arrives false and the
+                // page sat on "Waiting for Google..." forever with the popup
+                // dropped. Same-site/video gates below still apply to
+                // everything that is not a config page.
+                if (popupProtection && !isUserGesture && !addonConfig) {
                     showBlockedToast("Blocked popup")
                     return false
                 }
@@ -874,13 +939,25 @@ class WebViewActivity : ComponentActivity() {
                             // real browser (the popup URL loads in this view,
                             // the provider redirects back to the settings
                             // page signed in).
+                            //
+                            // A tap-opened popup that still fails this gate is
+                            // not dropped with a bare toast any more: the tap
+                            // gets its choice (Allow once / Always / Cancel —
+                            // see askPopupPermission), and a site already
+                            // allowed opens straight through.
                             if (popupProtection && !addonConfig) {
                                 val host = runCatching { java.net.URI(url).host }.getOrNull()
                                 val cur = currentPageHost()
                                 if (host == null || cur == null ||
                                     (host != cur && !AdBlocker.matches(host, whitelistDomains) && !isSameSite(host, cur))
                                 ) {
-                                    showBlockedToast("Blocked popup")
+                                    if (isPopupHostAllowed(host)) {
+                                        runOnUiThread { webView.loadUrl(url) }
+                                    } else {
+                                        askPopupPermission(url, host) { allowed ->
+                                            runOnUiThread { webView.loadUrl(allowed) }
+                                        }
+                                    }
                                     return
                                 }
                             }

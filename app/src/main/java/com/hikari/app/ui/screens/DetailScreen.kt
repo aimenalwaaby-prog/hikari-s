@@ -5626,6 +5626,20 @@ fun DetailScreen(
                     }
                 }
                 else -> Column(Modifier.fillMaxWidth()) {
+                    // Progressive by construction: rows above arrive as each
+                    // provider answers (see the live feed), and while the
+                    // sweep is still running the header says so with a live
+                    // count — never a finished-looking list that silently
+                    // grows, and never 15–20s of spinner followed by
+                    // everything at once.
+                    if (loadingStreams) {
+                        Text(
+                            I18n.t("Found %s — still searching…").replace("%s", streams.size.toString()),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
                     LazyColumn(
                         modifier = Modifier.heightIn(max = 400.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

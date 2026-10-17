@@ -4215,12 +4215,27 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             },
             onAddSite = { vm.clearStatus(); showSite = true },
             onOpenSite = { site ->
-                // A saved website is somebody else's page: it opens in the
-                // user's own browser, never in Hikari's WebView (whose
-                // redirect/cookie/popup rules turn outside pages into dead
-                // ends). Only the Cloudflare globe keeps the WebView — the
-                // clearance cookie has to land in this app's own jar.
-                openUrl(context, site.url)
+                // A saved website IS a WebView site: it opens in Hikari's
+                // own ad-free WebView (that is what "Add website — Opens in
+                // the ad-free web view" promises, and why the section is
+                // called "Webview sites"). The batch-76 universal-external
+                // reroute sent these outside via openUrl(), where the tap
+                // became a no-op on devices with no browser handler — hence
+                // the dead Open buttons. External-browser users can still
+                // long-press/copy the address; the row's own action is the
+                // WebView.
+                // The in-app view is tried first; only if this device
+                // cannot open our own activity does it fall back to the
+                // outside browser — no outcome is a dead tap.
+                val opened = runCatching {
+                    context.startActivity(
+                        Intent(context, WebViewActivity::class.java).apply {
+                            putExtra("url", site.url)
+                            putExtra("title", site.name)
+                        }
+                    )
+                }.isSuccess
+                if (!opened) openUrl(context, site.url)
             },
             onRemoveSite = { url ->
                 vm.runUninstall("Removing website…", "Website removed") { vm.removeSite(url) }
