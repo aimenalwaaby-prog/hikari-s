@@ -2847,6 +2847,9 @@ private fun TelegramVideoRow(video: TelegramVideo, onPlay: () -> Unit) {
  * tracks) is untouched.
  */
 private fun playTdVideo(context: android.content.Context, video: Td.ChatVideo) {
+    // Tap tracer: if the player never opens, this line says whether the tap
+    // even arrived (compare with the "player would not open" line below).
+    Logs.log("Telegram", "play tap fileId=" + video.fileId + " chat=" + video.chatId + " msg=" + video.messageId)
     // Start pulling the video NOW, before the player activity exists: resolving
     // the file reference and fetching the first part out of Telegram is the whole
     // cold-start cost of a Telegram video, so getting it going while the player
@@ -2894,6 +2897,7 @@ private fun playTdVideo(context: android.content.Context, video: Td.ChatVideo) {
  * player, with the headers its CDN expects.
  */
 private fun playTelegramVideo(context: android.content.Context, video: TelegramVideo) {
+    Logs.log("Telegram", "play tap url=" + video.url.take(160))
     val headers = JSONObject()
         .put("User-Agent", Http.UA)
         // Telegram's CDN answers a bare request; the referer keeps it looking

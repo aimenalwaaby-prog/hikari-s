@@ -128,6 +128,7 @@ import com.hikari.app.cs3.Cs3PluginManager
 import com.hikari.app.hiki.HikariPluginManager
 import com.hikari.app.data.Cs3Repo
 import com.hikari.app.data.Cs3RepoPlugin
+import com.hikari.app.data.Logs
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderConfig
 import com.hikari.app.data.ProviderType
@@ -3771,7 +3772,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                     addonConfigLauncher.launch(
                         Intent(context, com.hikari.app.web.WebViewActivity::class.java)
                             .putExtra("url", page)
-                            .putExtra("title", p.config.name)
+                            .putExtra("title", p.config.name.ifBlank { "Stremio addon" })
                             .putExtra("stremioConfig", true)
                             .putExtra("providerId", p.config.id)
                     )
@@ -4224,6 +4225,10 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 // the dead Open buttons. External-browser users can still
                 // long-press/copy the address; the row's own action is the
                 // WebView.
+                // Tap tracer: if the view never opens, this line says
+                // whether the tap even arrived (compare with the failure
+                // paths below).
+                Logs.log("Extensions", "webview site open tap url=" + site.url.take(160))
                 // The in-app view is tried first; only if this device
                 // cannot open our own activity does it fall back to the
                 // outside browser — no outcome is a dead tap.
@@ -4235,7 +4240,10 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         }
                     )
                 }.isSuccess
-                if (!opened) openUrl(context, site.url)
+                if (!opened) {
+                    Logs.log("Extensions", "webview site view would not open — browser fallback")
+                    openUrl(context, site.url)
+                }
             },
             onRemoveSite = { url ->
                 vm.runUninstall("Removing website…", "Website removed") { vm.removeSite(url) }

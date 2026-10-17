@@ -456,7 +456,22 @@ fun TrackerLoginDialog(
                     )
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { openUrl(context, kind.registerUrl) }) {
+                        TextButton(onClick = {
+                            // Browser first; our own web view when the
+                            // device has no browser to open — a developer
+                            // page is just a page, and the client id is
+                            // copied out of it by hand either way.
+                            if (!openUrl(context, kind.registerUrl)) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(context, WebViewActivity::class.java).apply {
+                                            putExtra("url", kind.registerUrl)
+                                            putExtra("title", kind.label)
+                                        }
+                                    )
+                                }
+                            }
+                        }) {
                             Text(tr("Open developer page"))
                         }
                         TextButton(onClick = { copy(redirect) }) {
@@ -915,6 +930,29 @@ fun TrackerLoginDialog(
                             // then in the address bar to copy into the field
                             // below, which is what the line above tells the user
                             // to do.
+                            // The address itself, always — exactly like the
+                            // device flow's confirmation row: when the
+                            // browser tap goes nowhere the user still sees
+                            // WHERE the page lives and can copy it by hand.
+                            // "Simkl shows a link I can copy, AniList shows
+                            // nothing" was the whole of that report.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    url,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { copy(url) }) {
+                                    Icon(
+                                        Icons.Filled.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 TextButton(onClick = { openUrl(context, url) }) {
                                     Text(tr("Open the login page in your browser"))

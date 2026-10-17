@@ -1,3 +1,9 @@
+## 0.11.54 (continuous build only)
+
+### Fixed
+- Source-sheet link rows dead on devices with no outside browser: YouTube + external watch pages were sent to the outside browser where the tap became a no-op — they open in Hikari's own WebView again exactly like the main release (the trailer button still uses the YouTube app)
+- Stremio settings opening with a blank title when the addon names itself blank: falls back to "Stremio addon" like the main release
+
 ## 0.11.53 (continuous build only)
 
 ### Fixed
@@ -8,6 +14,8 @@
 - Telegram videos silently not playing: opening the player can no longer fail without a word — a failure now says so out loud and is logged (a warmup throw that used to crash the tap is also contained)
 - Source sheet looking like it appears all at once: while the sweep still runs, the list carries a live "Found N — still searching…" header over the rows arriving one by one
 - WebView "Blocked popup" dead-ends: a popup your tap opened now asks what to do — Allow once, Always allow that site, or Cancel — instead of just dropping it with a toast
+- Browser taps falsely reporting "Couldn't open the link": the pre-flight probe lied on modern Android (package visibility hides every browser without a `<queries>` entry, while the real launch works) — removed, the launch itself is the only test, and the release's own code says the same
+- AniList sign-in showing no address to copy: the in-app login screen now carries the page address with its own copy button, exactly like Simkl's confirmation row, and the developer page falls back to the in-app view when no browser opens
 
 ## 0.11.52 (continuous build only)
 

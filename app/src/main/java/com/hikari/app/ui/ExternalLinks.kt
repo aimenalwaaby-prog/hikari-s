@@ -112,23 +112,20 @@ fun openCommunity(context: Context, url: String): Boolean = openUrl(context, url
  * Hikari's WebView would also mean the app's own redirect/cookie rules applying
  * to somebody else's sign-in flow.
  *
- * Never silent: false means "nothing was opened" (no handler on the device,
- * or the launch threw) and every caller must fall back or say so — a tap
- * that dies inside here is the whole class of "dead link" reports.
+ * Never silent: false means "nothing was opened" (the launch threw) and every
+ * caller must fall back or say so — a tap that dies inside here is the whole
+ * class of "dead link" reports.
+ *
+ * Deliberately NO resolveActivity probe before firing: on API 30+ package
+ * visibility reports "not installed" for a perfectly good browser unless it
+ * is declared in `<queries>` (see openYouTubeVideo's note), while starting
+ * the intent works regardless. A probe here turned every browser tap into a
+ * false "Couldn't open the link" — exactly the regression it claimed to
+ * prevent. The runCatching around the real launch is the only honest test.
  */
 fun openUrl(context: Context, url: String): Boolean {
     if (url.isBlank()) return false
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-    // Honest up front: if nothing on the device handles the link, say so
-    // instead of firing an intent the system drops on the floor.
-    val resolves = runCatching {
-        intent.resolveActivity(context.packageManager) != null
-    }.getOrDefault(true)
-    if (!resolves) {
-        Toast.makeText(context, I18n.t("Couldn't open the link"), Toast.LENGTH_SHORT).show()
-        return false
-    }
-    if (launch(context, intent)) return true
+    if (launch(context, Intent(Intent.ACTION_VIEW, Uri.parse(url)))) return true
     Toast.makeText(context, I18n.t("Couldn't open the link"), Toast.LENGTH_SHORT).show()
     return false
 }

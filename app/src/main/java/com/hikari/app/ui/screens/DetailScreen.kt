@@ -5678,19 +5678,28 @@ fun DetailScreen(
                                     when {
                                         s.ytId != null -> {
                                             showSheet = false
-                                            // A YouTube page belongs in the
-                                            // YouTube app or the user's browser
-                                            // (see openYouTubeVideo): the
-                                            // WebView's redirect protection
-                                            // turns it into a black screen.
-                                            openYouTubeVideo(context, s.ytId.orEmpty(), m?.title ?: title)
+                                            // Main-release route: a YouTube link row opens in
+                                            // Hikari's own WebView (the trailer BUTTON above
+                                            // still uses openYouTubeVideo for the YouTube app —
+                                            // this row is somebody else's watch page).
+                                            context.startActivity(
+                                                Intent(context, WebViewActivity::class.java).apply {
+                                                    putExtra("url", "https://www.youtube.com/watch?v=${s.ytId}")
+                                                    putExtra("title", (m?.title ?: title) + " — YouTube")
+                                                }
+                                            )
                                         }
                                         s.externalUrl -> {
                                             showSheet = false
-                                            // Somebody else's page: the user's
-                                            // own browser, never Hikari's
-                                            // WebView.
-                                            openUrl(context, s.url)
+                                            // Main-release route: an external watch page opens
+                                            // in Hikari's own WebView (that is what the
+                                            // "Opens in web view" line promises).
+                                            context.startActivity(
+                                                Intent(context, WebViewActivity::class.java).apply {
+                                                    putExtra("url", s.url)
+                                                    putExtra("title", m?.title ?: title)
+                                                }
+                                            )
                                         }
                                         else -> {
                                             showSheet = false
