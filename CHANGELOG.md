@@ -1,3 +1,12 @@
+## 0.11.47 (continuous build only)
+
+### Fixed
+- Stremio addon gear opening nothing useful: it now opens the addon's own settings page in the user's browser and nothing else — finishing on the page's Install button hands the configured copy back to Hikari, which installs it over the row (including links that come back as stremio://, which the Add dialog used to reject)
+- Tracker sync missing titles that are on the tracker (manga/manhwa/manhua, movies, series, anime, donghua): seasons are read from the title itself when the record carries none ("Season 5", including Chinese numerals), Chinese entries date themselves from their start date now that the year field is probed empty, searches also try the alias spellings (pinyin/English) that find entries the plain title misses, exact title hits win ties, and same-show season chains plus release-order picks rescue full ties — with guards, so a tie that cannot be proven (overlapping side stories, an episode number no season total fits) still reports honestly instead of syncing the wrong entry. Note: Simkl rejecting every call with 401 is its login key being refused server-side — logging into Simkl again is the fix, there is no code change for it
+- Tapping the picture-in-picture window to go fullscreen closing the player instead: it returns to fullscreen playing now, and only a real dismiss stops playback
+- Blank video with audio (some IPTV channels and extension videos play sound over a black screen): an audio-only stream is watched while its sound progresses (up to ~60s) and then left playing with an honest log line instead of a stuck title card, and a video track that exists but never draws a frame — even with video effects disarmed — gets one software-decode rebuild per server before the player gives up (explicit decoder picks are never overridden)
+- Novel reader highlighter, re-added and finer than before: Mark mode highlights a word, a line or a whole paragraph in 12 colors — tap again in the same color to remove, tap in another to recolor — saved per novel+chapter and restored on reopen
+
 ## 0.11.46 (continuous build only)
 
 ### Fixed

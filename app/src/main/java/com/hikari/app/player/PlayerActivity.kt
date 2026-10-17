@@ -60,6 +60,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.Effect
@@ -346,6 +347,20 @@ class PlayerActivity : ComponentActivity() {
     /** The URL [hwOnlyDecode] was armed for — one escape attempt per server. */
     private var hwOnlyAttemptUrl: String? = null
 
+    /** True while the current source is being played with software video
+     *  decode PREFERRED (see [rebuildPlayerSwPrefer]). The last resort for
+     *  the blank-video-with-audio class: a source that plays audio but never
+     *  renders a frame even with the effects pipeline disarmed is usually a
+     *  hardware codec silently refusing the stream, and software decode —
+     *  slower but far more forgiving — draws it. Transient and URL-keyed
+     *  like [hwOnlyDecode]: one attempt per server, cleared the moment a
+     *  frame renders or the user picks a decoder explicitly.
+     */
+    private var swPreferDecode = false
+
+    /** The URL [swPreferDecode] was armed for — one attempt per server. */
+    private var swPreferAttemptUrl: String? = null
+
     /**
      * The user's decoder choice ("auto" = Best, "hw" = hardware only, "sw" =
      * software first — see AppStore.DecoderModes). Best by default; Settings
@@ -460,6 +475,75 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
+     * Last resort for the blank-video-with-audio class (some IPTV channels
+     * and extension videos play sound over a black screen): the source
+     * reaches READY, the video track exists, but no frame ever renders even
+     * after the effects pipeline is disarmed. That shape is a hardware codec
+     * silently refusing the stream — and software decode, slower but far
+     * more forgiving about odd profiles, usually draws it. So the player is
+     * rebuilt ONCE per server URL with software video decode preferred, at
+     * the same position, with no cover flash (same shape as
+     * [rebuildPlayerHwOnly]).
+     *
+     * Only fires on Best/auto: an explicit hardware/software pick is the
+     * user's own and is never overridden behind their back. Callers are the
+     * two dead ends with nothing left to try — the live re-open budget
+     * running out (see [retryLiveStart]) and the on-demand walk running out
+     * (see [recoverNoPicture]). Returns true when the rebuild fired (the
+     * caller must return); false means this URL already had its attempt, so
+     * the caller should carry on to its honest error.
+     */
+    private fun maybePreferSoftwareDecode(index: Int): Boolean {
+        if (decoderMode != "auto" || swPreferDecode) return false
+        val src = sources.getOrNull(index) ?: return false
+        val url = src.url
+        if (url.isBlank() || url == swPreferAttemptUrl) return false
+        // Torrents resolve through their own engine — a direct rebuild would
+        // hand ExoPlayer a magnet it cannot play (same guard as
+        // [maybeEscapeSoftwareDecode]).
+        if (src.isTorrent && (src.infoHash != null || src.url.startsWith("magnet:", ignoreCase = true))) return false
+        if (player == null) return false
+        swPreferDecode = true
+        swPreferAttemptUrl = url
+        com.hikari.app.data.Logs.log(
+            "Player",
+            "audio but no picture from \"${src.name}\" " +
+                "(server ${index + 1}/${sources.size}) with effects disarmed — " +
+                "rebuilding with software-preferred decoding",
+        )
+        runCatching {
+            Toast.makeText(
+                this,
+                I18n.t("Trying software decoding…"),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        rebuildPlayerSwPrefer()
+        return true
+    }
+
+    /**
+     * The silent half of [maybePreferSoftwareDecode]: same shape as
+     * [rebuildPlayerHwOnly] (same source, position kept, no cover), but the
+     * rebuilt player PREFERS software video decoders (see `playDirectInner`).
+     */
+    private fun rebuildPlayerSwPrefer() {
+        val p = player ?: return
+        if (currentIndex !in sources.indices) return
+        val position = p.currentPosition
+        if (position > 2_000L) {
+            startPositionMs = position
+            seekPending = true
+        }
+        silentEffectsRebuild = true
+        try {
+            playDirectInner(currentIndex)
+        } finally {
+            silentEffectsRebuild = false
+        }
+    }
+
+    /**
      * One prompt per server when an EXPLICIT decoder choice stutters: "this
      * is lagging on <decoder> — shift to Best?" Shift writes Best and
      * rebuilds on it (re-arming the automatic escape for the new mode); No
@@ -498,6 +582,8 @@ class PlayerActivity : ComponentActivity() {
                     decoderMode = "auto"
                     hwOnlyDecode = false
                     hwOnlyAttemptUrl = null
+                    swPreferDecode = false
+                    swPreferAttemptUrl = null
                     lifecycleScope.launch {
                         runCatching {
                             (applicationContext as HikariApp).store.setPlayerDecoderMode("auto")
@@ -549,6 +635,10 @@ class PlayerActivity : ComponentActivity() {
             // a stale hardware-only escape armed earlier this session.
             hwOnlyDecode = false
         }
+        // An explicit pick owns the decoder from here on: a transient
+        // software-prefer escalation must not survive it either.
+        swPreferDecode = false
+        swPreferAttemptUrl = null
         decoderShiftPromptShown = false
         lifecycleScope.launch {
             runCatching {
@@ -970,6 +1060,18 @@ class PlayerActivity : ComponentActivity() {
      *  [playDirectInner]). Bounded, so an audio-only source is left alone. */
     private var noVideoPolls = 0
 
+    /** When the current source's no-video watch began (elapsedRealtime), so a
+     *  video track that never materialises is watched for ~60s of audible
+     *  progress and then left alone with an honest log line instead of being
+     *  watched forever (see the task in [playDirectInner]). Reset everywhere
+     *  [noVideoPolls] is reset. */
+    private var noVideoSince = 0L
+
+    /** Last observed playback position while watching for a missing video
+     *  track — advancing means the audio is audibly progressing, which is
+     *  what keeps the watch alive (see the task in [playDirectInner]). */
+    private var noVideoLastPosition = -1L
+
     /** How many servers have been skipped silently because nothing had played
      *  yet and the search was still delivering (see [promptSlowServer]). */
     private var silentSkips = 0
@@ -1020,15 +1122,31 @@ class PlayerActivity : ComponentActivity() {
     private var pipExitSilenceArmed = false
 
     /** Set when the PiP window closes without a return to fullscreen (the ✕):
-     *  [onResume] (an expand back to the player) clears it before [onStop]
-     *  ever sees it, so only a real dismiss reaches the stop path — which
-     *  then silences AND finishes, so video and audio both die with the
-     *  window. Covers both callback orders (exit-before-stop and
-     *  stop-before-exit differ by device): the exit branch posts a deferred
-     *  finish for the stop-first case, the stop branch finishes inline for
-     *  the exit-first case. Plain backgrounding never sets it, so background
-     *  audio stays a feature. */
+     *  an expand back to the player clears it (see [onResume]), so only a
+     *  real dismiss reaches the deferred finish — which then silences AND
+     *  finishes, so video and audio both die with the window. The deferred
+     *  check runs late AND verifies the activity never resumed, because the
+     *  tap-to-expand path crosses this same exit callback on every device:
+     *  an immediate finish here is exactly the "tapping the PiP window to go
+     *  fullscreen closed the player" report. Plain backgrounding never sets
+     *  it, so background audio stays a feature. */
     private var pipExitPending = false
+
+    /** The dismiss mark as seen by [onStop]: true when the stop landed with
+     *  the dismiss mark set. A later [onResume] means the stop was the middle
+     *  of a tap-to-expand (stop-first devices), so playback is restored
+     *  instead of finished; no resume means the ✕, and the deferred check
+     *  owns the finish. */
+    private var pipStoppedWithPending = false
+
+    /** Playback state captured when a PiP stop silences, so an expand puts
+     *  back exactly what was there (playing vs paused, and the volume —
+     *  including a muted primary under dual audio). */
+    private var pipSilenceWasPlaying = false
+    private var pipSilenceVolume = 1f
+
+    /** The deferred dismiss check, so it can be cancelled by an expand. */
+    private var pipDismissCheck: Runnable? = null
 
     /** "Server too slow" dialog: a 3s auto-switch countdown with Wait/Switch.
      *  Wait re-arms the watchdog for 30 more seconds, then re-prompts. */
@@ -3107,24 +3225,13 @@ class PlayerActivity : ComponentActivity() {
             pipExitSilenceArmed = true
             pipExitPending = false
         } else if (pipExitSilenceArmed) {
-            // The PiP window went away without a resume (the ✕ close path
-            // starts here on most devices; a tap-to-expand also passes
-            // through, but [onResume] clears the flags first). Mark the
-            // dismiss and post a deferred finish: on devices where onStop
-            // already ran (stop-first order) this runnable is the only thing
-            // that kills the player; on exit-first devices onStop finishes
-            // inline and this no-ops.
+            // The PiP window went away. That is EITHER the ✕ (finish the
+            // player) or a tap-to-expand (resume is on its way): both cross
+            // this callback, on every device, so nothing here may finish
+            // blindly. Mark the dismiss and let the deferred check decide —
+            // it only fires when no resume arrived.
             pipExitPending = true
-            window?.decorView?.post {
-                runCatching {
-                    if (pipExitPending && !isFinishing) {
-                        silencePlaybackForExit()
-                        finish()
-                    }
-                    pipExitPending = false
-                    pipExitSilenceArmed = false
-                }
-            }
+            schedulePipDismissCheck()
         }
         val pv = playerView ?: return
         if (isInPictureInPictureMode) {
@@ -3150,6 +3257,69 @@ class PlayerActivity : ComponentActivity() {
                 updateCodecOverlay()
                 startCodecTicker()
             }
+        }
+    }
+
+    /**
+     * The deferred PiP-dismiss check: the only place a vanished PiP window
+     * may finish the player. It runs late (an expand resumes first) AND
+     * verifies the activity never resumed — so a tap-to-expand can never
+     * trip it on any callback order, while a real ✕ (which never resumes)
+     * always does. Cancelled by [onResume].
+     */
+    private fun schedulePipDismissCheck() {
+        pipDismissCheck?.let { bufferingWatchdog.removeCallbacks(it) }
+        val check = Runnable {
+            pipDismissCheck = null
+            runCatching {
+                if ((pipExitPending || pipStoppedWithPending || pipExitSilenceArmed) &&
+                    !isFinishing &&
+                    !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+                ) {
+                    silencePlaybackForExit()
+                    finish()
+                }
+                pipExitPending = false
+                pipStoppedWithPending = false
+                pipExitSilenceArmed = false
+            }
+        }
+        pipDismissCheck = check
+        bufferingWatchdog.postDelayed(check, 750L)
+    }
+
+    /**
+     * The expand-safe silence for a PiP stop: pause + mute, state recorded,
+     * dual-audio pairing KEPT (unlike [silencePlaybackForExit], which is the
+     * real-exit teardown that releases it). [onResume] restores everything
+     * when the stop turns out to be a tap-to-expand; the ✕ never resumes,
+     * so it keeps the silence and the deferred check finishes.
+     */
+    private fun pipSilenceForPossibleExpand() {
+        val p = player
+        pipSilenceWasPlaying = p?.isPlaying == true
+        pipSilenceVolume = p?.volume ?: 1f
+        dualPlayer?.let { d ->
+            runCatching { d.playWhenReady = false }
+            runCatching { d.pause() }
+            runCatching { d.volume = 0f }
+        }
+        p?.let {
+            runCatching { it.volume = 0f }
+            runCatching { it.playWhenReady = false }
+            runCatching { it.pause() }
+        }
+    }
+
+    /** Puts back exactly what [pipSilenceForPossibleExpand] took: volume first
+     *  (so the first restored frame is never loud), then playing state. */
+    private fun pipRestoreAfterExpand() {
+        val p = player ?: return
+        runCatching { p.volume = pipSilenceVolume }
+        runCatching { dualPlayer?.volume = 1f }
+        if (pipSilenceWasPlaying) {
+            runCatching { p.playWhenReady = true }
+            runCatching { dualPlayer?.playWhenReady = true }
         }
     }
 
@@ -11857,6 +12027,8 @@ class PlayerActivity : ComponentActivity() {
         firstFrameTask = null
         renderedFirstFrame = false
         noVideoPolls = 0
+        noVideoSince = 0L
+        noVideoLastPosition = -1L
         // A new source restarts the drop tally (see [dropWatcher]).
         dropCount = 0
         // ...and earns its own shift-to-Best prompt booking (see
@@ -11869,6 +12041,10 @@ class PlayerActivity : ComponentActivity() {
         // the HW-only rebuild below actually builds HW-only.
         videoDecoderName = null
         if (src.url != hwOnlyAttemptUrl) hwOnlyDecode = false
+        // Same one-attempt-per-URL rule for the software-prefer escalation
+        // (see [maybePreferSoftwareDecode]): a different server earns its own
+        // attempt, the same URL never gets two.
+        if (src.url != swPreferAttemptUrl) swPreferDecode = false
         // [firstFrameRetried] is deliberately NOT reset here: a restart of the
         // SAME server is what it guards, and `playDirectInner` is what a restart
         // calls — resetting it here made the guard useless, so a server that
@@ -12008,7 +12184,7 @@ class PlayerActivity : ComponentActivity() {
                     .setExtensionRendererMode(
                         when {
                             decoderForbidsSoftware() -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
-                            decoderMode == "sw" -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                            decoderMode == "sw" || swPreferDecode -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
                             else -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
                         },
                     )
@@ -12185,12 +12361,35 @@ class PlayerActivity : ComponentActivity() {
                 if (!hasVideo) {
                     // Either an audio-only source (no video frames are coming,
                     // which is legitimate) or a READY player whose tracks have
-                    // not been reported yet. Re-check a bounded number of times
-                    // rather than concluding "no video" on the first look.
-                    if (noVideoPolls < 3) {
+                    // not been reported yet. Re-check a bounded number of
+                    // times rather than concluding "no video" on the first
+                    // look; after that, keep watching ONLY while the audio is
+                    // audibly progressing (the position keeps advancing) and
+                    // ONLY up to ~60s from the first look. A genuinely
+                    // audio-only stream (a podcast, music, an audio feed) is
+                    // then left playing with an honest log line instead of a
+                    // stuck title card, and a video track that never
+                    // materialises stops being watched instead of spinning
+                    // the watchdog forever.
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (noVideoSince == 0L) noVideoSince = now
+                    val pos = p.currentPosition
+                    val audioProgressing = pos != noVideoLastPosition
+                    noVideoLastPosition = pos
+                    if (noVideoPolls < 3 ||
+                        (audioProgressing && now - noVideoSince < 60_000L)
+                    ) {
                         noVideoPolls++
                         firstFrameTask = this
                         bufferingWatchdog.postDelayed(this, firstFramePollMs)
+                    } else {
+                        com.hikari.app.data.Logs.log(
+                            "Player",
+                            "audio-only source \"${sources.getOrNull(index)?.name ?: "?"}\" " +
+                                "(server ${index + 1}/${sources.size}): no video track " +
+                                "after ${noVideoPolls + 1} checks over " +
+                                "${(now - noVideoSince) / 1000}s — leaving it playing",
+                        )
                     }
                     return
                 }
@@ -12306,6 +12505,11 @@ class PlayerActivity : ComponentActivity() {
         }
         liveStartRetries++
         if (liveStartRetries > maxLiveStartRetries) {
+            // Last resort before the honest error: a live channel playing
+            // audio over a black screen gets one software-decode rebuild
+            // (see [maybePreferSoftwareDecode]) — a genuinely dead link just
+            // returns false and the error below stands.
+            if (maybePreferSoftwareDecode(currentIndex)) return
             com.hikari.app.data.Logs.log(
                 "Player",
                 "live stream \"${src.name}\" did not start after " +
@@ -12982,26 +13186,15 @@ class PlayerActivity : ComponentActivity() {
      */
     private fun recoverNoPicture(index: Int) {
         val src = sources.getOrNull(index)
-        // A LIVE stream is not a dud server to walk past. An IPTV channel is one
-        // link, so there is no "next server" and nothing for the search to find;
-        // a live feed that has not drawn a frame yet is re-opened instead (see
-        // [retryLiveStart]). Without this the failsafe blacklisted the channel's
-        // host, walked off the end of the one-item list and then waited three
-        // minutes for a replacement an IPTV playlist cannot produce.
-        if (isLiveSource(src)) {
-            com.hikari.app.data.Logs.log(
-                "Player",
-                "FAILSAFE: live stream \"${src?.name ?: "?"}\" drew no picture after " +
-                    "${firstFrameMs / 1000}s — re-opening instead of walking the list",
-            )
-            retryLiveStart(firstFrameMs)
-            return
-        }
         // A committed server with the effects pipeline armed that draws no
         // picture is a GPU-grade failure, not a dead mirror (the Shield TV
         // "no video displayed" class: every server black-screens the same
-        // way). Disarm once and replay the SAME server before blaming the host
-        // — walking the list would blacklist a healthy mirror per row.
+        // way). Disarm once and replay the SAME server before anything else —
+        // walking the list would blacklist a healthy mirror per row, and live
+        // channels have no list to walk at all (this used to run only for
+        // on-demand, so an IPTV channel whose picture died in the effects
+        // pipeline re-opened with the same armed pipeline until the retries
+        // ran out: audio playing, video blank, every time).
         if (videoSinkArmed && !firstFrameRetried) {
             firstFrameRetried = true
             videoSinkArmed = false
@@ -13015,6 +13208,21 @@ class PlayerActivity : ComponentActivity() {
             Toast.makeText(this, I18n.t("Turning off video effects…"), Toast.LENGTH_SHORT).show()
             noSubsRetry = false
             playSource(index)
+            return
+        }
+        // A LIVE stream is not a dud server to walk past. An IPTV channel is one
+        // link, so there is no "next server" and nothing for the search to find;
+        // a live feed that has not drawn a frame yet is re-opened instead (see
+        // [retryLiveStart]). Without this the failsafe blacklisted the channel's
+        // host, walked off the end of the one-item list and then waited three
+        // minutes for a replacement an IPTV playlist cannot produce.
+        if (isLiveSource(src)) {
+            com.hikari.app.data.Logs.log(
+                "Player",
+                "FAILSAFE: live stream \"${src?.name ?: "?"}\" drew no picture after " +
+                    "${firstFrameMs / 1000}s — re-opening instead of walking the list",
+            )
+            retryLiveStart(firstFrameMs)
             return
         }
         com.hikari.app.data.Logs.log(
@@ -13048,6 +13256,12 @@ class PlayerActivity : ComponentActivity() {
             playSource(index)
             return
         }
+        // Last resort before waiting on the search / the honest error: a
+        // server playing audio that never drew a frame gets one
+        // software-decode rebuild (see [maybePreferSoftwareDecode]) — a URL
+        // that already had its attempt just returns false and the flow below
+        // stands.
+        if (maybePreferSoftwareDecode(index)) return
         // Nothing else to hand ExoPlayer yet, and the search is still running:
         // wait for it instead of declaring the video dead (see
         // [awaitReplacementForStalledServer]).
@@ -14015,6 +14229,10 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onRenderedFirstFrame() {
             renderedFirstFrame = true
+            // A frame rendered: any software-prefer escalation armed for
+            // this URL is spent and must not leak onto the next server.
+            swPreferDecode = false
+            swPreferAttemptUrl = null
             // Real video is on screen — retract any "your connection looks slow"
             // verdict, measured or not.
             SlowNetTip.onFirstFrame()
@@ -15879,10 +16097,18 @@ class PlayerActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
-        // Back on the full screen (including a tap on the PiP window) — a
-        // later stop is a plain backgrounding, never a PiP dismiss.
+        // Back on the full screen — including a tap on the PiP window, on
+        // every callback order. The deferred dismiss check dies here (an
+        // expand must never finish), the dismiss marks clear, and a stop
+        // that silenced turns into a restore instead of a finish.
+        pipDismissCheck?.let { bufferingWatchdog.removeCallbacks(it) }
+        pipDismissCheck = null
         pipExitSilenceArmed = false
         pipExitPending = false
+        if (pipStoppedWithPending) {
+            pipStoppedWithPending = false
+            pipRestoreAfterExpand()
+        }
         hideSystemUi()
         // The remote's targets are set up once the whole window exists (see
         // [applyTvFocus]); a no-op on every device that is not a television.
@@ -15946,19 +16172,15 @@ class PlayerActivity : ComponentActivity() {
         // something is playing, so whatever it is holding is real watch time
         // that leaving the player must not throw away.
         flushWatchSeconds()
-        // A dismissed PiP window lands here with the dismiss guard still armed
-        // (no resume in between): silence the main and dual-audio players AND
-        // finish, so video and audio both die with the window (the "PiP ✕ cut
-        // the video but the sound kept coming until the app was swiped away"
-        // report: the activity was merely stopped, never destroyed, so the
-        // player lived on). The silence runs however the flags read — the exit
-        // callback may not have run yet on stop-first devices (inPip still
-        // true) — while finish needs the explicit dismiss mark, so a plain
-        // backgrounding (never armed) still keeps background audio working.
-        if (pipExitSilenceArmed || pipExitPending) silencePlaybackForExit()
-        if (pipExitPending && !isFinishing) finish()
-        pipExitPending = false
-        if (isFinishing || !inPip) pipExitSilenceArmed = false
+        // A PiP window going away lands here with the dismiss guard still
+        // armed — and so does a tap-to-expand on stop-first devices, so this
+        // branch silences but never finishes: the resume-aware deferred check
+        // owns the finish (see schedulePipDismissCheck). The silence is the
+        // expand-safe one (pause + mute, dual pairing kept), restored by
+        // onResume when the stop turns out to be an expand; the ✕ never
+        // resumes, so it keeps the silence and the check finishes it.
+        if (pipExitSilenceArmed || pipExitPending) pipSilenceForPossibleExpand()
+        pipStoppedWithPending = pipExitPending
         if (com.lagradost.cloudstream3.CommonActivity.activity === this) {
             com.lagradost.cloudstream3.CommonActivity.setActivityInstance(null)
         }

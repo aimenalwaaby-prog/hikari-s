@@ -177,6 +177,15 @@ data class TrackerMatch(
     val score: Double = 0.0,
     /** The year the service lists, when it has one. */
     val year: Int = 0,
+    /** The candidate-side name that scored best (a romaji/English/native title
+     *  or a synonym) — the tie-break fuel that tells an exact display-title
+     *  hit apart from an alias hit. */
+    val matchedVia: String = "",
+    /** The candidate's own English title ("" when the service gives none) —
+     *  an entry whose English title IS the watched title beats one that only
+     *  carries it as a synonym ("Hidden Marriage" vs "Full Marks Hidden
+     *  Marriage"). */
+    val english: String = "",
 )
 
 /**
@@ -338,6 +347,14 @@ private val TITLE_ALIASES = listOf(
     setOf("a will eternal", "yi nian yongheng"),
     setOf("apotheosis", "bai lian cheng shen"),
     setOf("shrouding the heavens", "zhe tian"),
+    // Probed against the live AniList catalogue 2026-10-17 (both directions):
+    // the English title searches zero rows, the pinyin/romaji finds id 97828.
+    setOf(
+        "bringing nation s husband home",
+        "bringing national husband home",
+        "guomin laogong dai huijia",
+        "guomin laogong dai huijia tou wen 55 ci",
+    ),
 )
 
 /** Every spelling of [title] worth searching and scoring: the title itself,
@@ -357,6 +374,74 @@ fun titleVariants(title: String): List<String> {
         }
     }
     return out.toList()
+}
+
+/**
+ * The season number out of a series title ("Battle Through The Heavens Season
+ * 5" → 5), for history entries written before the season was stored (or whose
+ * extension never numbers seasons). Only explicit markers count — a bare
+ * number in a title is a sequel index, not a season — and 0 means "not found",
+ * which keeps today's behaviour for everything without one.
+ */
+fun seasonFromTitle(title: String): Int {
+    val t = title.trim()
+    if (t.isEmpty()) return 0
+    val pats = listOf(
+        Regex("""(?i)\bseason\s*0?(\d{1,2})\b"""),
+        Regex("""(?i)\b(\d{1,2})(?:st|nd|rd|th)\s+season\b"""),
+        Regex("""(?i)\bpart\s*0?(\d)\b"""),
+        Regex("""(?i)\bcour\s*0?(\d)\b"""),
+        Regex("""(?i)\bs0?(\d{1,2})(?!\s*e\d)"""),
+        Regex("""第([一二三四五六七八九十\d]{1,3})季"""),
+    )
+    for (re in pats) {
+        val m = re.find(t) ?: continue
+        val g = m.groupValues[1]
+        val n = g.toIntOrNull() ?: cnNumeral(g)
+        if (n in 1..30) return n
+    }
+    return 0
+}
+
+/** Chinese-numeral season (第一季 → 1 … 第十季 → 10) for [seasonFromTitle]. */
+private fun cnNumeral(s: String): Int {
+    val v = mapOf('一' to 1, '二' to 2, '三' to 3, '四' to 4, '五' to 5, '六' to 6, '七' to 7, '八' to 8, '九' to 9)
+    if (s == "十") return 10
+    if (s.startsWith("十")) return 10 + (v[s.last()] ?: 0)
+    if (s.endsWith("十")) return (v[s.first()] ?: 0) * 10
+    return v[s.singleOrNull()] ?: 0
+}
+
+/**
+ * True when a tied candidate belongs on the main sequel line: specials, OVAs
+ * and OADs are side content that must not shift a release-order season pick
+ * (a "Specials" entry sitting between season 4 and season 5 makes season 5
+ * land on the wrong id). Films only count when a film is being watched.
+ */
+fun isMainlineEntry(title: String, movie: Boolean): Boolean {
+    val t = " $title ".lowercase()
+    if (Regex("""\bspecials?\b""").containsMatchIn(t)) return false
+    if (Regex("""\bova\b""").containsMatchIn(t)) return false
+    if (Regex("""\boad\b""").containsMatchIn(t)) return false
+    if (!movie && Regex("""\bmovie\b""").containsMatchIn(t)) return false
+    if (!movie && Regex("""\bfilm\b""").containsMatchIn(t)) return false
+    return true
+}
+
+/**
+ * 1 when the candidate's own display title IS the watched title (its romaji,
+ * English or native title, or the name it matched through, normalises equal)
+ * — the signal that separates the entry literally called "Hidden Marriage"
+ * from the one that merely carries it as a synonym. 0 otherwise, which keeps
+ * every non-exact tie exactly as tied as before.
+ */
+fun exactTitleHit(wanted: String, c: TrackerMatch): Int {
+    val w = normalizeTitle(wanted)
+    if (w.isBlank()) return 0
+    if (normalizeTitle(c.title) == w) return 1
+    if (c.english.isNotBlank() && normalizeTitle(c.english) == w) return 1
+    if (c.matchedVia.isNotBlank() && normalizeTitle(c.matchedVia) == w) return 1
+    return 0
 }
 
 /**
@@ -477,6 +562,8 @@ object TrackerStore {
                     put("total", m.total)
                     put("cat", m.category)
                     put("year", m.year)
+                    put("via", m.matchedVia)
+                    put("en", m.english)
                 }
             )
         }
@@ -501,6 +588,8 @@ object TrackerStore {
                     // A cached match was, by definition, confident enough to
                     // push with; it is not re-scored on the way out.
                     score = 1.0,
+                    matchedVia = o.optString("via"),
+                    english = o.optString("en"),
                 )
             }
             out

@@ -2,6 +2,7 @@ package com.hikari.app.ui.screens
 
 import android.os.SystemClock
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,9 +13,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -36,6 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +56,7 @@ import com.hikari.app.data.MediaType
 import com.hikari.app.manga.MangaChapter
 import com.hikari.app.manga.MangaProgress
 import com.hikari.app.manga.MangaStore
+import com.hikari.app.manga.NovelHighlight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -65,6 +74,9 @@ import kotlinx.coroutines.withContext
  * Chapter text arrives as [com.hikari.app.data.StreamSource.text] parts via
  * the provider's novel `getStreams` branch (blank urls, so the image reader
  * can never pick them up); they are joined here in order.
+ *
+ * The Mark button highlights words, lines or whole paragraphs in 12 colors —
+ * saved per novel+chapter and restored on reopen.
  */
 @Composable
 fun NovelReaderScreen(
@@ -95,6 +107,13 @@ fun NovelReaderScreen(
     // 0 = dark, 1 = sepia, 2 = light.
     var theme by remember { mutableIntStateOf(0) }
     var showChapters by remember { mutableStateOf(false) }
+    // Highlighter: mark mode + word/line/paragraph unit + the active color.
+    // Highlights persist per novel+chapter (see MangaStore) and are restored
+    // whenever the chapter loads.
+    var highlightMode by remember { mutableStateOf(false) }
+    var hlUnit by remember { mutableIntStateOf(0) }
+    var hlColor by remember { mutableIntStateOf(NovelHighlight.COLORS.first()) }
+    var highlights by remember { mutableStateOf<List<NovelHighlight>>(emptyList()) }
 
     val item = remember(providerId, mangaUrl, title, posterUrl) {
         MediaItem(
@@ -162,6 +181,8 @@ fun NovelReaderScreen(
             .filter { it.isNotBlank() }
         Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)} OK parts=${parts.size} paras=${paras.size} chars=${paras.sumOf { it.length }} in ${SystemClock.elapsedRealtime() - xt0}ms")
         paragraphs = paras
+        // Restore this chapter's highlights (persisted per novel+chapter).
+        highlights = MangaStore.highlightsFor(key).filter { it.chapterUrl == chapter }
         loading = false
         // Mark the chapter open (progress), then restore + follow the position.
         val chName = ch?.label ?: chapter
@@ -216,6 +237,37 @@ fun NovelReaderScreen(
             Logs.log("Novel", "chapter [$providerId] ${mangaUrl.take(60)} step ${if (next) "next" else "prev"} $chapterIndex->$to id=${it.url.take(60)}")
             chapter = it.url
         }
+    }
+
+    /** The word holding [offset] in [text] (start to exclusive end), or null
+     *  when the tap landed on whitespace/punctuation (nothing to mark). */
+    fun wordRange(text: String, offset: Int): Pair<Int, Int>? {
+        if (offset !in text.indices) return null
+        var s = offset
+        while (s > 0 && (text[s - 1].isLetterOrDigit() || text[s - 1] == '\'')) s--
+        var e = offset
+        while (e < text.length && (text[e].isLetterOrDigit() || text[e] == '\'')) e++
+        return if (e > s) s to e else null
+    }
+
+    /** Toggles the highlight for one range: tapping the same range in the
+     *  same color removes it, tapping it in another color recolors it. */
+    fun toggleHighlight(paraIndex: Int, start: Int, end: Int) {
+        val tag = "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)}"
+        val existing = highlights.firstOrNull {
+            it.paraIndex == paraIndex && it.start == start && it.end == end
+        }
+        if (existing != null && existing.color == hlColor) {
+            MangaStore.clearHighlightExact(key, chapter, paraIndex, start, end)
+            Logs.log("Novel", "$tag highlight clear para=$paraIndex start=$start end=$end")
+        } else {
+            MangaStore.setHighlight(
+                key,
+                NovelHighlight(key, chapter, paraIndex, hlColor, start, end),
+            )
+            Logs.log("Novel", "$tag highlight add para=$paraIndex start=$start end=$end color=$hlColor")
+        }
+        highlights = MangaStore.highlightsFor(key).filter { it.chapterUrl == chapter }
     }
 
     val bg = when (theme) {
@@ -275,6 +327,13 @@ fun NovelReaderScreen(
                 onClick = { fontSize = (fontSize + 2f).coerceAtMost(28f) },
                 enabled = fontSize < 28f,
             ) { Text("A+", color = fg) }
+            TextButton(onClick = { highlightMode = !highlightMode }) {
+                Text(
+                    text = "Mark",
+                    color = if (highlightMode) MaterialTheme.colorScheme.primary else fg,
+                    fontWeight = if (highlightMode) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
         }
         // Chapter navigation.
         Row(
@@ -305,6 +364,52 @@ fun NovelReaderScreen(
             }
         }
         Spacer(Modifier.height(2.dp))
+        // Highlighter controls: word/line/paragraph unit + the color palette.
+        // Visible only in mark mode; the text itself becomes tappable below.
+        if (highlightMode && !loading && error == null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                listOf("Word", "Line", "Para").forEachIndexed { i, label ->
+                    TextButton(onClick = { hlUnit = i }) {
+                        Text(
+                            text = label,
+                            color = if (hlUnit == i) MaterialTheme.colorScheme.primary else fg,
+                            fontWeight = if (hlUnit == i) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+                Text(
+                    text = "tap text to mark",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = dim,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+                NovelHighlight.COLORS.chunked(6).forEach { row ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        row.forEach { c ->
+                            Box(
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .size(30.dp)
+                                    .background(Color(c), CircleShape)
+                                    .border(
+                                        width = if (c == hlColor) 3.dp else 1.dp,
+                                        color = if (c == hlColor) MaterialTheme.colorScheme.primary else dim,
+                                        shape = CircleShape,
+                                    )
+                                    .clickable { hlColor = c },
+                            )
+                        }
+                    }
+                }
+            }
+        }
         when {
             loading -> {
                 Box(
@@ -343,14 +448,60 @@ fun NovelReaderScreen(
                             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
                         )
                     }
-                    items(paragraphs) { para ->
-                        Text(
-                            text = para,
-                            fontSize = fontSize.sp,
-                            lineHeight = (fontSize + 8f).sp,
-                            color = fg,
-                            modifier = Modifier.padding(bottom = 14.dp),
-                        )
+                    items(paragraphs.size) { idx ->
+                        val para = paragraphs[idx]
+                        if (!highlightMode) {
+                            Text(
+                                text = para,
+                                fontSize = fontSize.sp,
+                                lineHeight = (fontSize + 8f).sp,
+                                color = fg,
+                                modifier = Modifier.padding(bottom = 14.dp),
+                            )
+                        } else {
+                            // Mark mode: the paragraph's saved ranges render
+                            // as background spans, and a tap marks the word /
+                            // line / paragraph under the finger (tap again in
+                            // the same color to remove it).
+                            val paraHl = highlights.filter { it.paraIndex == idx }
+                            var layout by remember(para) { mutableStateOf<TextLayoutResult?>(null) }
+                            val annotated = remember(para, paraHl) {
+                                buildAnnotatedString {
+                                    append(para)
+                                    paraHl.forEach { h ->
+                                        val e = if (h.end < 0) para.length
+                                        else h.end.coerceAtMost(para.length)
+                                        val s = h.start.coerceIn(0, e)
+                                        if (e > s) {
+                                            addStyle(SpanStyle(background = Color(h.color)), s, e)
+                                        }
+                                    }
+                                }
+                            }
+                            ClickableText(
+                                text = annotated,
+                                style = TextStyle(
+                                    fontSize = fontSize.sp,
+                                    lineHeight = (fontSize + 8f).sp,
+                                    color = fg,
+                                ),
+                                onTextLayout = { layout = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 14.dp),
+                                onClick = { offset ->
+                                    val range = when (hlUnit) {
+                                        1 -> layout?.let { l ->
+                                            val line = l.getLineForOffset(offset)
+                                            l.getLineStart(line) to l.getLineEnd(line)
+                                        }
+                                        2 -> 0 to -1
+                                        else -> wordRange(para, offset)
+                                    } ?: return@ClickableText
+                                    toggleHighlight(idx, range.first, range.second)
+                                },
+                            )
+                        }
                     }
                     item { Spacer(Modifier.height(48.dp)) }
                 }

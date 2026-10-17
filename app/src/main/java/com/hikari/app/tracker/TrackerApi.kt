@@ -820,7 +820,7 @@ object TrackerApi {
      * top candidates with scores. [perQuery] is filled by the backend's loop;
      * pass the sorted output through here instead of returning it directly.
      */
-    private fun logSearch(
+    private suspend fun logSearch(
         label: String,
         media: TrackerMedia,
         title: String,
@@ -900,7 +900,7 @@ object TrackerApi {
      * ([titleVariants]) are scored, not searched, since each service already
      * answers a base title with all of its spellings.
      */
-    private fun searchQueries(title: String): List<String> {
+    private suspend fun searchQueries(title: String): List<String> {
         val t = title.trim()
         if (t.isEmpty()) return emptyList()
         val stripped = t
@@ -920,6 +920,18 @@ object TrackerApi {
         for (v in com.hikari.app.data.titleVariants(t)) {
             if (out.none { it.equals(v, true) }) out.add(v)
             if (out.size >= 5) break
+        }
+        // And the spellings AniList ITSELF knows (romaji/English/native +
+        // synonyms): a title whose English form searches zero rows is often
+        // listed under pinyin it never mentions ("Bringing the Nation's
+        // Husband Home" → "Guomin Laogong Dai Huijia", probed 2026-10-17).
+        // Bounded: the service loops stay small.
+        if (out.size < 7) {
+            for (a in runCatching { com.hikari.app.data.AnimeMetadataRepository.aliasesFor(t) }.getOrDefault(emptySet())) {
+                val form = a.trim()
+                if (form.isNotBlank() && out.none { it.equals(form, true) }) out.add(form)
+                if (out.size >= 7) break
+            }
         }
         return out
     }
@@ -945,6 +957,7 @@ object TrackerApi {
                   chapters
                   format
                   seasonYear
+                  startDate { year }
                   title { romaji english native }
                   synonyms
                 }
@@ -974,7 +987,13 @@ object TrackerApi {
                     titles?.optString("native"),
                 ).filter { it.isNotBlank() } + (0 until (m.optJSONArray("synonyms")?.length() ?: 0))
                     .mapNotNull { m.optJSONArray("synonyms")?.optString(it)?.takeIf { s -> s.isNotBlank() } }
-                val best = names.map { it to matchScoreAny(title, it, media.year, m.optInt("seasonYear", 0)) }
+                // seasonYear is null for whole catalogue stretches (every
+                // Chinese ONA probed 2026-10-17 carries null) while startDate
+                // still has the year — without it every tie-break that needs
+                // years ties, and season picks fall back to id order.
+                val seasonYear = m.optInt("seasonYear", 0).takeIf { it > 0 }
+                    ?: m.optJSONObject("startDate")?.optInt("year", 0) ?: 0
+                val best = names.map { it to matchScoreAny(title, it, media.year, seasonYear) }
                     .maxByOrNull { it.second }
                 if (best == null) continue
                 out.add(
@@ -984,13 +1003,77 @@ object TrackerApi {
                         total = if (media.manga) m.optInt("chapters", 0) else m.optInt("episodes", 0),
                         category = m.optString("format"),
                         score = best.second,
-                        year = m.optInt("seasonYear", 0),
+                        year = seasonYear,
+                        matchedVia = best.first,
+                        english = titles?.optString("english").orEmpty(),
                     )
                 )
             }
             perQuery += "\"$q\" http=${reply.code} +${out.size - before}"
         }
         return logSearch("AniList", media, title, perQuery, out)
+    }
+
+    /**
+     * The tracker's own sequel order for [ids]: PREQUEL/SEQUEL edges only, so
+     * side stories linked as SIDE_STORY never enter the line. Probed
+     * 2026-10-17: "Dou Po Cangqiong: Nian Fan" carries PREQUEL=137729 and
+     * SEQUEL=168163 — the graph is complete for franchise ordering.
+     *
+     * One round trip for the whole tied pool, walked locally from the unique
+     * root (the entry with no in-set prequel). Empty when the graph is
+     * disconnected or ambiguous — the caller falls back to year order, then
+     * to an honest no-match. Never throws: a failed lookup must not fail
+     * the sync.
+     */
+    suspend fun anilistSequelChain(ids: List<Int>): List<Int> {
+        val want = ids.distinct().take(50)
+        if (want.size < 2) return emptyList()
+        return try {
+            val query = """
+                query (${'$'}ids: [Int]) {
+                  Page(perPage: 50) {
+                    media(id_in: ${'$'}ids) {
+                      id
+                      relations { edges { relationType(version: 2) node { id } } }
+                    }
+                  }
+                }
+            """.trimIndent()
+            val reply = graphql(null, query, JSONObject().put("ids", JSONArray(want)))
+            val arr = reply.json()?.optJSONObject("data")?.optJSONObject("Page")
+                ?.optJSONArray("media") ?: return emptyList()
+            val pre = HashMap<Int, Int>()
+            val seq = HashMap<Int, Int>()
+            val inSet = want.toSet()
+            for (i in 0 until arr.length()) {
+                val m = arr.optJSONObject(i) ?: continue
+                val id = m.optInt("id", 0)
+                if (id <= 0) continue
+                val edges = m.optJSONObject("relations")?.optJSONArray("edges") ?: continue
+                for (e in 0 until edges.length()) {
+                    val edge = edges.optJSONObject(e) ?: continue
+                    val nid = edge.optJSONObject("node")?.optInt("id", 0) ?: 0
+                    if (nid <= 0 || nid !in inSet) continue
+                    when (edge.optString("relationType")) {
+                        "PREQUEL" -> pre[id] = nid
+                        "SEQUEL" -> seq.putIfAbsent(id, nid)
+                    }
+                }
+            }
+            val roots = inSet.filter { !pre.containsKey(it) }
+            if (roots.size != 1) return emptyList()
+            val chain = ArrayList<Int>()
+            val seen = HashSet<Int>()
+            var cur: Int? = roots.first()
+            while (cur != null && seen.add(cur)) {
+                chain.add(cur)
+                cur = seq[cur]
+            }
+            chain
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     private suspend fun anilistPush(token: String, match: TrackerMatch, media: TrackerMedia): Result<String> {
@@ -1071,6 +1154,8 @@ object TrackerApi {
                         category = node.optString("media_type"),
                         score = best?.second ?: 0.0,
                         year = year,
+                        matchedVia = best?.first.orEmpty(),
+                        english = alt?.optString("en").orEmpty(),
                     )
                 )
             }
@@ -1413,7 +1498,8 @@ object TrackerApi {
                     }
                     val bestScore = (listOf(name) + altNames)
                         .filter { it.isNotBlank() }
-                        .maxOfOrNull { matchScoreAny(title, it, media.year, year) } ?: 0.0
+                        .map { it to matchScoreAny(title, it, media.year, year) }
+                        .maxByOrNull { it.second }
                     out.add(
                         TrackerMatch(
                             id = id.toString(),
@@ -1422,8 +1508,9 @@ object TrackerApi {
                             // The path the result came from is what tells the push
                             // which Simkl collection to write into.
                             category = if (path == "anime") "anime" else o.optString("type", path),
-                            score = bestScore,
+                            score = bestScore?.second ?: 0.0,
                             year = year,
+                            matchedVia = bestScore?.first.orEmpty(),
                         )
                     )
                 }

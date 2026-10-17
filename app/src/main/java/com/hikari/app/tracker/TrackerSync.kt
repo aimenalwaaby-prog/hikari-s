@@ -162,13 +162,13 @@ object TrackerSync {
                     "id=${it.id} score=${"%.3f".format(it.score)} cat=${it.category} year=${it.year} total=${it.total} title=\"${it.title}\""
                 },
         )
-        val direct = bestMatch(media, candidates)
+        val direct = bestMatch(media, candidates, client.kind)
         if (direct != null) {
             Logs.log("Tracker", "${client.kind.label} decide [\"${media.title}\"] DIRECT id=${direct.id} title=\"${direct.title}\" score=${"%.3f".format(direct.score)}")
             runCatching { store.putTrackerMatch(TrackerStore.matchKey(client.kind, media.title), direct) }
             return direct
         }
-        val alias = aliasBestMatch(media, candidates)
+        val alias = aliasBestMatch(media, candidates, client.kind)
         if (alias != null) {
             Logs.log("Tracker", "${client.kind.label} decide [\"${media.title}\"] ALIAS id=${alias.id} title=\"${alias.title}\" score=${"%.3f".format(alias.score)}")
             runCatching { store.putTrackerMatch(TrackerStore.matchKey(client.kind, media.title), alias) }
@@ -192,6 +192,7 @@ object TrackerSync {
     private suspend fun aliasBestMatch(
         media: TrackerMedia,
         candidates: List<TrackerMatch>,
+        kind: com.hikari.app.data.TrackerKind,
     ): TrackerMatch? {
         if (candidates.isEmpty()) return null
         val aliases = runCatching {
@@ -200,7 +201,7 @@ object TrackerSync {
         if (aliases.isEmpty()) return null
         for (alias in aliases) {
             if (alias.equals(media.title, ignoreCase = true)) continue
-            bestMatch(media.copy(title = alias), candidates)?.let { return it }
+            bestMatch(media.copy(title = alias), candidates, kind)?.let { return it }
         }
         return null
     }
@@ -219,7 +220,11 @@ object TrackerSync {
      *    wrong episode on the user's list — so it is reported as unmatched
      *    instead.
      */
-    fun bestMatch(media: TrackerMedia, candidates: List<TrackerMatch>): TrackerMatch? {
+    suspend fun bestMatch(
+        media: TrackerMedia,
+        candidates: List<TrackerMatch>,
+        kind: com.hikari.app.data.TrackerKind,
+    ): TrackerMatch? {
         val usable = candidates.filter { it.id.isNotBlank() && it.score > 0.0 }
             .sortedByDescending { it.score }
         if (usable.isEmpty()) return null
@@ -242,32 +247,30 @@ object TrackerSync {
             // signal is still reported as unmatched.
             val ranked = pool.sortedWith(
                 compareByDescending<TrackerMatch> { it.score }
+                    .thenByDescending { com.hikari.app.data.exactTitleHit(media.title, it) }
                     .thenByDescending { com.hikari.app.data.matchScore(media.title, it.title, media.year, it.year) }
                     .thenByDescending { seasonMarkerScore(media, it) }
                     .thenByDescending { yearCloseness(media, it) }
                     .thenByDescending { coversEpisode(media, it) },
             )
             val winner = ranked.first()
-            // A known season picks by release order: the Nth-earliest entry
-            // of the same show is season N. Donghua sequel entries often
-            // carry no number at all ("Nian Fan" is season 5), so no marker
-            // can separate them — but they release in order, and the year
-            // the tracker lists says which is which.
+            // A known season picks its entry first off the tracker's own
+            // sequel line (AniList PREQUEL/SEQUEL edges), then by release
+            // order. Donghua sequel entries often carry no number at all
+            // ("Nian Fan" is season 5), so no marker can separate them — but
+            // the franchise graph (and then the release years) say which is
+            // which. Either way the pick must ALSO fit the watched episode
+            // or carry the season's marker: an interleaved side story at the
+            // wanted index is rejected back to an honest no-match instead of
+            // marking the wrong entry watched.
             if (media.season >= 2) {
-                val wantedBase = com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(media.title))
-                val sameShow = pool.filter {
-                    com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(it.title)) == wantedBase
-                }
-                if (media.season <= sameShow.size) {
-                    val ordered = sameShow.sortedWith(
-                        compareBy({ it.year.takeIf { y -> y > 0 } ?: Int.MAX_VALUE }, { it.id })
-                    )
-                    val pick = ordered.getOrNull(media.season - 1)
-                    if (pick != null && pick.score >= TRACKER_AUTO_THRESHOLD - 0.1) return pick
-                }
+                chainPick(media, pool, kind)?.let { return it }
+                orderPick(media, pool)?.let { return it }
             }
             val runnerUp = ranked.firstOrNull { it.id != winner.id }
             if (runnerUp != null && runnerUp.score >= winner.score - 0.02 &&
+                com.hikari.app.data.exactTitleHit(media.title, runnerUp) >=
+                com.hikari.app.data.exactTitleHit(media.title, winner) &&
                 com.hikari.app.data.matchScore(media.title, runnerUp.title, media.year, runnerUp.year) >=
                 com.hikari.app.data.matchScore(media.title, winner.title, media.year, winner.year) &&
                 seasonMarkerScore(media, runnerUp) >= seasonMarkerScore(media, winner) &&
@@ -277,6 +280,63 @@ object TrackerSync {
             return winner
         }
         return top
+    }
+
+    /**
+     * The wanted season straight off the service's franchise graph: the tied
+     * pool ordered root-first along PREQUEL/SEQUEL edges, mainline entries
+     * only. Null unless the pick is verifiable — in the pool, confident, AND
+     * fitting the watched episode or carrying the season's marker.
+     */
+    private suspend fun chainPick(
+        media: TrackerMedia,
+        pool: List<TrackerMatch>,
+        kind: com.hikari.app.data.TrackerKind,
+    ): TrackerMatch? {
+        if (kind != com.hikari.app.data.TrackerKind.ANILIST) return null
+        val ids = pool.mapNotNull { it.id.toIntOrNull() }.distinct()
+        if (ids.size < media.season) return null
+        val chain = TrackerApi.anilistSequelChain(ids)
+            .mapNotNull { id -> pool.firstOrNull { it.id == id.toString() } }
+            .filter { com.hikari.app.data.isMainlineEntry(it.title, media.movie) }
+        val pick = chain.getOrNull(media.season - 1) ?: return null
+        if (pick.score < TRACKER_AUTO_THRESHOLD - 0.1) return null
+        if (!coversEpisode(media, pick) && seasonMarkerScore(media, pick) == 0) return null
+        Logs.log(
+            "Tracker",
+            "decide [\"${media.title}\"] CHAIN season=${media.season} " +
+                "id=${pick.id} title=\"${pick.title}\"",
+        )
+        return pick
+    }
+
+    /**
+     * The wanted season by release order: the Nth-earliest same-show entry is
+     * season N. Same-show is alias-aware (plain sequel-base equality misses
+     * every pinyin-vs-English pair), specials stay out of the line, and a pick
+     * from unknown years is refused — without years the order is id order,
+     * which is meaningless.
+     */
+    private fun orderPick(media: TrackerMedia, pool: List<TrackerMatch>): TrackerMatch? {
+        val wantedBase = com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(media.title))
+        val sameShow = pool.filter { c ->
+            com.hikari.app.data.sequelBase(com.hikari.app.data.normalizeTitle(c.title)) == wantedBase ||
+                com.hikari.app.data.matchScoreAny(c.title, media.title, media.year, c.year) >= TRACKER_AUTO_THRESHOLD - 0.1
+        }.filter { com.hikari.app.data.isMainlineEntry(it.title, media.movie) }
+        if (media.season > sameShow.size) return null
+        val ordered = sameShow.sortedWith(
+            compareBy({ it.year.takeIf { y -> y > 0 } ?: Int.MAX_VALUE }, { it.id })
+        )
+        val pick = ordered.getOrNull(media.season - 1) ?: return null
+        if (pick.score < TRACKER_AUTO_THRESHOLD - 0.1) return null
+        if (pick.year <= 0) return null
+        if (!coversEpisode(media, pick) && seasonMarkerScore(media, pick) == 0) return null
+        Logs.log(
+            "Tracker",
+            "decide [\"${media.title}\"] ORDER season=${media.season} " +
+                "id=${pick.id} title=\"${pick.title}\" year=${pick.year}",
+        )
+        return pick
     }
 
     /** True when the candidate's episode total proves it is a DIFFERENT season:
@@ -334,7 +394,12 @@ object TrackerSync {
         year = year,
         movie = entry.type == MediaType.MOVIE,
         episode = if (entry.episodeNumber > 0) entry.episodeNumber else episodeFromName(entry.episodeName),
-        season = entry.seasonNumber,
+        // A stored season is exact and wins; otherwise read the marker out of
+        // the title ("…Season 5" → 5) so entries written before seasons were
+        // stored still disambiguate. Never invents one: 0 keeps every
+        // season-1 rule exactly as it was.
+        season = entry.seasonNumber.takeIf { it > 1 }
+            ?: com.hikari.app.data.seasonFromTitle(entry.title),
     )
 
     /**

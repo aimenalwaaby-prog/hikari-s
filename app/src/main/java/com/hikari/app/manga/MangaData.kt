@@ -41,13 +41,19 @@ data class MangaChapter(
     val label: String get() = name.ifBlank { if (number >= 0f) "Chapter $number" else "Chapter" }
 }
 
-/** One highlighted paragraph in the novel reader (see [MangaStore.highlightsFor]). */
+/** One highlighted range in the novel reader (see [MangaStore.highlightsFor]).
+ *  A word, a line or a whole paragraph: [start] is the char offset in the
+ *  paragraph and [end] the exclusive end offset — a whole paragraph is
+ *  start=0, end=-1 (older paragraph-only entries carry no start/end keys and
+ *  read back with these same defaults, so they keep working). */
 data class NovelHighlight(
     val mangaKey: String,
     val chapterUrl: String,
     val paraIndex: Int,
     /** ARGB color int. */
     val color: Int,
+    val start: Int = 0,
+    val end: Int = -1,
 ) {
     companion object {
         /** The palette the reader offers. */
@@ -58,6 +64,12 @@ data class NovelHighlight(
             0xFF2196F3.toInt(), // blue
             0xFFFF9800.toInt(), // orange
             0xFF9C27B6.toInt(), // purple
+            0xFF00BCD4.toInt(), // cyan
+            0xFFCDDC39.toInt(), // lime
+            0xFF009688.toInt(), // teal
+            0xFFFF5722.toInt(), // deep orange
+            0xFF3F51B5.toInt(), // indigo
+            0xFFF44336.toInt(), // red
         )
     }
 }
@@ -257,7 +269,7 @@ object MangaStore {
 
     // ---- Novel highlights ----
 
-    /** Paragraph highlights in the novel reader, per novel key. Kept in one
+    /** Range highlights in the novel reader, per novel key. Kept in one
      *  small JSON file per novel (same pattern as the chapter lists), so they
      *  survive restarts and are never mixed into the progress file. */
     @Volatile
@@ -272,7 +284,13 @@ object MangaStore {
     fun setHighlight(mangaKey: String, h: NovelHighlight) {
         val map = highlightsMap()
         val list = map.getOrPut(mangaKey) { mutableListOf() }
-        list.removeAll { it.chapterUrl == h.chapterUrl && it.paraIndex == h.paraIndex }
+        // Ranges are independent: setting one replaces only its exact range
+        // (same chapter + paragraph + start + end), never the paragraph's
+        // other ranges.
+        list.removeAll {
+            it.chapterUrl == h.chapterUrl && it.paraIndex == h.paraIndex &&
+                it.start == h.start && it.end == h.end
+        }
         list.add(h)
         highlightsCache = map
         saveHighlights(mangaKey, list)
@@ -283,6 +301,21 @@ object MangaStore {
         val map = highlightsMap()
         val list = map[mangaKey] ?: return
         if (list.removeAll { it.chapterUrl == chapterUrl && it.paraIndex == paraIndex }) {
+            highlightsCache = map
+            saveHighlights(mangaKey, list)
+            ping()
+        }
+    }
+
+    /** Removes one exact highlighted range (the reader's tap-toggle-off). */
+    fun clearHighlightExact(mangaKey: String, chapterUrl: String, paraIndex: Int, start: Int, end: Int) {
+        val map = highlightsMap()
+        val list = map[mangaKey] ?: return
+        if (list.removeAll {
+                it.chapterUrl == chapterUrl && it.paraIndex == paraIndex &&
+                    it.start == start && it.end == end
+            }
+        ) {
             highlightsCache = map
             saveHighlights(mangaKey, list)
             ping()
@@ -306,6 +339,11 @@ object MangaStore {
                                 chapterUrl = o.optString("chapterUrl"),
                                 paraIndex = o.optInt("paraIndex", -1),
                                 color = o.optInt("color", 0xFFFFFF00.toInt()),
+                                // Additive: entries written before ranges
+                                // existed carry no keys and read back as whole
+                                // paragraphs (start=0, end=-1).
+                                start = o.optInt("start", 0),
+                                end = o.optInt("end", -1),
                             )
                             if (h.mangaKey.isNotBlank() && h.paraIndex >= 0) {
                                 map.getOrPut(h.mangaKey) { mutableListOf() }.add(h)
@@ -328,6 +366,8 @@ object MangaStore {
                         put("chapterUrl", it.chapterUrl)
                         put("paraIndex", it.paraIndex)
                         put("color", it.color)
+                        put("start", it.start)
+                        put("end", it.end)
                     }
                 )
             }

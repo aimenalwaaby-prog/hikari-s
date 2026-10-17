@@ -2226,12 +2226,23 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun addRepoLink(rawUrl: String): Result<RepoLinkResult> = withContext(Dispatchers.IO) {
         runCatching {
-            val trimmed = rawUrl.trim()
+            // A Stremio install link comes back as stremio:// (that is what
+            // an addon config page's Install button fires): normalise it to
+            // the https manifest URL first, and the sniff below installs it
+            // as a Stremio addon exactly like a pasted link — same fetch,
+            // same id, same one-row-per-addon rule, so a configured copy
+            // replaces its row. (Same normalisation as
+            // WebViewActivity.addonInstallUrl.)
+            var trimmed = rawUrl.trim()
             if (trimmed.startsWith("stremio://", ignoreCase = true)) {
-                throw Exception(
-                    "That is a Stremio app link — open it in Stremio, or paste " +
-                        "the addon's manifest.json address instead"
-                )
+                var rest = trimmed.substring("stremio://".length)
+                rest = runCatching { java.net.URLDecoder.decode(rest, "UTF-8") }.getOrDefault(rest)
+                if (!rest.startsWith("http://") && !rest.startsWith("https://")) rest = "https://" + rest
+                rest = rest.substringBefore('?')
+                if (!rest.trimEnd('/').endsWith("/manifest.json", ignoreCase = true)) {
+                    rest = rest.trimEnd('/') + "/manifest.json"
+                }
+                trimmed = rest
             }
             if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
                 throw Exception("That link is not a repo file — it must start with http(s)://")
@@ -3694,8 +3705,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
      *    (`behaviorHints.configurationURL` / `configurable`) — OpenSubtitles v3,
      *    AIOMetadata, the debrid addons. That page IS its settings screen (it is
      *    the same page the Stremio app opens), and it opens in the user's own
-     *    browser: the configured install link is pasted into the Add dialog,
-     *    which replaces this row;
+     *    browser — nothing else. Configuring ends on the addon's Install
+     *    button, whose stremio:// link comes back to Hikari and replaces
+     *    this row with the configured copy;
      *  * a CloudStream plugin (.cs3): the plugin's OWN settings screen, through
      *    the provider contract ([openProviderSettingsSafely]);
      *  * a nuvio scraper, a Vega provider, an Aniyomi/Manga extension: the
@@ -3724,21 +3736,14 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         addonInfoProvider = p
                         return@launch
                     }
-                    // The config page opens in the user's own browser, never
-                    // in Hikari's WebView: it is the addon's own site, and the
-                    // WebView's redirect/cookie/popup rules turn those pages
-                    // into dead ends. The page ends on the configured install
-                    // link, which the user pastes into the Add dialog opened
-                    // below — installed exactly as a pasted addon URL would be
-                    // (same fetch, same id, same one-row-per-addon rule),
-                    // which also replaces this row with the configured copy.
+                    // The config page IS the settings screen (the same page
+                    // the Stremio app opens), and it opens in the user's own
+                    // browser — nothing else: no dialog, nothing to paste.
+                    // Configuring ends on the addon's Install button, whose
+                    // stremio:// link Android hands straight back to Hikari,
+                    // which installs the configured copy over this row (see
+                    // addRepoLink + RepoLinkActivity).
                     openUrl(context, page)
-                    showStremio = true
-                    Toast.makeText(
-                        context,
-                        I18n.t("Configure the addon in your browser, then paste its install link here"),
-                        Toast.LENGTH_LONG,
-                    ).show()
                 }
             }
             ProviderType.NUVIO -> schemaProvider = p

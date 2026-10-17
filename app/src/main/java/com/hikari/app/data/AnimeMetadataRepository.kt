@@ -108,7 +108,16 @@ object AnimeMetadataRepository {
     private const val FULL_TTL_MS = 24 * 60 * 60 * 1000L
 
         suspend fun animeFull(title: String): AnimeFull? {
-        return null
+        val key = title.trim().lowercase()
+        if (key.isBlank()) return null
+        fullCache[key]?.let { if (System.currentTimeMillis() - it.at < FULL_TTL_MS) return it.full }
+        // The fetcher below existed but was never called (this answered null),
+        // so every alias consumer silently had nothing. One cached AniList
+        // search per title per day — the tracker sync's alias queries and
+        // second-chance matching run on it.
+        val f = withContext(Dispatchers.IO) { fetchAnimeFull(title) } ?: return null
+        fullCache[key] = FullEntry(System.currentTimeMillis(), f)
+        return f
     }
 
     /** Every spelling AniList knows for [title]: exact-match fuel for tracker sync. */
