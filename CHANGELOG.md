@@ -1,3 +1,9 @@
+## 0.11.50 (continuous build only)
+
+### Fixed
+- Tracker sign-in still opening the "register your own app" screen on phones that had typed an id before the app shipped its own: the shipped id now always wins on first open (a typed id only sticks when explicitly chosen via Continue, and step 1 says so with a one-tap way back to the built-in) — plus the deeper half of the same bug, the shipped id never reaching the sync layer, so a sign-in through it left nothing syncing after a restart: the store now merges the shipped ids in for every reader and every sign-in persists the client it used
+- Shikimori still waiting on its id + secret pair (manual step kept); Kitsu needs nothing
+
 ## 0.11.49 (continuous build only)
 
 ### Fixed

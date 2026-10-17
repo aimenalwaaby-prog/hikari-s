@@ -118,6 +118,10 @@ fun TrackerLoginDialog(
     var handled by remember { mutableStateOf(false) }
     /** Whether the credential fields are behind us (the sign-in step is showing). */
     var credentialsDone by remember { mutableStateOf(false) }
+    /** Whether the app ships its own registration for this service. */
+    val hasBuiltIn = remember(kind) {
+        com.hikari.app.data.TrackerBuiltIn.clientFor(kind) != null
+    }
 
     // Strings used from NON-composable places (callbacks, coroutines): `tr` is
     // itself composable and cannot be called from there, so those go through
@@ -137,6 +141,11 @@ fun TrackerLoginDialog(
     fun finish(account: TrackerAccount) {
         scope.launch {
             runCatching { app.store.setTrackerAccount(account) }
+            // The client that signed this in goes to the store too: the sync
+            // layer reads the STORE (never this dialog), so a sign-in through
+            // the shipped registration would otherwise leave it with no app
+            // id after a restart — signed in, but nothing syncing.
+            runCatching { app.store.setTrackerClient(client) }
             // The sign-in is over, so nothing is waiting for a redirect any
             // more (see TrackerApi.Pending).
             runCatching { app.store.setTrackerPending(null) }
@@ -158,7 +167,18 @@ fun TrackerLoginDialog(
         val made = TrackerClient(kind, id, secretField.trim())
         client = made
         credentialsDone = true
-        scope.launch { runCatching { app.store.setTrackerClient(made) } }
+        scope.launch {
+            runCatching { app.store.setTrackerClient(made) }
+            // An explicitly typed id sticks per device (it shadows the
+            // shipped one until reset); re-typing the shipped id re-adopts it.
+            val builtIn = com.hikari.app.data.TrackerBuiltIn.clientFor(kind)
+            runCatching {
+                app.store.setTrackerClientOverride(
+                    kind,
+                    builtIn != null && (id != builtIn.id || secretField.trim() != builtIn.secret),
+                )
+            }
+        }
     }
 
     /** Starts whatever sign-in this service uses. */
@@ -311,15 +331,18 @@ fun TrackerLoginDialog(
 
     // The app credentials the user pasted last time decide which step opens:
     // the credential fields, or the sign-in itself. The app's OWN
-    // registration ([TrackerBuiltIn]) wins when nothing was ever typed: the
-    // sign-in step opens straight away, so the flow is tap → Sign in →
-    // browser login page → approve → back in the app, with no developer
+    // registration ([TrackerBuiltIn]) wins over anything typed in the past —
+    // a stale id from before the app shipped its own must never shadow it —
+    // and the sign-in step opens straight away, so the flow is tap → Sign in
+    // → browser login page → approve → back in the app, with no developer
     // pages and no paste. "Use a different app id" below still reaches the
-    // manual fields.
+    // manual fields, and Continue there sticks per device until reset.
     LaunchedEffect(kind) {
         val stored = runCatching { app.store.trackerClient(kind) }.getOrDefault(TrackerClient(kind))
-        val effective = if (stored.ready) stored
-        else com.hikari.app.data.TrackerBuiltIn.clientFor(kind) ?: stored
+        val builtIn = com.hikari.app.data.TrackerBuiltIn.clientFor(kind)
+        val override = runCatching { app.store.trackerClientOverride(kind) }.getOrDefault(false)
+        val effective = if (override && stored.ready) stored
+        else builtIn ?: stored
         client = effective
         idField = effective.id
         secretField = effective.secret
@@ -409,8 +432,15 @@ fun TrackerLoginDialog(
                     Spacer(Modifier.height(12.dp))
                     Text(
                         tr(
-                            "${kind.label} needs an app registered by you before it will let " +
-                                "anyone log in. It is free and takes a minute:"
+                            if (hasBuiltIn) {
+                                "${kind.label} is ready to sign in with Hikari's own app id — " +
+                                    "you are only seeing these fields because this device was set " +
+                                    "to a different one. Either go back to the built-in below, or " +
+                                    "paste another app id:"
+                            } else {
+                                "${kind.label} needs an app registered by you before it will let " +
+                                    "anyone log in. It is free and takes a minute:"
+                            }
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
@@ -436,6 +466,22 @@ fun TrackerLoginDialog(
                             Spacer(Modifier.width(6.dp))
                             Text(tr("Copy redirect URI"))
                         }
+                    }
+                    if (hasBuiltIn) {
+                        // The way back out of an override: forget the typed id
+                        // and sign in with the shipped one.
+                        TextButton(onClick = {
+                            scope.launch {
+                                runCatching { app.store.setTrackerClientOverride(kind, false) }
+                                com.hikari.app.data.TrackerBuiltIn.clientFor(kind)?.let {
+                                    client = it
+                                    idField = it.id
+                                    secretField = it.secret
+                                }
+                                error = null
+                                credentialsDone = true
+                            }
+                        }) { Text(tr("Use Hikari's built-in id instead")) }
                     }
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(

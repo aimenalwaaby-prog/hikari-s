@@ -338,6 +338,9 @@ class AppStore(private val ctx: Context) {
         val TRACKERS = stringPreferencesKey("trackers")
         /** The app id/secret the user registered with each service (JSON). */
         val TRACKER_CLIENTS = stringPreferencesKey("trackerClients")
+        /** Services whose stored app id was typed by the user and must keep
+         *  shadowing the shipped one (comma-joined [TrackerKind] keys). */
+        val TRACKER_CLIENT_OVERRIDES = stringPreferencesKey("trackerClientOverrides")
         /** The sign-in waiting for its redirect — see [trackerPending]. */
         val TRACKER_PENDING = stringPreferencesKey("trackerPending")
         /** Whether a finished episode is reported to the trackers at all. */
@@ -2820,7 +2823,19 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
         store.data.map { TrackerStore.parseClients(it[K.TRACKER_CLIENTS]) }
             .distinctUntilChanged().flowOn(Dispatchers.Default)
 
-    suspend fun trackerClients(): List<TrackerClient> = trackerClientsFlow().first()
+    /**
+     * Every usable app id: what was stored, plus the app's OWN shipped
+     * registrations for services with nothing stored ([TrackerBuiltIn]) — so
+     * every reader (sync, search, detail) gets a working id without knowing
+     * where it came from. A stored id always wins over the shipped one.
+     */
+    suspend fun trackerClients(): List<TrackerClient> {
+        val stored = trackerClientsFlow().first()
+        val missing = TrackerKind.entries
+            .filter { k -> stored.none { it.kind == k } }
+            .mapNotNull { TrackerBuiltIn.clientFor(it) }
+        return stored + missing
+    }
 
     suspend fun trackerClient(kind: TrackerKind): TrackerClient =
         trackerClients().firstOrNull { it.kind == kind } ?: TrackerClient(kind)
@@ -2830,6 +2845,26 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
             val next = TrackerStore.parseClients(prefs[K.TRACKER_CLIENTS])
                 .filterNot { it.kind == client.kind } + client
             prefs[K.TRACKER_CLIENTS] = TrackerStore.encodeClients(next)
+        }
+    }
+
+    /**
+     * Whether [kind]'s stored app id was explicitly typed by the user
+     * ("Use a different app id" → Continue) and must keep shadowing the
+     * shipped registration — see the login dialog.
+     */
+    suspend fun trackerClientOverride(kind: TrackerKind): Boolean =
+        store.data.first()[K.TRACKER_CLIENT_OVERRIDES]
+            ?.split(",").orEmpty().any { it.trim() == kind.key } == true
+
+    suspend fun setTrackerClientOverride(kind: TrackerKind, override: Boolean) {
+        write("TRACKER_CLIENT_OVERRIDES") { prefs ->
+            val next = prefs[K.TRACKER_CLIENT_OVERRIDES]
+                ?.split(",").orEmpty().map { it.trim() }
+                .filter { it.isNotBlank() && it != kind.key }
+                .toMutableList()
+            if (override) next.add(kind.key)
+            prefs[K.TRACKER_CLIENT_OVERRIDES] = next.joinToString(",")
         }
     }
 
