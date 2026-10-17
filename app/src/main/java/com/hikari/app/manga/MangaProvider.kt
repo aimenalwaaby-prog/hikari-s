@@ -24,7 +24,6 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -55,9 +54,6 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     companion object {
         const val CATALOG_POPULAR = "popular"
         const val CATALOG_LATEST = "latest"
-        /** One novel page/call may take this long before it counts as dead —
-         *  see the novel branch of [getStreams]. */
-        const val NOVEL_CALL_MS = 30_000L
         val lastOutcome = ConcurrentHashMap<String, String>()
         // Same universal preview-set guard as the Anymex engine (see there):
         // a page set repeating verbatim for another chapter is previews.
@@ -661,11 +657,7 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
      * scrambled.
      */
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
-        // A chapter tap is INTERACTIVE work — the reader's spinner is on
-        // screen waiting for it — so it must never queue behind background
-        // stream prefetches on the same extension. Video lookups stay on the
-        // background lane; only the novel branch is user-waiting.
-        gate(if (isNovel) ProviderGate.Lane.INTERACTIVE else ProviderGate.Lane.BACKGROUND) {
+        gate(ProviderGate.Lane.BACKGROUND) {
         // A novel chapter is TEXT, not pages: each part travels as a
         // StreamSource with its text set and a blank url (the image reader
         // skips blank urls, so these can never leak into it). The novel
@@ -677,24 +669,13 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             Logs.log("Manga", "${config.name} novel chapter start id=${chapter.id.take(80)}")
             return@gate try {
                 val sch = ch(chapter.id).apply { name = chapter.name.orEmpty() }
-                // Bounded: a dead page (or a host that never answers) must
-                // fail the chapter, never hang the reader's spinner forever.
-                // 30s per call, 150s for the whole chapter — a real book
-                // chapter that needs longer is vanishingly rare, and the
-                // reader's Try-again re-runs the whole thing anyway.
                 val pt0 = SystemClock.elapsedRealtime()
-                val pageListRaw = withTimeoutOrNull(NOVEL_CALL_MS) {
-                    runCatching { nsrc.getPageList(sch) }.getOrNull()
-                }
-                val pages = pageListRaw.orEmpty()
-                Logs.log("Manga", "${config.name} novel pageList id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - pt0}ms pages=${pages.size} timeout=${pageListRaw == null}")
+                val pages = runCatching { nsrc.getPageList(sch) }.getOrNull().orEmpty()
+                Logs.log("Manga", "${config.name} novel pageList id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - pt0}ms pages=${pages.size}")
                 val parts = pages.mapIndexedNotNull { i, pg ->
                     val ft0 = SystemClock.elapsedRealtime()
-                    val raw = withTimeoutOrNull(NOVEL_CALL_MS) {
-                        runCatching { nsrc.fetchPageText(pg) }.getOrNull()
-                    }
-                    val text = raw?.trim().orEmpty()
-                    Logs.log("Manga", "${config.name} novel page ${i + 1}/${pages.size} id=${chapter.id.take(40)} in ${SystemClock.elapsedRealtime() - ft0}ms chars=${text.length} timeout=${raw == null}")
+                    val text = runCatching { nsrc.fetchPageText(pg) }.getOrNull()?.trim().orEmpty()
+                    Logs.log("Manga", "${config.name} novel page ${i + 1}/${pages.size} id=${chapter.id.take(40)} in ${SystemClock.elapsedRealtime() - ft0}ms chars=${text.length}")
                     if (text.isBlank()) null else StreamSource(
                         name = "Part ${i + 1}",
                         url = "",
@@ -711,11 +692,9 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                     // chapter as one page.
                     Logs.log("Manga", "${config.name} novel fallback single-text id=${chapter.id.take(60)}")
                     val st0 = SystemClock.elapsedRealtime()
-                    val sraw = withTimeoutOrNull(NOVEL_CALL_MS) {
-                        runCatching { nsrc.fetchPageText(Page(0, chapter.id)) }.getOrNull()
-                    }
-                    val text = sraw?.trim().orEmpty()
-                    Logs.log("Manga", "${config.name} novel fallback id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - st0}ms chars=${text.length} timeout=${sraw == null}")
+                    val text = runCatching { nsrc.fetchPageText(Page(0, chapter.id)) }
+                        .getOrNull()?.trim().orEmpty()
+                    Logs.log("Manga", "${config.name} novel fallback id=${chapter.id.take(60)} in ${SystemClock.elapsedRealtime() - st0}ms chars=${text.length}")
                     if (text.isBlank()) fail("chapter text unavailable", emptyList())
                     else {
                         lastOutcome[config.id] = "✓ 1 part"

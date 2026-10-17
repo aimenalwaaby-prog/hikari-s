@@ -164,6 +164,7 @@ import com.hikari.app.ui.Artwork
 import com.hikari.app.ui.LoadingStyles
 import com.hikari.app.ui.PosterArt
 import com.hikari.app.ui.PosterLoader
+import com.hikari.app.ui.openUrl
 import com.hikari.app.ui.openYouTubeVideo
 import com.hikari.app.ui.rememberPosterScore
 import com.hikari.app.ui.rememberPosterStyle
@@ -5573,21 +5574,19 @@ fun DetailScreen(
                                     when {
                                         s.ytId != null -> {
                                             showSheet = false
-                                            context.startActivity(
-                                                Intent(context, WebViewActivity::class.java).apply {
-                                                    putExtra("url", "https://www.youtube.com/watch?v=${s.ytId}")
-                                                    putExtra("title", (m?.title ?: title) + " — YouTube")
-                                                }
-                                            )
+                                            // A YouTube page belongs in the
+                                            // YouTube app or the user's browser
+                                            // (see openYouTubeVideo): the
+                                            // WebView's redirect protection
+                                            // turns it into a black screen.
+                                            openYouTubeVideo(context, s.ytId.orEmpty(), m?.title ?: title)
                                         }
                                         s.externalUrl -> {
                                             showSheet = false
-                                            context.startActivity(
-                                                Intent(context, WebViewActivity::class.java).apply {
-                                                    putExtra("url", s.url)
-                                                    putExtra("title", m?.title ?: title)
-                                                }
-                                            )
+                                            // Somebody else's page: the user's
+                                            // own browser, never Hikari's
+                                            // WebView.
+                                            openUrl(context, s.url)
                                         }
                                         else -> {
                                             showSheet = false

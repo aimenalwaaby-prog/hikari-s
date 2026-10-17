@@ -650,6 +650,23 @@ class ContentRepository(private val manager: ProviderManager) {
          *  server that vanishes from the list makes the app look broken. */
         const val REMEMBERED_STREAMS_TTL_MS = 60 * 60 * 1000L
 
+        /** Hard ceiling on [streamsRemembered]: the TTL expiry above only
+         *  purges when the map is already over this size, and a long session
+         *  of fresh lookups could otherwise grow it without bound (every
+         *  entry holds full server lists). Past the ceiling the oldest go. */
+        const val REMEMBERED_STREAMS_MAX = 64
+
+        /** Freshness window for [directTmdbCache] entries (also enforced on
+         *  read), and its hard ceiling — same OOM-hygiene reasoning as
+         *  [REMEMBERED_STREAMS_MAX]. */
+        const val DIRECT_TMDB_TTL_MS = 30 * 60 * 1000L
+        const val DIRECT_TMDB_MAX = 64
+
+        /** Hard ceiling for `tmdbSeasonLayouts`: layouts never go stale so
+         *  there is no TTL — overflow drops arbitrary entries, which simply
+         *  recompute on demand. */
+        const val SEASON_LAYOUT_MAX = 96
+
         /**
          * A whole pass that found fewer than this many servers, while repos were
          * answered out of the session's "no such title" record, is treated as
@@ -4266,7 +4283,12 @@ class ContentRepository(private val manager: ProviderManager) {
                 // the fallback below overrode the user's own switch (playing
                 // from one Hikari extension listed every sibling Hikari
                 // extension's servers) the moment the origin was slow or threw.
+                // AND never on an explicit one-shot "this extension only" tap:
+                // that tap names exactly one repo — going around it to ask 8
+                // siblings is the reported "I picked this extension only and
+                // it still searched all 9".
                 val soleTargetDead = originRepo != null && !scopeAll &&
+                    oneShotNarrow == null &&
                     SearchScope.family(originRepo.config.type) &&
                     crossTargets.isEmpty() && passFound.isEmpty() &&
                     providerOutcome[originRepo.config.id] != "no servers" &&
@@ -4486,9 +4508,17 @@ class ContentRepository(private val manager: ProviderManager) {
             }
             if (finalResult.isNotEmpty()) {
                 streamsRemembered[rememberKey] = RememberedStreams(finalResult, System.currentTimeMillis())
-                if (streamsRemembered.size > 64) {
+                if (streamsRemembered.size > REMEMBERED_STREAMS_MAX) {
                     val cutoff = System.currentTimeMillis() - REMEMBERED_STREAMS_TTL_MS
                     streamsRemembered.entries.removeAll { it.value.at < cutoff }
+                    // Fresh lookups alone can still push past the ceiling (the
+                    // expiry above only drops the old) — drop the oldest until
+                    // it fits, so a long session cannot grow this map (and the
+                    // full server lists inside it) without bound.
+                    while (streamsRemembered.size > REMEMBERED_STREAMS_MAX) {
+                        val oldest = streamsRemembered.entries.minByOrNull { it.value.at }?.key ?: break
+                        streamsRemembered.remove(oldest)
+                    }
                 }
             }
             // A `ytId` or `externalUrl` row is a LINK to the video, not a video
@@ -6389,7 +6419,7 @@ class ContentRepository(private val manager: ProviderManager) {
     private suspend fun directTmdbEpisodes(item: MediaItem, tmdbId: Int): List<Episode>? {
         val key = tmdbId.toString()
         directTmdbCache[key]?.let { cached ->
-            if (System.currentTimeMillis() - cached.first < 30 * 60 * 1000L && cached.second.isNotEmpty()) return cached.second
+            if (System.currentTimeMillis() - cached.first < DIRECT_TMDB_TTL_MS && cached.second.isNotEmpty()) return cached.second
         }
         val tv = com.hikari.app.nuvio.TmdbResolver.apiGet("/tv/" + tmdbId, emptyMap()) ?: return null
         val seasons = tv.optJSONArray("seasons") ?: return null
@@ -6436,6 +6466,14 @@ class ContentRepository(private val manager: ProviderManager) {
             air <= java.time.LocalDate.now().toString()
         }
         val final = (if (past.isNotEmpty()) past else out).sortedWith(compareBy({ it.season }, { it.number }))
+        if (directTmdbCache.size >= DIRECT_TMDB_MAX) {
+            val cutoff = System.currentTimeMillis() - DIRECT_TMDB_TTL_MS
+            directTmdbCache.entries.removeAll { it.value.first < cutoff }
+            while (directTmdbCache.size >= DIRECT_TMDB_MAX) {
+                val oldest = directTmdbCache.entries.minByOrNull { it.value.first }?.key ?: break
+                directTmdbCache.remove(oldest)
+            }
+        }
         directTmdbCache[key] = System.currentTimeMillis() to final
         return final
     }
@@ -6481,7 +6519,17 @@ class ContentRepository(private val manager: ProviderManager) {
         val key = item.searchTitle.lowercase() + "|" + (item.year ?: 0)
         tmdbSeasonLayouts[key]?.let { return it }
         val out = withTimeoutOrNull(8_000) { tmdbSeasonLayoutNetwork(item) }.orEmpty()
-        if (out.isNotEmpty()) tmdbSeasonLayouts[key] = out
+        if (out.isNotEmpty()) {
+            if (tmdbSeasonLayouts.size >= SEASON_LAYOUT_MAX) {
+                // No timestamps here (a layout never goes stale) — drop
+                // arbitrary overflow so a huge library cannot grow this
+                // without bound; a dropped entry recomputes on demand.
+                val drop = tmdbSeasonLayouts.keys.iterator()
+                var left = tmdbSeasonLayouts.size - SEASON_LAYOUT_MAX + 1
+                while (left > 0 && drop.hasNext()) { drop.next(); drop.remove(); left-- }
+            }
+            tmdbSeasonLayouts[key] = out
+        }
         return out
     }
 

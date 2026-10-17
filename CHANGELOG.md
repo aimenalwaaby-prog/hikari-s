@@ -1,3 +1,11 @@
+## 0.11.46 (continuous build only)
+
+### Fixed
+- Novel reader back to the build that loaded (0.11.42 behavior restored: no per-page caps, no reader timeout — the text path that worked): the batch-74 caps are gone, the batch-75 stage logging stays, so a slow chapter is both loadable and diagnosable from Settings → Logs
+- Explicit "only this extension" taps fanning out to sibling repos: a one-shot narrowed lookup no longer triggers the family fallback — it searches exactly the extension tapped
+- Outside pages opening inside Hikari's WebView (universally, not per-extension): Stremio addon config pages, saved websites, trailer/YouTube rows, external-link rows and every tracker login page now open in the user's own browser with the result pasted back into Hikari — only the manual Cloudflare globe keeps the in-app WebView (the clearance cookie has to land in this app's jar)
+- Out-of-memory crash during playback (heap 100% full, died inside a settings read): the player never set a byte cap on its buffers — a fast link banked the whole 150s ceiling (hundreds of MB on a high-bitrate stream) on top of an already-full heap — buffers are now byte-capped to a heap-scaled budget, and the long-lived lookup caches (remembered servers, TMDB episodes/layouts) have hard ceilings with oldest-drop
+
 ## 0.11.45 (continuous build only)
 
 ### Fixed

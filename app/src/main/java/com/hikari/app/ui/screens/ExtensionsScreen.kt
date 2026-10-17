@@ -160,6 +160,7 @@ import com.hikari.app.ui.components.StremioAddonInfoDialog
 import com.hikari.app.ui.components.VegaSettingsDialog
 import com.hikari.app.ui.navigation.LocalTaskbarInset
 import com.hikari.app.ui.navigation.Routes
+import com.hikari.app.ui.openUrl
 import com.hikari.app.ui.rememberNsfwEnabled
 import com.hikari.app.ui.theme.rememberGlassTokens
 import com.hikari.app.web.WebViewActivity
@@ -3679,24 +3680,6 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
     var schemaProvider by remember { mutableStateOf<ContentProvider?>(null) }
     var infoProvider by remember { mutableStateOf<ContentProvider?>(null) }
 
-    // The addon config page's install link arrives as an activity result: that
-    // page is the addon's own, and the manifest it hands back carries the
-    // choices the user just made — so it is installed exactly as a pasted addon
-    // URL would be (same fetch, same id, same one-row-per-addon rule), which
-    // also replaces an already-installed addon with the configured copy.
-    val addonConfigLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val url = result.data?.getStringExtra("manifestUrl").orEmpty()
-        if (result.resultCode == android.app.Activity.RESULT_OK && url.isNotBlank()) {
-            vm.runTask(
-                "Installing configured addon…",
-                { vm.addStremio(url) },
-                successMsg = I18n.t("Addon installed"),
-            )
-        }
-    }
-
     /**
      * Opens a provider's settings — whatever the settings for that engine
      * actually ARE.
@@ -3710,8 +3693,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
      *  * a Stremio addon: its manifest says whether it has a config page
      *    (`behaviorHints.configurationURL` / `configurable`) — OpenSubtitles v3,
      *    AIOMetadata, the debrid addons. That page IS its settings screen (it is
-     *    the same page the Stremio app opens), and the addon it hands back on
-     *    "Install" replaces this row;
+     *    the same page the Stremio app opens), and it opens in the user's own
+     *    browser: the configured install link is pasted into the Add dialog,
+     *    which replaces this row;
      *  * a CloudStream plugin (.cs3): the plugin's OWN settings screen, through
      *    the provider contract ([openProviderSettingsSafely]);
      *  * a nuvio scraper, a Vega provider, an Aniyomi/Manga extension: the
@@ -3740,17 +3724,21 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         addonInfoProvider = p
                         return@launch
                     }
-                    addonConfigLauncher.launch(
-                        Intent(context, WebViewActivity::class.java).apply {
-                            putExtra("url", page)
-                            putExtra("title", p.config.name.ifBlank { "Stremio addon" })
-                            // The link this page ends on IS the install: the
-                            // view captures it and hands it back (see
-                            // WebViewActivity.finishWithManifest).
-                            putExtra("stremioConfig", true)
-                            putExtra("providerId", p.config.id)
-                        }
-                    )
+                    // The config page opens in the user's own browser, never
+                    // in Hikari's WebView: it is the addon's own site, and the
+                    // WebView's redirect/cookie/popup rules turn those pages
+                    // into dead ends. The page ends on the configured install
+                    // link, which the user pastes into the Add dialog opened
+                    // below — installed exactly as a pasted addon URL would be
+                    // (same fetch, same id, same one-row-per-addon rule),
+                    // which also replaces this row with the configured copy.
+                    openUrl(context, page)
+                    showStremio = true
+                    Toast.makeText(
+                        context,
+                        I18n.t("Configure the addon in your browser, then paste its install link here"),
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
             }
             ProviderType.NUVIO -> schemaProvider = p
@@ -4191,12 +4179,12 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             },
             onAddSite = { vm.clearStatus(); showSite = true },
             onOpenSite = { site ->
-                context.startActivity(
-                    Intent(context, WebViewActivity::class.java).apply {
-                        putExtra("url", site.url)
-                        putExtra("title", site.name)
-                    }
-                )
+                // A saved website is somebody else's page: it opens in the
+                // user's own browser, never in Hikari's WebView (whose
+                // redirect/cookie/popup rules turn outside pages into dead
+                // ends). Only the Cloudflare globe keeps the WebView — the
+                // clearance cookie has to land in this app's own jar.
+                openUrl(context, site.url)
             },
             onRemoveSite = { url ->
                 vm.runUninstall("Removing website…", "Website removed") { vm.removeSite(url) }

@@ -66,10 +66,13 @@ import com.hikari.app.tv.tvTextFieldKeys
  * before anyone may log in — a property of the services, not of Hikari — so the
  * first step is "paste the id you just created", with the exact page to create
  * it and the exact redirect URI to paste into it. After that the sign-in is
- * whatever that service uses: a login page in a WebView whose redirect we
- * intercept ([TrackerFlow.CODE]/[TrackerFlow.TOKEN]), the account's own
+ * whatever that service uses: the service's own login page in the user's own
+ * browser ([TrackerFlow.CODE]/[TrackerFlow.TOKEN]), the account's own
  * credentials ([TrackerFlow.PASSWORD]), or a short code the user confirms on the
- * service's own site ([TrackerFlow.PIN]/[TrackerFlow.DEVICE]).
+ * service's own site ([TrackerFlow.PIN]/[TrackerFlow.DEVICE]). The browser is
+ * deliberate: these are account pages with logins and Cloudflare checks, built
+ * for a real browser — the in-app WebView stays only as the fallback when the
+ * device has no browser to open.
  *
  * Every path ends in a sentence — the sign-in either works and names the account
  * it signed in as, or it says what the service refused. There is no state where
@@ -96,8 +99,12 @@ fun TrackerLoginDialog(
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
-    /** Non-null once the login page should be shown. */
+    /** Non-null once the in-app fallback page should be shown. */
     var webUrl by remember { mutableStateOf<String?>(null) }
+    /** The last authorize URL produced, so it can be re-opened or fall back. */
+    var lastAuthUrl by remember { mutableStateOf<String?>(null) }
+    /** True once the login page has been opened in the user's browser. */
+    var browserOpened by remember { mutableStateOf(false) }
     /** The state we send, echoed back by the redirect — and MAL's PKCE verifier. */
     var loginState by remember { mutableStateOf(TrackerApi.newState()) }
     var device by remember { mutableStateOf<TrackerApi.DeviceLogin?>(null) }
@@ -193,7 +200,22 @@ fun TrackerLoginDialog(
                             TrackerApi.Pending(kind, client.id, loginState)
                         )
                     }
-                    webUrl = url
+                    // The login page opens in the user's own browser, never
+                    // in Hikari's WebView: these are account pages (logins,
+                    // passwords, Cloudflare Turnstile — AniList's sits in
+                    // front of its login), built for a real browser, and a
+                    // WebView is exactly what the bot checks are suspicious
+                    // of. The redirect/paste path below finishes the sign-in;
+                    // the WebView stays only as the fallback when the device
+                    // has no browser to open.
+                    lastAuthUrl = url
+                    if (openUrl(context, url)) {
+                        webUrl = null
+                        browserOpened = true
+                    } else {
+                        browserOpened = false
+                        webUrl = url
+                    }
                 }
             }
         }
@@ -519,10 +541,57 @@ fun TrackerLoginDialog(
                         val url = webUrl
                         Spacer(Modifier.height(8.dp))
                         if (url == null) {
-                            Text(
-                                tr("Press Sign in to open the service's own login page."),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                            if (browserOpened && lastAuthUrl != null) {
+                                // The normal case now: the service's login page
+                                // is open in the user's browser. Approve the
+                                // app there, then paste the code/token back
+                                // here (or copy the redirect link whole — the
+                                // paste path reads a token or a code out of
+                                // it). The in-app page is one tap away for a
+                                // device whose browser cannot finish the flow.
+                                Text(
+                                    tr(
+                                        "The login page is open in your browser — approve the app " +
+                                            "there, then paste the " +
+                                            (if (kind.flow == TrackerFlow.TOKEN) "token" else "code") +
+                                            " below."
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                val auth = lastAuthUrl.orEmpty()
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { openUrl(context, auth) }) {
+                                        Text(tr("Reopen the page"))
+                                    }
+                                    TextButton(onClick = { webUrl = auth }) {
+                                        Text(tr("Use the in-app page instead"))
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = codeField,
+                                    onValueChange = { codeField = it; error = null },
+                                    label = {
+                                        Text(
+                                            if (kind.flow == TrackerFlow.TOKEN) tr("Paste the token")
+                                            else tr("Paste the code")
+                                        )
+                                    },
+                                    singleLine = true,
+                                    enabled = !busy,
+                                    modifier = Modifier.fillMaxWidth().tvTextFieldKeys(codeField),
+                                )
+                                TextButton(
+                                    enabled = !busy && codeField.isNotBlank(),
+                                    onClick = { handleRedirect(codeField, fromPaste = true) },
+                                ) { Text(tr("Use this")) }
+                            } else {
+                                Text(
+                                    tr("Press Sign in to open the service's own login page."),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         } else {
                             AndroidView(
                                 modifier = Modifier

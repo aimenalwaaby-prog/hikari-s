@@ -11505,11 +11505,14 @@ class PlayerActivity : ComponentActivity() {
      * ExoPlayer keep downloading ahead whenever the source can outrun
      * playback, banking minutes of runway on a link that has the headroom.
      *
-     * This cannot grow memory without bound: media3's own allocator byte
-     * target (≈125 MB video + ≈12 MB audio, which `largeHeap="true"` comfortably
-     * covers) is still enforced, so a high-bitrate stream stops at the byte cap
-     * exactly as it did before — only low/medium-bitrate streams, which have
-     * the memory to spare, get the deeper time buffer.
+     * This cannot grow memory without bound: besides the time ceilings below,
+     * the buffer is byte-capped to a heap-scaled budget (the same 1/8-of-heap
+     * shaping as Coil's memory cache, floored at 24 MB and capped at 64 MB, so
+     * a 512 MB-heap phone never lets one fast link bank hundreds of megabytes
+     * of high-bitrate video on top of an already-full heap — that pileup is
+     * what OOM-killed the app mid-playback). A high-bitrate stream stops at
+     * the byte cap exactly as it did before — only low/medium-bitrate streams,
+     * which have the memory to spare, get the deeper time buffer.
      *
      * Start/resume thresholds keep media3's snappy defaults (1 s to start,
      * 2 s to resume after a stall): a longer resume threshold would only make
@@ -11531,6 +11534,16 @@ class PlayerActivity : ComponentActivity() {
                 if (isTd) 180_000 else 150_000, // maxBufferMs — ceiling when the link can outrun playback
                 1_000,    // bufferForPlaybackMs — how little we need to start
                 if (isTd) 8_000 else 2_000,     // bufferForPlaybackAfterRebufferMs — how little to resume
+            )
+            .setTargetBufferBytes(
+                // media3's own byte target defaults to off, so without this a
+                // fast link banks the whole time ceiling: 150 s of a 25 Mbps
+                // stream is ~470 MB on the Java heap. Scale it like Coil's
+                // memory cache (see setupImageLoader) so small heaps stay
+                // alive and big heaps keep their depth.
+                (Runtime.getRuntime().maxMemory() / 8)
+                    .coerceIn(24L * 1024 * 1024, 64L * 1024 * 1024)
+                    .toInt()
             )
             .build()
 
