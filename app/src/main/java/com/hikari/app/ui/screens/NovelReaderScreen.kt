@@ -18,7 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -39,10 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -76,7 +77,9 @@ import kotlinx.coroutines.withContext
  * can never pick them up); they are joined here in order.
  *
  * The Mark button highlights words, lines or whole paragraphs in 12 colors —
- * saved per novel+chapter and restored on reopen.
+ * saved per novel+chapter and restored on reopen. A long-press on any word
+ * (~0.5s) starts a copy-like selection anywhere: drag to the wanted word or
+ * line and release to commit it.
  */
 @Composable
 fun NovelReaderScreen(
@@ -450,58 +453,98 @@ fun NovelReaderScreen(
                     }
                     items(paragraphs.size) { idx ->
                         val para = paragraphs[idx]
-                        if (!highlightMode) {
-                            Text(
-                                text = para,
-                                fontSize = fontSize.sp,
-                                lineHeight = (fontSize + 8f).sp,
-                                color = fg,
-                                modifier = Modifier.padding(bottom = 14.dp),
-                            )
-                        } else {
-                            // Mark mode: the paragraph's saved ranges render
-                            // as background spans, and a tap marks the word /
-                            // line / paragraph under the finger (tap again in
-                            // the same color to remove it).
-                            val paraHl = highlights.filter { it.paraIndex == idx }
-                            var layout by remember(para) { mutableStateOf<TextLayoutResult?>(null) }
-                            val annotated = remember(para, paraHl) {
-                                buildAnnotatedString {
-                                    append(para)
-                                    paraHl.forEach { h ->
-                                        val e = if (h.end < 0) para.length
-                                        else h.end.coerceAtMost(para.length)
-                                        val s = h.start.coerceIn(0, e)
-                                        if (e > s) {
-                                            addStyle(SpanStyle(background = Color(h.color)), s, e)
-                                        }
+                        // Saved ranges render as background spans. Two ways to
+                        // mark: in Mark mode a tap marks the word / line /
+                        // paragraph under the finger (tap again in the same
+                        // color to remove it); in ANY mode a long-press
+                        // (~0.5s) on a word starts a copy-like selection —
+                        // drag to the wanted word or line and release to
+                        // commit it in the current color.
+                        val paraHl = highlights.filter { it.paraIndex == idx }
+                        var layout by remember(para) { mutableStateOf<TextLayoutResult?>(null) }
+                        var liveSel by remember(para) { mutableStateOf<Pair<Int, Int>?>(null) }
+                        val annotated = remember(para, paraHl, liveSel, hlColor) {
+                            buildAnnotatedString {
+                                append(para)
+                                paraHl.forEach { h ->
+                                    val e = if (h.end < 0) para.length
+                                    else h.end.coerceAtMost(para.length)
+                                    val s = h.start.coerceIn(0, e)
+                                    if (e > s) {
+                                        addStyle(SpanStyle(background = Color(h.color)), s, e)
+                                    }
+                                }
+                                liveSel?.let { (a, b) ->
+                                    val s = minOf(a, b).coerceIn(0, para.length)
+                                    val e = maxOf(a, b).coerceIn(0, para.length)
+                                    if (e > s) {
+                                        addStyle(SpanStyle(background = Color(hlColor)), s, e)
                                     }
                                 }
                             }
-                            ClickableText(
-                                text = annotated,
-                                style = TextStyle(
-                                    fontSize = fontSize.sp,
-                                    lineHeight = (fontSize + 8f).sp,
-                                    color = fg,
-                                ),
-                                onTextLayout = { layout = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 14.dp),
-                                onClick = { offset ->
-                                    val range = when (hlUnit) {
-                                        1 -> layout?.let { l ->
-                                            val line = l.getLineForOffset(offset)
-                                            l.getLineStart(line) to l.getLineEnd(line)
-                                        }
-                                        2 -> 0 to -1
-                                        else -> wordRange(para, offset)
-                                    } ?: return@ClickableText
-                                    toggleHighlight(idx, range.first, range.second)
-                                },
-                            )
                         }
+                        Text(
+                            text = annotated,
+                            fontSize = fontSize.sp,
+                            lineHeight = (fontSize + 8f).sp,
+                            color = fg,
+                            onTextLayout = { layout = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 14.dp)
+                                .pointerInput(highlightMode, hlUnit, para) {
+                                    detectTapGestures(
+                                        onTap = { pos ->
+                                            if (!highlightMode) return@detectTapGestures
+                                            val l = layout ?: return@detectTapGestures
+                                            val offset = l.getOffsetForPosition(pos)
+                                            val range = when (hlUnit) {
+                                                1 -> {
+                                                    val line = l.getLineForOffset(offset)
+                                                    l.getLineStart(line) to l.getLineEnd(line)
+                                                }
+                                                2 -> 0 to -1
+                                                else -> wordRange(para, offset)
+                                                    ?: return@detectTapGestures
+                                            }
+                                            toggleHighlight(idx, range.first, range.second)
+                                        },
+                                    )
+                                }
+                                .pointerInput(para) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { pos ->
+                                            val l = layout
+                                                ?: return@detectDragGesturesAfterLongPress
+                                            val o = l.getOffsetForPosition(pos)
+                                            liveSel = o to o
+                                        },
+                                        onDrag = { change ->
+                                            change.consume()
+                                            val l = layout
+                                                ?: return@detectDragGesturesAfterLongPress
+                                            val o = l.getOffsetForPosition(change.position)
+                                            liveSel = liveSel?.let { it.first to o } ?: (o to o)
+                                        },
+                                        onDragEnd = {
+                                            val sel = liveSel
+                                            liveSel = null
+                                            if (sel != null) {
+                                                var s = minOf(sel.first, sel.second)
+                                                    .coerceIn(0, para.length)
+                                                var e = maxOf(sel.first, sel.second)
+                                                    .coerceIn(0, para.length)
+                                                // Snap to word edges, like a
+                                                // copy selection.
+                                                while (s > 0 && (para[s - 1].isLetterOrDigit() || para[s - 1] == '\'')) s--
+                                                while (e < para.length && (para[e].isLetterOrDigit() || para[e] == '\'')) e++
+                                                if (e > s) toggleHighlight(idx, s, e)
+                                            }
+                                        },
+                                        onDragCancel = { liveSel = null },
+                                    )
+                                },
+                        )
                     }
                     item { Spacer(Modifier.height(48.dp)) }
                 }

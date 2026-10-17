@@ -164,6 +164,49 @@ data class TrackerClient(
     val ready: Boolean get() = id.isNotBlank() && (!kind.needsSecret || secret.isNotBlank())
 }
 
+/**
+ * The app's OWN registrations, one per service — what makes every sign-in
+ * one tap: with these filled, the dialog skips its "register your own app"
+ * step entirely and goes straight to Sign in → browser login page → approve
+ * → back in the app (the `hikari://oauth` return path is already wired).
+ *
+ * Shipped empty: a client id belongs to whoever registered it, and baking in
+ * somebody else's would impersonate them (and die the moment they revoke
+ * it). Fill each pair ONCE from the service's developer page (redirect URI
+ * `hikari://oauth` everywhere — the exact pages are [TrackerKind.registerUrl]),
+ * and every install signs in with a tap from then on. Kitsu needs nothing at
+ * all (password grant with no app registration). A user-typed id/secret in
+ * the dialog still overrides these per device.
+ */
+object TrackerBuiltIn {
+    /** Client ids shipped with the app, keyed by [TrackerKind.key]. */
+    private val IDS = mapOf(
+        "anilist" to "",
+        "mal" to "",
+        "simkl" to "",
+        "shikimori" to "",
+        "trakt" to "",
+        // Kitsu takes the account itself — no app registration exists.
+    )
+
+    /** Client secrets shipped with the app, keyed by [TrackerKind.key]. */
+    private val SECRETS = mapOf(
+        "shikimori" to "",
+    )
+
+    fun idFor(kind: TrackerKind): String = IDS[kind.key].orEmpty().trim()
+    fun secretFor(kind: TrackerKind): String = SECRETS[kind.key].orEmpty().trim()
+
+    /** A ready-to-use client for [kind], or null when nothing is shipped (and
+     *  the dialog must ask the user, as before). */
+    fun clientFor(kind: TrackerKind): TrackerClient? {
+        val id = idFor(kind)
+        if (id.isBlank()) return null
+        val c = TrackerClient(kind, id, secretFor(kind))
+        return if (c.ready) c else null
+    }
+}
+
 /** One candidate a tracker search returned, and how well it matched. */
 data class TrackerMatch(
     /** The service's own id for this title. */

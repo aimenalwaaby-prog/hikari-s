@@ -862,7 +862,19 @@ class WebViewActivity : ComponentActivity() {
                             // the site (same host/subdomain or whitelisted).
                             // about:blank popunders and foreign ad popups are
                             // dropped entirely.
-                            if (popupProtection) {
+                            //
+                            // An extension's settings page is user-driven
+                            // setup, not a video site: its login buttons (a
+                            // Google "Sign in", a debrid API-key flow) pop
+                            // windows on FOREIGN hosts (accounts.google.com)
+                            // that the same-site gate below would drop — and
+                            // the page then sits on "Waiting for Google..."
+                            // forever, which is exactly the reported hang.
+                            // Relay them so the login can finish like in a
+                            // real browser (the popup URL loads in this view,
+                            // the provider redirects back to the settings
+                            // page signed in).
+                            if (popupProtection && !addonConfig) {
                                 val host = runCatching { java.net.URI(url).host }.getOrNull()
                                 val cur = currentPageHost()
                                 if (host == null || cur == null ||

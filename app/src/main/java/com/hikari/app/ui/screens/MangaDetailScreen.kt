@@ -672,26 +672,15 @@ private fun openChapter(
     posterUrl: String,
     chapter: MangaChapter,
 ) {
-    // Novel rows open the text reader; manga rows the image reader.
-    // LNReader rows (`lnreader|…`) are novels too — same reader.
-    val route = if (com.hikari.app.manga.MangaExtensionManager.isNovelId(providerId) ||
-        com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(providerId)) {
-        Routes.novelReader(
-            providerId = providerId,
-            url = mangaUrl,
-            chapterUrl = chapter.url,
-            title = title,
-            posterUrl = posterUrl,
-        )
-    } else {
-        Routes.mangaReader(
-            providerId = providerId,
-            url = mangaUrl,
-            chapterUrl = chapter.url,
-            title = title,
-            posterUrl = posterUrl,
-        )
-    }
+    // Novel rows open the text reader; manga rows the image reader (see
+    // Routes.readingRoute — every opener uses the same rule).
+    val route = Routes.readingRoute(
+        providerId = providerId,
+        url = mangaUrl,
+        chapterUrl = chapter.url,
+        title = title,
+        posterUrl = posterUrl,
+    )
     Routes.safeNavigate(nav, route)
 }
 

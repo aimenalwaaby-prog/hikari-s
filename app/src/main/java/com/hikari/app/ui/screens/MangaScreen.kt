@@ -663,9 +663,15 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
                             ContinueCard(
                                 progress = p,
                                 onClick = {
+                                    // Novels resume in the text reader, manga
+                                    // in the image reader (see
+                                    // Routes.readingRoute) — never the image
+                                    // reader for both, which was the "novel
+                                    // from history says it could not load
+                                    // images" report.
                                     Routes.safeNavigate(
                                         nav,
-                                        Routes.mangaReader(
+                                        Routes.readingRoute(
                                             p.providerId, p.mangaUrl, p.chapterUrl, p.title, p.posterUrl,
                                         )
                                     )
@@ -1481,9 +1487,13 @@ fun MangaContinueShelf(nav: NavHostController) {
                 ContinueCard(
                     progress = p,
                     onClick = {
+                        // Same novel/manga rule as every other opener (see
+                        // Routes.readingRoute): this shelf serves History and
+                        // My Stuff too, so it must not assume the image
+                        // reader.
                         Routes.safeNavigate(
                             nav,
-                            Routes.mangaReader(p.providerId, p.mangaUrl, p.chapterUrl, p.title, p.posterUrl),
+                            Routes.readingRoute(p.providerId, p.mangaUrl, p.chapterUrl, p.title, p.posterUrl),
                         )
                     },
                     onDelete = { MangaStore.clearProgress(p.mangaKey) },

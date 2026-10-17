@@ -1,3 +1,12 @@
+## 0.11.48 (continuous build only)
+
+### Fixed
+- Extension settings opening in the outside browser: the gear opens the addon's config page in Hikari's own WebView again, as in previous builds — configuring ends on the page's Install button, whose manifest URL comes back and installs
+- Google "Sign in" stuck on "Waiting for Google..." on extension settings pages (e.g. PenguPlay): login popups on foreign hosts (accounts.google.com) were dropped as ad popups and the page waited forever — settings pages relay them now, so the login finishes in the view like a real browser and the provider redirects back signed in
+- Novel highlighter needing Mark-mode taps: a long-press (~0.5s) on any word now starts a copy-like selection anywhere — drag to the wanted word or line, release to commit it in the current color (snapped to word edges, logged like every other highlight)
+- Novels opened from history/continue shelves landing in the manga reader ("couldn't load images"), and the reverse: every opener now goes through one novel-or-manga rule (novel rows carry their own provider ids, so it is exact) — novel opens as novel and manga as manga from detail, continue reading, History and My Stuff alike
+- Tracker sign-ins asking for a self-registered app id per service: the app now ships its own registrations when they exist, so the flow is tap → Sign in → browser login page → approve → back in the app with the account named — no developer pages, no paste (a typed id still overrides per device; Kitsu never needed any of this)
+
 ## 0.11.47 (continuous build only)
 
 ### Fixed

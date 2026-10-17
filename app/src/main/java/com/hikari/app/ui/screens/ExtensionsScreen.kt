@@ -3649,6 +3649,33 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
     val sites by vm.sites.collectAsState()
     val openRepo = repos.firstOrNull { it.url == openRepoUrl || it.url.trimEnd('/') == openRepoUrl?.trimEnd('/') }
     val context = LocalContext.current
+    // An extension-settings WebView result: the config page's Install
+    // button hands back the configured manifest URL, which installs like
+    // any other link (previous-build behavior).
+    val addonConfigLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val manifest = result.data?.getStringExtra("manifestUrl")?.trim().orEmpty()
+        if (manifest.isBlank()) return@rememberLauncherForActivityResult
+        vm.runTask(
+            "Adding repo…",
+            { vm.addRepoLink(manifest) },
+            onSuccess = { res ->
+                res.repo?.let { openRepoUrl = it.url }
+                if (res.repo == null && res.kinds.isNotEmpty()) {
+                    vm.clearStatus()
+                    repoUrl = res.ambiguousUrl ?: manifest
+                    repoDialogKind = res.kinds.first()
+                    showRepoDialog = true
+                } else if (res.repo != null) {
+                    vm.setSuccess("Repo added")
+                } else {
+                    vm.setSuccess("Addon installed")
+                }
+            },
+        )
+    }
     // A repo link handed in from a browser ("Open with → Hikari", published as
     // HikariApp.repoLinkRequest with AppNav already on this tab): install it
     // into the section its own content says it belongs to, then open that
@@ -3704,10 +3731,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
      *  * a Stremio addon: its manifest says whether it has a config page
      *    (`behaviorHints.configurationURL` / `configurable`) — OpenSubtitles v3,
      *    AIOMetadata, the debrid addons. That page IS its settings screen (it is
-     *    the same page the Stremio app opens), and it opens in the user's own
-     *    browser — nothing else. Configuring ends on the addon's Install
-     *    button, whose stremio:// link comes back to Hikari and replaces
-     *    this row with the configured copy;
+     *    the same page the Stremio app opens), and it opens in Hikari's own
+     *    WebView — configuring ends on the addon's Install button, whose
+     *    manifest URL comes back and installs;
      *  * a CloudStream plugin (.cs3): the plugin's OWN settings screen, through
      *    the provider contract ([openProviderSettingsSafely]);
      *  * a nuvio scraper, a Vega provider, an Aniyomi/Manga extension: the
@@ -3737,13 +3763,18 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         return@launch
                     }
                     // The config page IS the settings screen (the same page
-                    // the Stremio app opens), and it opens in the user's own
-                    // browser — nothing else: no dialog, nothing to paste.
-                    // Configuring ends on the addon's Install button, whose
-                    // stremio:// link Android hands straight back to Hikari,
-                    // which installs the configured copy over this row (see
-                    // addRepoLink + RepoLinkActivity).
-                    openUrl(context, page)
+                    // the Stremio app opens), and it opens in Hikari's own
+                    // WebView: configuring ends on the addon's Install
+                    // button, whose manifest URL comes back here and
+                    // installs. Google "Sign in" popups on these pages are
+                    // relayed so logins finish (see WebViewActivity).
+                    addonConfigLauncher.launch(
+                        Intent(context, com.hikari.app.web.WebViewActivity::class.java)
+                            .putExtra("url", page)
+                            .putExtra("title", p.config.name)
+                            .putExtra("stremioConfig", true)
+                            .putExtra("providerId", p.config.id)
+                    )
                 }
             }
             ProviderType.NUVIO -> schemaProvider = p

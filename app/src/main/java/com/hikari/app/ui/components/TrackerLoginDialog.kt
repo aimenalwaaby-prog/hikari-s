@@ -62,10 +62,14 @@ import com.hikari.app.tv.tvTextFieldKeys
 /**
  * Signing in to a tracker (Settings → Trackers).
  *
- * Every one of these services needs an app of the user's own registered with it
- * before anyone may log in — a property of the services, not of Hikari — so the
- * first step is "paste the id you just created", with the exact page to create
- * it and the exact redirect URI to paste into it. After that the sign-in is
+ * When the app ships its own registration for the service (see
+ * [com.hikari.app.data.TrackerBuiltIn] — Kitsu needs none at all), there is
+ * no first step: the sign-in opens straight away and the flow is tap → Sign
+ * in → the service's own login page in the user's browser → approve → back
+ * in the app, which names the account it signed in as. Only when nothing is
+ * shipped does the dialog ask for an app of the user's own (the exact page
+ * to create it and the exact redirect URI to paste into it), because a
+ * client id belongs to whoever registered it. After that the sign-in is
  * whatever that service uses: the service's own login page in the user's own
  * browser ([TrackerFlow.CODE]/[TrackerFlow.TOKEN]), the account's own
  * credentials ([TrackerFlow.PASSWORD]), or a short code the user confirms on the
@@ -306,13 +310,20 @@ fun TrackerLoginDialog(
     }
 
     // The app credentials the user pasted last time decide which step opens:
-    // the credential fields, or the sign-in itself.
+    // the credential fields, or the sign-in itself. The app's OWN
+    // registration ([TrackerBuiltIn]) wins when nothing was ever typed: the
+    // sign-in step opens straight away, so the flow is tap → Sign in →
+    // browser login page → approve → back in the app, with no developer
+    // pages and no paste. "Use a different app id" below still reaches the
+    // manual fields.
     LaunchedEffect(kind) {
         val stored = runCatching { app.store.trackerClient(kind) }.getOrDefault(TrackerClient(kind))
-        client = stored
-        idField = stored.id
-        secretField = stored.secret
-        credentialsDone = stored.ready
+        val effective = if (stored.ready) stored
+        else com.hikari.app.data.TrackerBuiltIn.clientFor(kind) ?: stored
+        client = effective
+        idField = effective.id
+        secretField = effective.secret
+        credentialsDone = effective.ready
         loading = false
     }
 

@@ -255,6 +255,27 @@ object Routes {
         return s
     }
 
+    /** The reader for one chapter: the text reader for novel rows, the image
+     *  reader for manga rows. Novel rows carry their own provider ids
+     *  (`manga|<pkg>|n<idx>`, LNReader `lnreader|…`), so this is exact — and
+     *  EVERY opener must come through here. Two of them did not (the continue
+     *  shelves opened the image reader unconditionally), which is the whole
+     *  of the "novel opens as manga and says it could not load images"
+     *  report — and the same bypass in the other direction would open a
+     *  manga in the text reader. */
+    fun readingRoute(
+        providerId: String,
+        url: String,
+        chapterUrl: String,
+        title: String,
+        posterUrl: String? = null,
+    ): String {
+        val novel = com.hikari.app.manga.MangaExtensionManager.isNovelId(providerId) ||
+            com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(providerId)
+        return if (novel) novelReader(providerId, url, chapterUrl, title, posterUrl)
+        else mangaReader(providerId, url, chapterUrl, title, posterUrl)
+    }
+
     /** Opens the Manga tab with [query] already searched across every
      *  installed manga engine. Tracker manga shelves land here. */
     /** [genre] arms a TAG search instead (results hold the tag — see
