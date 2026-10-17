@@ -16,13 +16,11 @@ import org.json.JSONObject
  * **Each service keeps its OWN credentials.** Every one of these APIs needs an
  * "app" registered with it (a client id, sometimes a secret) before anyone can
  * log in — that is how each service tells one third-party client from another.
- * Hikari deliberately does not ship somebody else's registered app: an app id
- * belongs to the developer who registered it, using it would impersonate them,
- * and it gets the whole app locked out the moment that registration is revoked
- * or rate-limited. So the card asks for the user's own, once per service, with
- * the exact page to get it ([registerUrl]) and the exact redirect URI to paste
- * ([com.hikari.app.tracker.TrackerApi.REDIRECT_URI]) spelled out. One extra
- * step, and it is the step that makes the sign-in actually work for them.
+ * Hikari ships its own registrations ([TrackerBuiltIn], registered by the app
+ * owner — never somebody else's), so the card goes straight to Sign in; only
+ * services with no shipped id still ask for the user's own, once, with the
+ * exact page to get it ([registerUrl]) and the exact redirect URI to paste
+ * ([com.hikari.app.tracker.TrackerApi.REDIRECT_URI]) spelled out.
  */
 enum class TrackerKind(
     /** Stable id — what the stored rows are keyed by, never shown. */
@@ -170,22 +168,21 @@ data class TrackerClient(
  * step entirely and goes straight to Sign in → browser login page → approve
  * → back in the app (the `hikari://oauth` return path is already wired).
  *
- * Shipped empty: a client id belongs to whoever registered it, and baking in
- * somebody else's would impersonate them (and die the moment they revoke
- * it). Fill each pair ONCE from the service's developer page (redirect URI
- * `hikari://oauth` everywhere — the exact pages are [TrackerKind.registerUrl]),
- * and every install signs in with a tap from then on. Kitsu needs nothing at
+ * Registered by the app owner for Hikari itself (AniList/MAL/Simkl/Trakt ids
+ * live-verified at embed time via their device/authorize endpoints). Shikimori
+ * is still empty — its id AND secret are both required and were never supplied,
+ * so Shikimori keeps the manual step until they are. Kitsu needs nothing at
  * all (password grant with no app registration). A user-typed id/secret in
  * the dialog still overrides these per device.
  */
 object TrackerBuiltIn {
     /** Client ids shipped with the app, keyed by [TrackerKind.key]. */
     private val IDS = mapOf(
-        "anilist" to "",
-        "mal" to "",
-        "simkl" to "",
+        "anilist" to "51890",
+        "mal" to "c5982f6a1db357b98a41ec116ba00001",
+        "simkl" to "fe031828569ee8ca40d2d09988cb4f2f7ae04857220fef7009decd81b3857813",
         "shikimori" to "",
-        "trakt" to "",
+        "trakt" to "xEjFc5nG3iAzqghfVK_uaJFD6vkJedqZLNxyFnltz-M",
         // Kitsu takes the account itself — no app registration exists.
     )
 

@@ -116,6 +116,10 @@ fun NovelReaderScreen(
     var highlightMode by remember { mutableStateOf(false) }
     var hlUnit by remember { mutableIntStateOf(0) }
     var hlColor by remember { mutableIntStateOf(NovelHighlight.COLORS.first()) }
+    // Erase mode: tap removes the highlight under the finger, a long-press
+    // drag removes every highlight the drag touches (the only way to undo a
+    // free-dragged range, which can never be re-tapped exactly).
+    var hlErase by remember { mutableStateOf(false) }
     var highlights by remember { mutableStateOf<List<NovelHighlight>>(emptyList()) }
 
     val item = remember(providerId, mangaUrl, title, posterUrl) {
@@ -273,6 +277,42 @@ fun NovelReaderScreen(
         highlights = MangaStore.highlightsFor(key).filter { it.chapterUrl == chapter }
     }
 
+    /** End offset of [h] inside a paragraph of [paraLen] (whole-paragraph
+     *  marks store -1). */
+    fun hlEnd(h: NovelHighlight, paraLen: Int): Int =
+        if (h.end < 0) paraLen else h.end.coerceAtMost(paraLen)
+
+    /** Removes every highlight in [paraIndex] holding [offset] (tap-erase:
+     *  any overlapping range counts — no exact re-tap needed). */
+    fun eraseAt(paraIndex: Int, offset: Int, paraLen: Int) {
+        val tag = "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)}"
+        val hits = highlights.filter {
+            it.paraIndex == paraIndex &&
+                offset >= it.start.coerceIn(0, paraLen) && offset < hlEnd(it, paraLen)
+        }
+        if (hits.isEmpty()) return
+        hits.forEach { MangaStore.clearHighlightExact(key, chapter, it.paraIndex, it.start, it.end) }
+        Logs.log("Novel", "$tag highlight erase-at para=$paraIndex offset=$offset count=${hits.size}")
+        highlights = MangaStore.highlightsFor(key).filter { it.chapterUrl == chapter }
+    }
+
+    /** Removes every highlight in [paraIndex] touching [start, end)
+     *  (drag-erase: undoes free-dragged ranges). */
+    fun eraseRange(paraIndex: Int, start: Int, end: Int, paraLen: Int) {
+        val tag = "chapter [$providerId] ${mangaUrl.take(60)} id=${chapter.take(60)}"
+        val s = start.coerceIn(0, paraLen)
+        val e = end.coerceIn(0, paraLen)
+        if (e <= s) return
+        val hits = highlights.filter {
+            it.paraIndex == paraIndex &&
+                s < hlEnd(it, paraLen) && e > it.start.coerceIn(0, paraLen)
+        }
+        if (hits.isEmpty()) return
+        hits.forEach { MangaStore.clearHighlightExact(key, chapter, it.paraIndex, it.start, it.end) }
+        Logs.log("Novel", "$tag highlight erase-range para=$paraIndex start=$s end=$e count=${hits.size}")
+        highlights = MangaStore.highlightsFor(key).filter { it.chapterUrl == chapter }
+    }
+
     val bg = when (theme) {
         1 -> Color(0xFFF4ECD8)
         2 -> Color(0xFFFFFFFF)
@@ -330,7 +370,10 @@ fun NovelReaderScreen(
                 onClick = { fontSize = (fontSize + 2f).coerceAtMost(28f) },
                 enabled = fontSize < 28f,
             ) { Text("A+", color = fg) }
-            TextButton(onClick = { highlightMode = !highlightMode }) {
+            TextButton(onClick = {
+                highlightMode = !highlightMode
+                if (!highlightMode) hlErase = false
+            }) {
                 Text(
                     text = "Mark",
                     color = if (highlightMode) MaterialTheme.colorScheme.primary else fg,
@@ -385,8 +428,15 @@ fun NovelReaderScreen(
                         )
                     }
                 }
+                TextButton(onClick = { hlErase = !hlErase }) {
+                    Text(
+                        text = "Erase",
+                        color = if (hlErase) MaterialTheme.colorScheme.primary else fg,
+                        fontWeight = if (hlErase) FontWeight.Bold else FontWeight.Normal,
+                    )
+                }
                 Text(
-                    text = "tap text to mark",
+                    text = if (hlErase) "tap/drag to unmark" else "tap text to mark",
                     style = MaterialTheme.typography.labelSmall,
                     color = dim,
                     modifier = Modifier.padding(start = 4.dp),
@@ -453,13 +503,15 @@ fun NovelReaderScreen(
                     }
                     items(paragraphs.size) { idx ->
                         val para = paragraphs[idx]
-                        // Saved ranges render as background spans. Two ways to
+                        // Saved ranges render as background spans. Three ways to
                         // mark: in Mark mode a tap marks the word / line /
                         // paragraph under the finger (tap again in the same
-                        // color to remove it); in ANY mode a long-press
-                        // (~0.5s) on a word starts a copy-like selection —
-                        // drag to the wanted word or line and release to
-                        // commit it in the current color.
+                        // color to remove it, or use Erase); with Erase on, a
+                        // tap removes the highlight under the finger and a
+                        // long-press drag removes every highlight it touches.
+                        // In ANY mode a long-press (~0.5s) on a word starts a
+                        // copy-like selection — drag to the wanted word or
+                        // line and release to commit it in the current color.
                         val paraHl = highlights.filter { it.paraIndex == idx }
                         var layout by remember(para) { mutableStateOf<TextLayoutResult?>(null) }
                         var liveSel by remember(para) { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -492,12 +544,16 @@ fun NovelReaderScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 14.dp)
-                                .pointerInput(highlightMode, hlUnit, para) {
+                                .pointerInput(highlightMode, hlUnit, hlErase, para) {
                                     detectTapGestures(
                                         onTap = { pos ->
                                             if (!highlightMode) return@detectTapGestures
                                             val l = layout ?: return@detectTapGestures
                                             val offset = l.getOffsetForPosition(pos)
+                                            if (hlErase) {
+                                                eraseAt(idx, offset, para.length)
+                                                return@detectTapGestures
+                                            }
                                             val range = when (hlUnit) {
                                                 1 -> {
                                                     val line = l.getLineForOffset(offset)
@@ -534,6 +590,10 @@ fun NovelReaderScreen(
                                                     .coerceIn(0, para.length)
                                                 var e = maxOf(sel.first, sel.second)
                                                     .coerceIn(0, para.length)
+                                                if (hlErase) {
+                                                    eraseRange(idx, s, e, para.length)
+                                                    return@detectDragGesturesAfterLongPress
+                                                }
                                                 // Snap to word edges, like a
                                                 // copy selection.
                                                 while (s > 0 && (para[s - 1].isLetterOrDigit() || para[s - 1] == '\'')) s--

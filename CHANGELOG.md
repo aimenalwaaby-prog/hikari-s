@@ -1,3 +1,9 @@
+## 0.11.49 (continuous build only)
+
+### Fixed
+- Tracker sign-ins still asking users to register their own app id: the app now ships its own owner-registered ids (AniList, MyAnimeList, Simkl, Trakt — each live-verified before embedding), so sign-in is tap → Sign in → normal browser login → approve → back in the app with the account named, like signing into any site — no developer pages, no paste (a typed id still overrides per device; Kitsu never needed any of this; Shikimori keeps its manual step until its id + secret pair is supplied)
+- Novel drag-highlights being permanent: Mark mode has an Erase toggle now — tap removes the highlight under the finger, a long-press drag removes every highlight it touches, which is the only way to undo a free-dragged range that can never be re-tapped exactly
+
 ## 0.11.48 (continuous build only)
 
 ### Fixed
