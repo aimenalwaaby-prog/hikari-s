@@ -50,6 +50,7 @@ import com.hikari.app.manga.NovelHighlight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The novel reader: text chapters from plain novel sources (see
@@ -116,10 +117,14 @@ fun NovelReaderScreen(
     val chapterLabel = chapters.getOrNull(chapterIndex)?.label ?: title.ifBlank { mangaUrl }
 
     // The chapter list normally arrives cached (the detail screen fetched it).
+    // Bounded: a chapter list that never answers must fail the screen, never
+    // spin its first paint forever.
     LaunchedEffect(key) {
         if (chapters.isNotEmpty()) return@LaunchedEffect
         val p = app.providers.byId(providerId) ?: return@LaunchedEffect
-        withContext(Dispatchers.IO) { runCatching { p.getEpisodes(item) } }
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(60_000L) { runCatching { p.getEpisodes(item) } }
+        }
         chapters = MangaStore.chaptersFor(key).orEmpty()
         if (chapter.isBlank()) chapter = chapters.firstOrNull()?.url.orEmpty()
     }
@@ -151,7 +156,22 @@ fun NovelReaderScreen(
             season = 1,
         )
         val streams = withContext(Dispatchers.IO) {
-            runCatching { p.getStreams(item, ep) }.getOrNull().orEmpty()
+            // Bounded: the chapter text must arrive or FAIL — the old code
+            // awaited the provider with no cap, so a hung extension call spun
+            // this screen forever with no error and no retry. 75s covers the
+            // provider's own per-page caps with room to spare; a timeout lands
+            // on the error card below, where Try-again re-runs the load.
+            withTimeoutOrNull(75_000L) {
+                runCatching { p.getStreams(item, ep) }.getOrNull()
+            }.orEmpty()
+        }
+        if (streams.isEmpty()) {
+            // Covers both the timeout above and a genuinely textless
+            // chapter: either way the spinner must end on the error card,
+            // where Try-again re-runs the load.
+            error = "Chapter text unavailable"
+            loading = false
+            return@LaunchedEffect
         }
         val parts = streams.mapNotNull { it.text.takeIf { t -> t.isNotBlank() } }
         if (parts.isEmpty()) {

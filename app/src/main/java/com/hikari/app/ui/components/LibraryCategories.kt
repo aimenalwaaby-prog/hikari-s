@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,7 +59,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hikari.app.HikariApp
 import com.hikari.app.data.LibraryCategory
+import com.hikari.app.data.MediaItem
+import com.hikari.app.data.MediaType
 import com.hikari.app.i18n.tr
 import com.hikari.app.tv.tvToggle
 import kotlinx.coroutines.launch
@@ -585,4 +589,54 @@ fun CategoryManagerSheet(
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+/**
+ * The poster hold-menu's Library slot (see PosterQuickMenu slot 2): the SAME
+ * "which categories?" sheet the detail screen's heart opens, over any poster
+ * grid. A hold-menu tap used to file the title silently into the Library with
+ * no category choice — now it asks, with the type-appropriate category
+ * pre-ticked so the common case is one tap, exactly like the detail screen.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QuickAddToLibrarySheet(item: MediaItem, onDismiss: () -> Unit) {
+    val app = HikariApp.instance
+    val scope = rememberCoroutineScope()
+    val categories by remember { app.store.libraryCategoriesFlow() }
+        .collectAsState(initial = LibraryCategory.DEFAULTS)
+    val filings by remember { app.store.favoriteCategoriesFlow() }
+        .collectAsState(initial = emptyMap())
+    val favorites by remember { app.store.favoritesFlow() }
+        .collectAsState(initial = emptyList())
+    val isSaved = favorites.any { it.uniqueId == item.uniqueId }
+    val savedCategories: Set<String> = filings[item.uniqueId].orEmpty()
+    val defaultCategories: Set<String> = when (item.type) {
+        MediaType.MOVIE -> setOf(LibraryCategory.MOVIES)
+        MediaType.SERIES -> setOf(LibraryCategory.SERIES)
+        else -> emptySet()
+    }
+    CategoryPickerSheet(
+        title = if (isSaved) tr("Move to") else tr("Add to library"),
+        subtitle = item.title,
+        categories = categories,
+        selected = if (isSaved) savedCategories else defaultCategories,
+        confirmLabel = if (isSaved) tr("Done") else tr("Add to library"),
+        onConfirm = { picked ->
+            scope.launch {
+                if (!isSaved) app.store.addFavorite(item)
+                app.store.setFavoriteCategories(item.uniqueId, picked)
+            }
+            onDismiss()
+        },
+        onCreateCategory = { name -> app.store.addLibraryCategory(name) },
+        removeLabel = tr("Remove from library"),
+        onRemove = if (isSaved) {
+            {
+                scope.launch { app.store.removeFavorite(item.uniqueId) }
+                onDismiss()
+            }
+        } else null,
+        onDismiss = onDismiss,
+    )
 }

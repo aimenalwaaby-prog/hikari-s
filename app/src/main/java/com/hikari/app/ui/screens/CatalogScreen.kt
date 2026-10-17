@@ -1,4 +1,5 @@
 package com.hikari.app.ui.screens
+import com.hikari.app.ui.components.QuickAddToLibrarySheet
 import com.hikari.app.ui.components.QuickMenuOverlay
 import com.hikari.app.ui.components.quickMenuGesture
 import com.hikari.app.ui.components.rememberQuickMenuState
@@ -969,11 +970,11 @@ private fun CatalogCard(
     val hero = if (cinema) Artwork.heroModel(item) else null
     // 1-second-hold quick menu (info / play / library / close) — see PosterQuickMenu.
     val quickMenu = rememberQuickMenuState()
-    val quickScope = rememberCoroutineScope()
     val latestClick by rememberUpdatedState(onClick)
     val latestPlay by rememberUpdatedState(onQuickPlay)
-    // Hoisted: `tr` is @Composable and must not run inside `runCatching`.
-    val addedToLibrary = tr("Added to library")
+    val latestItem by rememberUpdatedState(item)
+    // Hold-menu Library pick: the title the sheet files (null = no sheet).
+    var quickLibraryItem by remember { mutableStateOf<MediaItem?>(null) }
     // No clip on the outer Column: the artwork's own rounding used to extend
     // over the title/year lines and cut their edges. Only the image Box below
     // is rounded.
@@ -994,18 +995,10 @@ private fun CatalogCard(
                             val play = latestPlay
                             if (play != null) play(item) else latestClick()
                         }
-                        // Slot 2 files into the Library; slot 3 (Close)
+                        // Slot 2 opens the "which categories?" sheet (the same
+                        // one the detail screen's heart opens); slot 3 (Close)
                         // dismisses with no action.
-                        2 -> quickScope.launch {
-                            runCatching { com.hikari.app.HikariApp.instance.store.addFavorite(item) }
-                            runCatching {
-                                android.widget.Toast.makeText(
-                                    com.hikari.app.HikariApp.instance,
-                                    addedToLibrary,
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        }
+                        2 -> quickLibraryItem = latestItem
                         else -> {}
                     }
                 },
@@ -1053,6 +1046,9 @@ private fun CatalogCard(
                 )
             }
             if (quickMenu.visible) QuickMenuOverlay(quickMenu.selected)
+        }
+        quickLibraryItem?.let { picked ->
+            QuickAddToLibrarySheet(item = picked, onDismiss = { quickLibraryItem = null })
         }
         if (style.showTitles) {
             Text(

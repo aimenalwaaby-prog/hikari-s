@@ -1,3 +1,11 @@
+## 0.11.44 (continuous build only)
+
+### Fixed
+- Tracker sync now logs everything (Settings → Logs): per-title search start/end, exact queries sent per service, per-query HTTP status + new candidates, top candidates with id/score/kind/year/total, and the decision (direct / alias / cached / no-match) plus push results — a "no confident match" is fully answerable from the log
+- Sources sheet sitting empty while servers are in hand: the open sheet now re-checks the live session and repaints on its status tick, so any blank-with-servers state recovers within ~1.5s instead of sitting empty
+- Novel chapters spinning forever on tap: chapter loads ran on the background lane (queuing behind stream prefetches) with no timeout anywhere — they run on the interactive lane now, each page call is capped at 30s, and the reader itself caps the load at 75s (chapter list at 60s), landing on the error card with Try-again instead of an endless spinner
+- Poster hold-menu Library filing silently with no category choice: it opens the same "Add to library" category sheet the detail screen uses (type-appropriate category pre-ticked, new categories + re-file + remove included) on every poster grid
+
 ## 0.11.43 (continuous build only)
 
 ### Fixed

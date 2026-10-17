@@ -58,7 +58,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
-import com.hikari.app.HikariApp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
@@ -332,11 +331,13 @@ fun PosterCard(
     // The lambdas are hoisted into refs so the gesture (keyed on Unit, never
     // restarted) can never close over a stale item after recomposition.
     val quickMenu = rememberQuickMenuState()
-    val scope = rememberCoroutineScope()
     val latestClick by rememberUpdatedState(onClick)
     val latestPlay by rememberUpdatedState(onQuickPlay)
-    // Hoisted: `tr` is @Composable and must not run inside `runCatching`.
-    val addedToLibrary = tr("Added to library")
+    val latestItem by rememberUpdatedState(item)
+    // Hold-menu Library pick: the title the sheet files (null = no sheet).
+    // The sheet lives here — beside the gesture that opens it — so it works
+    // over every grid that uses this card, with no change at the call sites.
+    var quickLibraryItem by remember { mutableStateOf<MediaItem?>(null) }
     Column(
         Modifier
             .width(cardWidth)
@@ -357,19 +358,11 @@ fun PosterCard(
                             val play = latestPlay
                             if (play != null) play(item) else latestClick()
                         }
-                        // Slot 2 files into the Library; slot 3 (Close)
+                        // Slot 2 opens the "which categories?" sheet (the same
+                        // one the detail screen's heart opens); slot 3 (Close)
                         // dismisses with no action, so an opened menu never
                         // forces a pick.
-                        2 -> scope.launch {
-                            runCatching { HikariApp.instance.store.addFavorite(item) }
-                            runCatching {
-                                android.widget.Toast.makeText(
-                                    HikariApp.instance,
-                                    addedToLibrary,
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        }
+                        2 -> quickLibraryItem = latestItem
                         else -> {}
                     }
                 }
@@ -384,6 +377,9 @@ fun PosterCard(
                 modifier = Modifier.fillMaxSize(),
             )
             if (quickMenu.visible) QuickMenuOverlay(quickMenu.selected)
+        }
+        quickLibraryItem?.let { picked ->
+            QuickAddToLibrarySheet(item = picked, onDismiss = { quickLibraryItem = null })
         }
         if (style.showTitles) {
             Text(

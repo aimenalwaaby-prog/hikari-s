@@ -1,5 +1,6 @@
 package com.hikari.app.tracker
 
+import com.hikari.app.data.Logs
 import com.hikari.app.data.TrackerAccount
 import com.hikari.app.data.TrackerClient
 import com.hikari.app.data.TrackerKind
@@ -778,6 +779,10 @@ object TrackerApi {
     ): Result<List<TrackerMatch>> {
         val title = media.title.trim()
         if (title.isBlank()) return Result.success(emptyList())
+        Logs.log(
+            "Tracker",
+            "${client.kind.label} search start [${media.describe()}]",
+        )
         return try {
             when (client.kind) {
                 TrackerKind.ANILIST -> Result.success(anilistSearch(token, title, media))
@@ -786,10 +791,62 @@ object TrackerApi {
                 TrackerKind.SHIKIMORI -> Result.success(if (media.manga) emptyList() else shikimoriSearch(title, media))
                 TrackerKind.SIMKL -> Result.success(if (media.manga) emptyList() else simklSearch(client.id, title, media))
                 TrackerKind.TRAKT -> Result.success(if (media.manga) emptyList() else traktSearch(client.id, token, title, media))
+            }.also { result ->
+                val n = result.getOrNull()?.size
+                Logs.log(
+                    "Tracker",
+                    "${client.kind.label} search end [${media.describe()}] candidates=${n ?: "FAILED"}",
+                )
             }
         } catch (e: Exception) {
+            Logs.log("Tracker", "${client.kind.label} search threw [${media.describe()}]: ${e.message ?: e.javaClass.simpleName}")
             Result.failure(Exception("${client.kind.label} search failed: ${e.message ?: e.javaClass.simpleName}"))
         }
+    }
+
+    /** The watched title in the terms the search understands — the first thing
+     *  the log needs when a match fails, because the extension's own season /
+     *  episode numbering is usually where it went wrong. */
+    private fun TrackerMedia.describe(): String =
+        "title=\"$title\" season=$season ep=$episode year=$year movie=$movie manga=$manga"
+
+    /** One candidate on one log line: id, score, kind, year, total, title. */
+    private fun TrackerMatch.describe(): String =
+        "id=$id score=${"%.3f".format(score)} cat=$category year=$year total=$total title=\"$title\""
+
+    /**
+     * Full-detail search report, written for every backend on every title: the
+     * exact queries sent, the per-query HTTP status + new candidates, and the
+     * top candidates with scores. [perQuery] is filled by the backend's loop;
+     * pass the sorted output through here instead of returning it directly.
+     */
+    private fun logSearch(
+        label: String,
+        media: TrackerMedia,
+        title: String,
+        perQuery: List<String>,
+        out: List<TrackerMatch>,
+    ): List<TrackerMatch> {
+        val top = out.sortedByDescending { it.score }
+        val queries = searchQueries(title)
+        Logs.log(
+            "Tracker",
+            "$label search [${media.describe()}] queries=${queries.size} " +
+                queries.joinToString(" | ") { "\"$it\"" },
+        )
+        if (perQuery.isNotEmpty()) {
+            Logs.log("Tracker", "$label search [${media.describe()}] per-query: " + perQuery.joinToString(" · "))
+        }
+        if (top.isEmpty()) {
+            Logs.log("Tracker", "$label search [${media.describe()}] candidates=0 — nothing returned for any query")
+        } else {
+            val lines = top.take(10).mapIndexed { i, m -> "#${i + 1} ${m.describe()}" }
+            Logs.log("Tracker", "$label search [${media.describe()}] candidates=${top.size}: " + lines.joinToString(" ;; "))
+            if (top.size > 10) {
+                Logs.log("Tracker", "$label search [${media.describe()}] …and ${top.size - 10} more below score ${"%.3f".format(top[10].score)}")
+            }
+        }
+        return top
     }
 
     // --------------------------------------------------------------------- push
@@ -896,10 +953,16 @@ object TrackerApi {
         """.trimIndent()
         val seen = HashSet<Int>()
         val out = ArrayList<TrackerMatch>()
+        val perQuery = ArrayList<String>()
         for (q in searchQueries(title)) {
             val reply = graphql(token, query, JSONObject().put("search", q))
             val list = reply.json()?.optJSONObject("data")?.optJSONObject("Page")?.optJSONArray("media")
-                ?: continue
+            if (list == null) {
+                val err = reply.graphQlError()?.take(120)
+                perQuery += "\"$q\" http=${reply.code}" + (if (err != null) " gql-err=$err" else " no-media")
+                continue
+            }
+            val before = out.size
             for (i in 0 until list.length()) {
                 val m = list.optJSONObject(i) ?: continue
                 val id = m.optInt("id", 0)
@@ -925,8 +988,9 @@ object TrackerApi {
                     )
                 )
             }
+            perQuery += "\"$q\" http=${reply.code} +${out.size - before}"
         }
-        return out.sortedByDescending { it.score }
+        return logSearch("AniList", media, title, perQuery, out)
     }
 
     private suspend fun anilistPush(token: String, match: TrackerMatch, media: TrackerMedia): Result<String> {
@@ -976,13 +1040,19 @@ object TrackerApi {
         // and this call is about the title they are watching right now.
         val out = ArrayList<TrackerMatch>()
         val seen = HashSet<Int>()
+        val perQuery = ArrayList<String>()
         for (q in searchQueries(title)) {
             val malKind = if (media.manga) "manga" else "anime"
             val url = "https://api.myanimelist.net/v2/" + malKind +
                 "?q=${enc(q)}&limit=12&nsfw=true" +
                 "&fields=id,title,alternative_titles," + (if (media.manga) "num_chapters" else "num_episodes") + ",start_date,media_type"
             val reply = get(url, malHeaders(token))
-            val arr = reply.json()?.optJSONArray("data") ?: continue
+            val arr = reply.json()?.optJSONArray("data")
+            if (arr == null) {
+                perQuery += "\"$q\" http=${reply.code} no-data"
+                continue
+            }
+            val before = out.size
             for (i in 0 until arr.length()) {
                 val node = arr.optJSONObject(i)?.optJSONObject("node") ?: continue
                 val nid = node.optInt("id", 0)
@@ -1004,8 +1074,9 @@ object TrackerApi {
                     )
                 )
             }
+            perQuery += "\"$q\" http=${reply.code} +${out.size - before}"
         }
-        return out.sortedByDescending { it.score }
+        return logSearch("MyAnimeList", media, title, perQuery, out)
     }
 
     /** MAL's "synonyms" — the other spellings of a title, as a list. */
@@ -1053,10 +1124,16 @@ object TrackerApi {
     private suspend fun kitsuSearch(token: String, title: String, media: TrackerMedia): List<TrackerMatch> {
         val out = ArrayList<TrackerMatch>()
         val seen = HashSet<String>()
+        val perQuery = ArrayList<String>()
         for (q in searchQueries(title)) {
             val url = "https://kitsu.io/api/edge/anime?filter[text]=${enc(q)}&page[limit]=12"
             val reply = get(url, kitsuHeaders(token))
-            val arr = reply.json()?.optJSONArray("data") ?: continue
+            val arr = reply.json()?.optJSONArray("data")
+            if (arr == null) {
+                perQuery += "\"$q\" http=${reply.code} no-data"
+                continue
+            }
+            val before = out.size
             for (i in 0 until arr.length()) {
                 val node = arr.optJSONObject(i) ?: continue
                 val nid = node.optString("id")
@@ -1080,8 +1157,9 @@ object TrackerApi {
                     )
                 )
             }
+            perQuery += "\"$q\" http=${reply.code} +${out.size - before}"
         }
-        return out.sortedByDescending { it.score }
+        return logSearch("Kitsu", media, title, perQuery, out)
     }
 
     /**
@@ -1185,15 +1263,22 @@ object TrackerApi {
     private suspend fun shikimoriSearch(title: String, media: TrackerMedia): List<TrackerMatch> {
         val out = ArrayList<TrackerMatch>()
         val seen = HashSet<Int>()
+        val perQuery = ArrayList<String>()
         for (q in searchQueries(title)) {
             val url = "https://shikimori.one/api/animes?search=${enc(q)}&limit=12&order=popularity"
-            val arr = get(
+            val reply = get(
                 url,
                 mapOf(
                     "Accept" to "application/json",
                     "User-Agent" to "Hikari/" + com.hikari.app.BuildConfig.VERSION_NAME,
                 ),
-            ).array() ?: continue
+            )
+            val arr = reply.array()
+            if (arr == null) {
+                perQuery += "\"$q\" http=${reply.code} no-array"
+                continue
+            }
+            val before = out.size
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
                 val nid = o.optInt("id", 0)
@@ -1215,8 +1300,9 @@ object TrackerApi {
                     )
                 )
             }
+            perQuery += "\"$q\" http=${reply.code} +${out.size - before}"
         }
-        return out.sortedByDescending { it.score }
+        return logSearch("Shikimori", media, title, perQuery, out)
     }
 
     private suspend fun shikimoriPush(
@@ -1294,12 +1380,19 @@ object TrackerApi {
         }
         val out = ArrayList<TrackerMatch>()
         val seen = HashSet<String>()
+        val perQuery = ArrayList<String>()
         for (query in searchQueries(title)) {
             for (path in paths) {
-                val arr = get(
+                val reply = get(
                     "https://api.simkl.com/search/$path?client_id=${enc(clientId)}&q=${enc(query)}&extended=full",
                     mapOf("simkl-api-key" to clientId, "Accept" to "application/json"),
-                ).array() ?: continue
+                )
+                val arr = reply.array()
+                if (arr == null) {
+                    perQuery += "\"$query\"/$path http=${reply.code} no-array"
+                    continue
+                }
+                val before = out.size
                 for (i in 0 until arr.length()) {
                     val o = arr.optJSONObject(i) ?: continue
                     val id = o.optJSONObject("ids")?.optInt("simkl", 0) ?: 0
@@ -1334,9 +1427,10 @@ object TrackerApi {
                         )
                     )
                 }
+                perQuery += "\"$query\"/$path http=${reply.code} +${out.size - before}"
             }
         }
-        return out.sortedByDescending { it.score }
+        return logSearch("Simkl", media, title, perQuery, out)
     }
 
     private suspend fun simklPush(
@@ -1461,12 +1555,19 @@ object TrackerApi {
         val kinds = if (media.movie) listOf("movie", "show") else listOf("show", "movie")
         val out = ArrayList<TrackerMatch>()
         val seen = HashSet<String>()
+        val perQuery = ArrayList<String>()
         for (query in searchQueries(title)) {
             for (kind in kinds) {
-                val arr = get(
+                val reply = get(
                     "https://api.trakt.tv/search/$kind?query=${enc(query)}&limit=12&extended=full",
                     traktHeaders(clientId, token),
-                ).array() ?: continue
+                )
+                val arr = reply.array()
+                if (arr == null) {
+                    perQuery += "\"$query\"/$kind http=${reply.code} no-array"
+                    continue
+                }
+                val before = out.size
                 for (i in 0 until arr.length()) {
                     val entry = arr.optJSONObject(i) ?: continue
                     val node = entry.optJSONObject(kind) ?: continue
@@ -1504,9 +1605,10 @@ object TrackerApi {
                         )
                     )
                 }
+                perQuery += "\"$query\"/$kind http=${reply.code} +${out.size - before}"
             }
         }
-        return out.sortedByDescending { it.score }
+        return logSearch("Trakt", media, title, perQuery, out)
     }
 
     private suspend fun traktPush(

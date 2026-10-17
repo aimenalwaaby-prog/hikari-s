@@ -2,6 +2,7 @@ package com.hikari.app.tracker
 
 import com.hikari.app.data.AppStore
 import com.hikari.app.data.HistoryEntry
+import com.hikari.app.data.Logs
 import com.hikari.app.data.MediaType
 import com.hikari.app.manga.MangaStore
 import com.hikari.app.data.TrackerAccount
@@ -91,17 +92,24 @@ object TrackerSync {
             // only trusted while it still looks like the same title.
             val cached = matches[TrackerStore.matchKey(kind, media.title)]
                 ?.takeIf { matchScoreAny(media.title, it.title, media.year, it.year) >= TRACKER_AUTO_THRESHOLD }
-            val match = cached ?: resolve(store, client, live, media)
+            val match = if (cached != null) {
+                Logs.log("Tracker", "${kind.label} decide [\"${media.title}\"] CACHED id=${cached.id} title=\"${cached.title}\"")
+                cached
+            } else {
+                resolve(store, client, live, media)
+            }
             if (match == null) {
                 notes += "${kind.label}: no confident match for \"${media.title}\""
                 continue
             }
             TrackerApi.push(client, live, match, media)
                 .onSuccess { note ->
+                    Logs.log("Tracker", "${kind.label} push OK [\"${media.title}\" ep=${media.episode}] id=${match.id} $note")
                     notes += note
                     runCatching { store.markTrackerDone(doneKey) }
                 }
                 .onFailure { error ->
+                    Logs.log("Tracker", "${kind.label} push FAIL [\"${media.title}\" ep=${media.episode}] id=${match.id}: ${error.message}")
                     // A refusal can mean the stored match is stale (the service
                     // re-numbered something, or the account was reset), so it is
                     // forgotten: the next watch searches again instead of
@@ -146,10 +154,32 @@ object TrackerSync {
         media: TrackerMedia,
     ): TrackerMatch? {
         val candidates = TrackerApi.search(client, account.token, media).getOrNull().orEmpty()
-        val best = bestMatch(media, candidates) ?: aliasBestMatch(media, candidates)
-        best ?: return null
-        runCatching { store.putTrackerMatch(TrackerStore.matchKey(client.kind, media.title), best) }
-        return best
+        Logs.log(
+            "Tracker",
+            "${client.kind.label} decide [title=\"${media.title}\" season=${media.season} ep=${media.episode} " +
+                "year=${media.year} movie=${media.movie} manga=${media.manga}] candidates=${candidates.size}" +
+                if (candidates.isEmpty()) "" else " " + candidates.take(12).joinToString(" ;; ") {
+                    "id=${it.id} score=${"%.3f".format(it.score)} cat=${it.category} year=${it.year} total=${it.total} title=\"${it.title}\""
+                },
+        )
+        val direct = bestMatch(media, candidates)
+        if (direct != null) {
+            Logs.log("Tracker", "${client.kind.label} decide [\"${media.title}\"] DIRECT id=${direct.id} title=\"${direct.title}\" score=${"%.3f".format(direct.score)}")
+            runCatching { store.putTrackerMatch(TrackerStore.matchKey(client.kind, media.title), direct) }
+            return direct
+        }
+        val alias = aliasBestMatch(media, candidates)
+        if (alias != null) {
+            Logs.log("Tracker", "${client.kind.label} decide [\"${media.title}\"] ALIAS id=${alias.id} title=\"${alias.title}\" score=${"%.3f".format(alias.score)}")
+            runCatching { store.putTrackerMatch(TrackerStore.matchKey(client.kind, media.title), alias) }
+            return alias
+        }
+        Logs.log(
+            "Tracker",
+            "${client.kind.label} decide [\"${media.title}\"] NO-MATCH " +
+                "(threshold=$TRACKER_AUTO_THRESHOLD; pool empty, top below threshold, or a full tie — see candidates above)",
+        )
+        return null
     }
 
     /**

@@ -23,6 +23,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -53,6 +54,9 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     companion object {
         const val CATALOG_POPULAR = "popular"
         const val CATALOG_LATEST = "latest"
+        /** One novel page/call may take this long before it counts as dead —
+         *  see the novel branch of [getStreams]. */
+        const val NOVEL_CALL_MS = 30_000L
         val lastOutcome = ConcurrentHashMap<String, String>()
         // Same universal preview-set guard as the Anymex engine (see there):
         // a page set repeating verbatim for another chapter is previews.
@@ -656,7 +660,11 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
      * scrambled.
      */
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
-        gate(ProviderGate.Lane.BACKGROUND) {
+        // A chapter tap is INTERACTIVE work — the reader's spinner is on
+        // screen waiting for it — so it must never queue behind background
+        // stream prefetches on the same extension. Video lookups stay on the
+        // background lane; only the novel branch is user-waiting.
+        gate(if (isNovel) ProviderGate.Lane.INTERACTIVE else ProviderGate.Lane.BACKGROUND) {
         // A novel chapter is TEXT, not pages: each part travels as a
         // StreamSource with its text set and a blank url (the image reader
         // skips blank urls, so these can never leak into it). The novel
@@ -666,9 +674,18 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
             return@gate try {
                 val sch = ch(chapter.id).apply { name = chapter.name.orEmpty() }
-                val pages = runCatching { nsrc.getPageList(sch) }.getOrNull().orEmpty()
+                // Bounded: a dead page (or a host that never answers) must
+                // fail the chapter, never hang the reader's spinner forever.
+                // 30s per call, 150s for the whole chapter — a real book
+                // chapter that needs longer is vanishingly rare, and the
+                // reader's Try-again re-runs the whole thing anyway.
+                val pages = withTimeoutOrNull(NOVEL_CALL_MS) {
+                    runCatching { nsrc.getPageList(sch) }.getOrNull()
+                }.orEmpty()
                 val parts = pages.mapIndexedNotNull { i, pg ->
-                    val text = runCatching { nsrc.fetchPageText(pg) }.getOrNull()?.trim().orEmpty()
+                    val text = withTimeoutOrNull(NOVEL_CALL_MS) {
+                        runCatching { nsrc.fetchPageText(pg) }.getOrNull()
+                    }?.trim().orEmpty()
                     if (text.isBlank()) null else StreamSource(
                         name = "Part ${i + 1}",
                         url = "",
@@ -682,8 +699,9 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 } else {
                     // Single-text fallback: some novel sources serve the whole
                     // chapter as one page.
-                    val text = runCatching { nsrc.fetchPageText(Page(0, chapter.id)) }
-                        .getOrNull()?.trim().orEmpty()
+                    val text = withTimeoutOrNull(NOVEL_CALL_MS) {
+                        runCatching { nsrc.fetchPageText(Page(0, chapter.id)) }.getOrNull()
+                    }?.trim().orEmpty()
                     if (text.isBlank()) fail("chapter text unavailable", emptyList())
                     else {
                         lastOutcome[config.id] = "✓ 1 part"

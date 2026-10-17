@@ -8527,6 +8527,22 @@ class PlayerActivity : ComponentActivity() {
                         shown = text
                         hintView.text = text
                     }
+                    // Blank-sheet backstop (the stuck-empty report: the list
+                    // showing nothing while servers are already in hand). The
+                    // watcher path covers arrivals, but a paint that never
+                    // fired — a missed emission, a converged-then-dropped
+                    // list — leaves the box empty with no further tick of its
+                    // own. So while the visible list is empty AND servers
+                    // exist anywhere this player can see (its own list or the
+                    // live session), adopt + repaint on this cadence: a
+                    // genuinely empty search is untouched, and a stuck one
+                    // recovers within ~1.5s instead of sitting blank.
+                    val sessionSize = liveSessionId?.let {
+                        runCatching { StreamsLive.flow(it).value.size }.getOrDefault(0)
+                    } ?: 0
+                    if ((list.childCount - 1) <= 0 && (sources.isNotEmpty() || sessionSize > 0)) {
+                        runCatching { if (dialog.isShowing) requestPaint() }
+                    }
                     // 1.5s, not every tick: the tally line remeasures the whole
                     // panel on every change, and at 600ms that remeasure never
                     // stopped during a live search. Still live — tallies move

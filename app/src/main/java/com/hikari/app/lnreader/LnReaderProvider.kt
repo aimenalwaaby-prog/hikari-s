@@ -333,7 +333,10 @@ class LnReaderProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
-        gate(ProviderGate.Lane.BACKGROUND) {
+        // A chapter tap is INTERACTIVE work — the reader's spinner is on
+        // screen waiting for it — so it must never queue behind background
+        // passes on the same extension (see MangaProvider's novel branch).
+        gate(ProviderGate.Lane.INTERACTIVE) {
             if (!pluginFile.exists()) return@gate fail(missingReason(), emptyList())
             val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
             try {
