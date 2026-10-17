@@ -51,6 +51,7 @@ import com.hikari.app.data.TrackerAccount
 import com.hikari.app.data.TrackerClient
 import com.hikari.app.data.TrackerFlow
 import com.hikari.app.data.TrackerKind
+import com.hikari.app.data.Logs
 import com.hikari.app.net.Http
 import com.hikari.app.tracker.TrackerApi
 import com.hikari.app.tracker.TrackerRedirect
