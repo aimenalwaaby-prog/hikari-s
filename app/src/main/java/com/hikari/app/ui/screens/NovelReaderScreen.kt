@@ -519,7 +519,7 @@ fun NovelReaderScreen(
                                             val o = l.getOffsetForPosition(pos)
                                             liveSel = o to o
                                         },
-                                        onDrag = { change ->
+                                        onDrag = { change, _ ->
                                             change.consume()
                                             val l = layout
                                                 ?: return@detectDragGesturesAfterLongPress
