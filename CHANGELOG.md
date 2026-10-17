@@ -1,3 +1,8 @@
+## 0.11.51 (continuous build only)
+
+### Fixed
+- Simkl/Trakt "Open the confirmation page" silently doing nothing: the tap is now logged with its address, and if the browser refuses to open, the dialog says so out loud and copies the address — the sign-in can always be finished by hand — plus the address sits under the button with its own copy tap, so no outcome is a dead end
+
 ## 0.11.50 (continuous build only)
 
 ### Fixed

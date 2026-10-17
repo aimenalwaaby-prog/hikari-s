@@ -588,8 +588,37 @@ fun TrackerLoginDialog(
                                 }
                             }
                             Spacer(Modifier.height(6.dp))
-                            TextButton(onClick = { openUrl(context, login.verifyUrl) }) {
+                            TextButton(onClick = {
+                                Logs.log("Trackers", "${kind.label} confirm tap url=" + login.verifyUrl.take(160))
+                                if (!openUrl(context, login.verifyUrl)) {
+                                    // The tap must never die silently: the
+                                    // address is copied so the sign-in can be
+                                    // finished by hand in any browser, and the
+                                    // failure is logged + said out loud.
+                                    Logs.log("Trackers", "${kind.label} confirm external open failed — address copied instead")
+                                    copy(login.verifyUrl)
+                                    error = I18n.t(
+                                        "The browser would not open, so the confirmation address " +
+                                            "was copied — paste it into your browser, then type " +
+                                            "the code there."
+                                    )
+                                }
+                            }) {
                                 Text(tr("Open the confirmation page"))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    login.verifyUrl,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                TextButton(onClick = { copy(login.verifyUrl) }) {
+                                    Icon(
+                                        Icons.Filled.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
                             }
                         }
                     }
