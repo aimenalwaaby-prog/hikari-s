@@ -1331,8 +1331,11 @@ class ContentRepository(private val manager: ProviderManager) {
 
     /** How long the origin (plus the nuvio/Stremio passes) gets a head start
      *  before the other extensions are asked, so a working repo's servers are
-     *  still the first ones the player sees. */
-    private val CROSS_EXT_GRACE_MS = 2_500L
+     *  still the first ones the player sees. Short on purpose: the origin is
+     *  fetched from t=0 regardless, extraction is trust-ordered and the list
+     *  itself is origin-first, so a long grace only ever delayed the first
+     *  server without changing who wins the top row. */
+    private val CROSS_EXT_GRACE_MS = 600L
 
     /** Pause before re-asking the ORIGIN after an instant-empty attempt (see
      *  [fetchStreams]): a cold extension answers empty in milliseconds, and
@@ -1351,9 +1354,11 @@ class ContentRepository(private val manager: ProviderManager) {
      *  targets (the nuvio engines) wait [ORIGIN_HEAD_START_MS]; the origin's own
      *  engine family (the other CloudStream/… repos, which start beside it) waits
      *  [SAME_ENGINE_HEAD_START_MS]. Their servers still stream in right after,
-     *  so this only reorders who answers first, never removes anyone. */
-    private val ORIGIN_HEAD_START_MS = 800L
-    private val SAME_ENGINE_HEAD_START_MS = 1_200L
+     *  so this only reorders who answers first, never removes anyone. Both are
+     *  short: with the origin fetched from t=0 and the list origin-first by
+     *  construction, long head starts only delayed the first paint. */
+    private val ORIGIN_HEAD_START_MS = 250L
+    private val SAME_ENGINE_HEAD_START_MS = 400L
 
     /** Ceiling on how long the other repos are held back while the provider the
      *  title was opened from is still working (see [awaitOriginHeadStart]). The
@@ -1490,11 +1495,13 @@ class ContentRepository(private val manager: ProviderManager) {
     // Tight stagger so answers arrive in big bursts: the sheet paints every
     // arrival window as one batch (20-30 rows landing together is the normal
     // case, not a special path), each paint as soon as it lands — never held
-    // for a full set, never cancelling an in-flight extraction. The wedge
+    // for a full set, never cancelling an in-flight extraction. Gaps are short
+    // so the first servers paint in ~1s and the queue still never cold-loads
+    // dozens of runtimes in the same instant. The wedge
     // watchdog ([CROSS_EXT_STALL_MS]) and the device fan-out ceiling still
     // bound the work; TV and booster caps are untouched.
-    private val CROSS_EXT_WAVE_GAP_MS = 400L
-    private val CROSS_EXT_WAVE_SLOW_MS = 800L
+    private val CROSS_EXT_WAVE_GAP_MS = 150L
+    private val CROSS_EXT_WAVE_SLOW_MS = 400L
 
     /** How long the pass may go with NOTHING completing before it is called
      *  wedged and ends early, handing every repo it has no answer from to the

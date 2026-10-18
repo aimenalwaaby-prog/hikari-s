@@ -1,3 +1,9 @@
+## 0.11.55 (continuous build only)
+
+### Fixed
+- Telegram videos + webview sites unclickable (log-proven): our own auto-open guard convicted our own player/view intents as "an extension fired on its own" and the tap died silently inside runCatching — explicit intents into our own activities now always pass (the guard keeps blocking foreign/auto opens exactly as before), and any future block names the convicting class in the log
+- Slow server lists (10-15s, all-at-once): the search held cross-extension work 2.5s before starting and staggered everything after it — grace/head-start/wave gaps cut to ~0.6s/0.25-0.4s/0.15s so first servers paint in ~1-3s and keep streaming in live; every repo is still asked, budgets/sweeps untouched, no server left behind
+
 ## 0.11.54 (continuous build only)
 
 ### Fixed

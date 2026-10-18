@@ -65,6 +65,15 @@ object ExtensionUiGuard {
      */
     fun checkStartActivity(intent: Intent?): Boolean {
         if (intent == null) return false
+        // Internal navigation is never an "external open": an explicit intent
+        // into one of our own activities (player, web view, settings...) always
+        // passes. The abuse this guard targets is extensions firing the OUTSIDE
+        // world (browser intents, their own activities) on their own — our own
+        // screens opening our own player/view is the app itself working, and
+        // blocking it is the whole "telegram videos, webview sites unclickable"
+        // class (the tap then dies silently inside runCatching with no toast).
+        val componentClass = runCatching { intent.component?.className }.getOrNull()
+        if (componentClass != null && componentClass.startsWith("com.hikari.app.")) return true
         if (isAllowed()) return true
         val frames = Thread.currentThread().stackTrace
         if (!hasPluginFrame(frames)) return true
@@ -72,7 +81,8 @@ object ExtensionUiGuard {
         Logs.log(
             "Extensions",
             "blocked an external open an extension fired on its own: " +
-                intent.toUri(Intent.URI_INTENT_SCHEME).take(220),
+                intent.toUri(Intent.URI_INTENT_SCHEME).take(220) +
+                " convict=" + (convictFrame(frames) ?: "unknown"),
         )
         return false
     }
@@ -117,6 +127,24 @@ object ExtensionUiGuard {
             i++
         }
         return false
+    }
+
+    /** The frame [hasPluginFrame] convicted, for the block log — so the next
+     *  "why did my tap die" report names the class instead of guessing. */
+    private fun convictFrame(frames: Array<StackTraceElement>): String? {
+        var i = 0
+        while (i < frames.size && frames[i].className == "java.lang.Thread") i++
+        while (i < frames.size && frames[i].className.startsWith("com.hikari.app.net.ExtensionUiGuard")) i++
+        while (i < frames.size && frames[i].className.startsWith("com.hikari.") &&
+            frames[i].methodName == "startActivity"
+        ) i++
+        while (i < frames.size) {
+            val name = frames[i].className
+            if (name.startsWith("com.hikari.")) return null
+            if (!isNeutral(name)) return name + "." + frames[i].methodName
+            i++
+        }
+        return null
     }
 
     /**
