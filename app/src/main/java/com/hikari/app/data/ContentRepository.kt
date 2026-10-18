@@ -4982,7 +4982,7 @@ class ContentRepository(private val manager: ProviderManager) {
                         if (isHung(p.config.id)) {
                             if (deadSessionUntil[p.config.id]?.let { System.currentTimeMillis() < it } == true) {
                                 val rn = p.config.name.ifBlank { p.config.id }
-                                tally.verdict[p.config.id] = "$rn — sitting out (silent twice in a row)"
+                                crossTally.verdict[p.config.id] = "$rn — sitting out (silent twice in a row)"
                                 bumpCrossStatus()
                             }
                             continue
