@@ -4578,6 +4578,7 @@ private fun FolderRowList(
                 title = row.title,
                 providerName = if (showProviderName) row.providerName else "",
                 items = row.items,
+                keeperKey = if (keeperKey.isBlank()) "" else "colRow:$keeperKey:${row.key}",
                 onClick = { item ->
                     Routes.safeNavigate(
                         nav,

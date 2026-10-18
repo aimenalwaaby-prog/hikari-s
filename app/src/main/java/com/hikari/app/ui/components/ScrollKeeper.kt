@@ -114,8 +114,11 @@ fun keptListState(
                 val idx = state.firstVisibleItemIndex
                 val off = state.firstVisibleItemScrollOffset
                 val anchor = keysNow.value.getOrNull(idx)
-                ScrollKeeper.save(key, idx, off, anchor)
-                scrollLog("save key=$key idx=$idx off=$off anchor=$anchor")
+                if (idx <= 0 && off <= 0) scrollLog("drop key=$key (left at top)")
+                else {
+                    ScrollKeeper.save(key, idx, off, anchor)
+                    scrollLog("save key=$key idx=$idx off=$off anchor=$anchor")
+                }
             }
         }
     }
@@ -182,8 +185,11 @@ fun keptGridState(
                 val idx = state.firstVisibleItemIndex
                 val off = state.firstVisibleItemScrollOffset
                 val anchor = keysNow.value.getOrNull(idx)
-                ScrollKeeper.save(key, idx, off, anchor)
-                scrollLog("save key=$key idx=$idx off=$off anchor=$anchor")
+                if (idx <= 0 && off <= 0) scrollLog("drop key=$key (left at top)")
+                else {
+                    ScrollKeeper.save(key, idx, off, anchor)
+                    scrollLog("save key=$key idx=$idx off=$off anchor=$anchor")
+                }
             }
         }
     }
@@ -220,8 +226,12 @@ fun keptScrollState(key: String): ScrollState {
     DisposableEffect(key) {
         onDispose {
             runCatching {
-                ScrollKeeper.save(key, state.value)
-                scrollLog("save key=$key off=${state.value}")
+                val off = state.value
+                if (off <= 0) scrollLog("drop key=$key (left at top)")
+                else {
+                    ScrollKeeper.save(key, off)
+                    scrollLog("save key=$key off=$off")
+                }
             }
         }
     }

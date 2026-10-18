@@ -113,6 +113,9 @@ fun MediaRow(
     onShowAll: (() -> Unit)? = null,
     /** Poster hold-menu play target (detail autoplay); plain detail open when null. */
     onQuickPlay: ((MediaItem) -> Unit)? = null,
+    /** ScrollKeeper slot for this row's horizontal scroll (see ScrollKeeper):
+     *  Back from a title lands where the row was. Blank keeps a plain state. */
+    keeperKey: String = "",
 ) {
     val style = rememberPosterStyle()
     if (TvMode.current()) {
@@ -176,6 +179,11 @@ fun MediaRow(
         // rather than on every recomposition of it (a row recomposes on every
         // scroll step): this is a fresh list otherwise.
         val uniqueItems = rememberVisibleItems(items)
+        // A row's horizontal scroll dies with the page unless it is kept: in
+        // a one-row folder the row IS the browsing position, and losing it
+        // read as "Back jumps". Keys re-find the exact poster when the row
+        // reloads in a different order (see ScrollKeeper).
+        val rowKeys = remember(uniqueItems) { uniqueItems.map { it.uniqueId } }
         // The adult-content gate is applied where the row is DRAWN (see
         // [NsfwGate] and [rememberVisibleItems]): every shelf in the app funnels
         // through this composable — Home, collections, the detail page's
@@ -183,6 +191,8 @@ fun MediaRow(
         // the Settings switch take effect on the next frame, with no re-fetch and
         // no stale cached row to trip over.
         LazyRow(
+            state = if (keeperKey.isBlank()) androidx.compose.foundation.lazy.rememberLazyListState()
+            else keptListState(keeperKey, itemKeys = rowKeys),
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {

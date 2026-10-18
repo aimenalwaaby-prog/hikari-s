@@ -1,3 +1,8 @@
+## 0.11.62 (continuous build only)
+
+### Fixed
+- Back still resetting the poster rows (Japan folder and every shelf: scroll right along a row, open a title, come back at the row's start — the log proved the pages held while the rows had no keeper at all): every shelf row now holds its own horizontal spot per page (folder rows, Home rows, anchored to the exact poster), and the Scroll log now says "drop (left at top)" instead of a misleading save when a page is left at its top
+
 ## 0.11.61 (continuous build only)
 
 ### Fixed

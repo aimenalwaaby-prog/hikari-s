@@ -1182,6 +1182,7 @@ fun HomeScreen(nav: NavHostController) {
                         title = row.title,
                         providerName = row.providerName,
                         items = row.items,
+                        keeperKey = "homeRow:" + row.key.ifBlank { "${row.providerName}|${row.title}" },
                         onClick = { item ->
                             Routes.safeNavigate(
                                 nav,
