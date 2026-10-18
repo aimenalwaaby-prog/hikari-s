@@ -1,3 +1,9 @@
+## 0.11.67 (continuous build only)
+
+### Fixed
+- Zangetsu titles opening but never playing ("no playable server") and most providers listing nothing: the bridge missed three host globals the providers expect (htmlText, absUrl, base64ToBytes) so detail/episodes threw and play fell back to a bare slug the provider rejects — all three are now injected, and failing fetches plus provider errors are logged under Zangetsu/Tracker tags so the next log names any block
+- Tracker picks on Home silently empty (Trakt): the failure reason is now logged and shown in the empty state instead of a blank "Couldn't load", and Trakt endpoint errors are logged per call
+
 ## 0.11.66 (continuous build only)
 
 ### Fixed

@@ -110,7 +110,7 @@ fun keptListState(
                 ) {
                     runCatching { state.scrollToItem(target, s.offset) }
                 }
-                scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount}")
+                scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount} anchorFound=" + (s.anchor != null && keysNow.value.indexOf(s.anchor) >= 0))
                 // Follow the anchor while late content streams in above the
                 // landing spot (see FOLLOW_MS): sitting still would leave the
                 // wrong rows on screen. Stands down only when the USER moves
@@ -124,17 +124,17 @@ fun keptListState(
                 while (System.currentTimeMillis() < followUntil) {
                     delay(250L)
                     // Dragging or flinging: the user is driving now.
-                    if (state.isScrollInProgress) return@LaunchedEffect
+                    if (state.isScrollInProgress) { scrollLog("stand-down key=$key (user took list during follow)"); return@LaunchedEffect }
                     val ai = keysNow.value.indexOf(s.anchor)
                     if (ai < 0) {
                         // Anchor gone for now (rows reloading): hold unless the
                         // user scrolls away, in which case it is theirs.
-                        if (state.firstVisibleItemIndex != lastTarget) return@LaunchedEffect
+                        if (state.firstVisibleItemIndex != lastTarget) { scrollLog("stand-down key=$key (anchor gone, user moved)"); return@LaunchedEffect }
                     } else if (state.firstVisibleItemIndex == ai) {
                         lastTarget = ai
                     } else if (ai == lastTarget) {
                         // Anchor stationary, viewport moved: that was the user.
-                        return@LaunchedEffect
+                        scrollLog("stand-down key=$key (viewport left anchor)"); return@LaunchedEffect
                     } else {
                         // Anchor moved under a stationary viewport: feed update.
                         runCatching { state.scrollToItem(ai, s.offset) }
@@ -212,7 +212,7 @@ fun keptGridState(
                 ) {
                     runCatching { state.scrollToItem(target, s.offset) }
                 }
-                scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount}")
+                scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount} anchorFound=" + (s.anchor != null && keysNow.value.indexOf(s.anchor) >= 0))
                 // Follow the anchor while late content streams in above the
                 // landing spot (see FOLLOW_MS): sitting still would leave the
                 // wrong rows on screen. Stands down only when the USER moves
@@ -226,17 +226,17 @@ fun keptGridState(
                 while (System.currentTimeMillis() < followUntil) {
                     delay(250L)
                     // Dragging or flinging: the user is driving now.
-                    if (state.isScrollInProgress) return@LaunchedEffect
+                    if (state.isScrollInProgress) { scrollLog("stand-down key=$key (user took list during follow)"); return@LaunchedEffect }
                     val ai = keysNow.value.indexOf(s.anchor)
                     if (ai < 0) {
                         // Anchor gone for now (rows reloading): hold unless the
                         // user scrolls away, in which case it is theirs.
-                        if (state.firstVisibleItemIndex != lastTarget) return@LaunchedEffect
+                        if (state.firstVisibleItemIndex != lastTarget) { scrollLog("stand-down key=$key (anchor gone, user moved)"); return@LaunchedEffect }
                     } else if (state.firstVisibleItemIndex == ai) {
                         lastTarget = ai
                     } else if (ai == lastTarget) {
                         // Anchor stationary, viewport moved: that was the user.
-                        return@LaunchedEffect
+                        scrollLog("stand-down key=$key (viewport left anchor)"); return@LaunchedEffect
                     } else {
                         // Anchor moved under a stationary viewport: feed update.
                         runCatching { state.scrollToItem(ai, s.offset) }

@@ -443,7 +443,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
             val app = getApplication<Application>() as HikariApp
             return trackerKeys.flatMap { key ->
                 val kind = trackerKindOf(key) ?: return@flatMap emptyList()
-                TrackerLibraryRepository.load(app, kind.key).getOrDefault(emptyList()).map { shelf ->
+                TrackerLibraryRepository.load(app, kind.key).onFailure { e ->
+                    com.hikari.app.data.Logs.log("Home", "tracker pick " + key + ": " + (e.message ?: "failed"))
+                }.getOrDefault(emptyList()).map { shelf ->
                     CatalogRow(providerId = TRACKER_PREFIX + kind.key, providerName = kind.label, title = shelf.title, items = shelf.items, key = TRACKER_PREFIX + shelf.key, catalogId = shelf.key, type = shelf.items.firstOrNull()?.type ?: MediaType.UNKNOWN, rawType = shelf.items.firstOrNull()?.rawType ?: "anime")
                 }
             }
@@ -3064,7 +3066,8 @@ private fun MediaItem.shrinkPoster(): MediaItem {
  * [com.hikari.app.providers.HikariProviderAdapter.catalogErrors].
  */
 private fun engineFailureReason(providerId: String): String? =
-    com.hikari.app.providers.HikariProviderAdapter.catalogErrors[providerId]
+    com.hikari.app.data.TrackerLibraryRepository.errors[providerId]
+        ?: com.hikari.app.providers.HikariProviderAdapter.catalogErrors[providerId]
         ?: com.hikari.app.cs3.Cs3MainApiProvider.catalogErrors[providerId]
         ?: com.hikari.app.providers.StremioAddon.catalogErrors[providerId]
         ?: com.hikari.app.nuvio.NuvioScraper.catalogErrors[providerId]

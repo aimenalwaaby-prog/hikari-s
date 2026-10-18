@@ -127,6 +127,65 @@ object ZangetsuRuntime {
           }
           return wait;
         };
+        var __zB64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        function base64ToBytes(s) {
+          var t = String(s == null ? '' : s).replace(/[^A-Za-z0-9\+\/=]/g, '');
+          var out = [], i = 0;
+          while (i < t.length) {
+            var e1 = __zB64chars.indexOf(t.charAt(i++));
+            var e2 = __zB64chars.indexOf(t.charAt(i++));
+            var e3 = __zB64chars.indexOf(t.charAt(i++));
+            var e4 = __zB64chars.indexOf(t.charAt(i++));
+            if (e1 < 0 || e2 < 0) break;
+            out.push(((e1 << 2) | (e2 >> 4)) & 0xff);
+            if (e3 !== 64 && e3 >= 0) out.push((((e2 & 15) << 4) | (e3 >> 2)) & 0xff);
+            if (e4 !== 64 && e4 >= 0) out.push((((e3 & 3) << 6) | e4) & 0xff);
+          }
+          return out;
+        }
+        function atob(s) {
+          var b = base64ToBytes(s), o = '', i;
+          for (i = 0; i < b.length; i++) o += String.fromCharCode(b[i] & 0xff);
+          return o;
+        }
+        function btoa(s) {
+          var t = String(s == null ? '' : s), o = '', i, c1, c2, c3;
+          for (i = 0; i < t.length; i += 3) {
+            c1 = t.charCodeAt(i) & 0xff; c2 = (i + 1 < t.length) ? t.charCodeAt(i + 1) & 0xff : -1; c3 = (i + 2 < t.length) ? t.charCodeAt(i + 2) & 0xff : -1;
+            o += __zB64chars.charAt(c1 >> 2);
+            o += __zB64chars.charAt(((c1 & 3) << 4) | (c2 >= 0 ? (c2 >> 4) : 0));
+            o += (c2 >= 0) ? __zB64chars.charAt(((c2 & 15) << 2) | (c3 >= 0 ? (c3 >> 6) : 0)) : '=';
+            o += (c3 >= 0) ? __zB64chars.charAt(c3 & 63) : '=';
+          }
+          return o;
+        }
+        function htmlText(s) {
+          var t = String(s == null ? '' : s);
+          t = t.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+          t = t.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+          t = t.replace(/<[^>]*>/g, ' ');
+          t = t.replace(/&nbsp;/gi, ' ');
+          t = t.replace(/&amp;/gi, '&');
+          t = t.replace(/&lt;/gi, '<');
+          t = t.replace(/&gt;/gi, '>');
+          t = t.replace(/&quot;/gi, '"');
+          t = t.replace(/&#39;|&apos;/gi, "'");
+          t = t.replace(/&#x([0-9a-fA-F]+);/g, function(m, h) { return String.fromCharCode(parseInt(h, 16)); });
+          t = t.replace(/&#(\d+);/g, function(m, d) { return String.fromCharCode(parseInt(d, 10)); });
+          t = t.replace(/\s+/g, ' ');
+          return t.replace(/^\s+|\s+$/g, '');
+        }
+        function absUrl(href, base) {
+          var h = String(href == null ? '' : href).trim();
+          if (!h) return '';
+          if (/^https?:\/\//i.test(h)) return h;
+          if (h.indexOf('//') === 0) return 'https:' + h;
+          var b = String(base == null ? '' : base);
+          var m = b.match(/^(https?:\/\/[^\/]+)/i);
+          var origin = m ? m[1] : '';
+          if (h.charAt(0) === '/') return origin + h;
+          return b.replace(/\/[^\/]*$/, '/') + h;
+        }
         globalThis.__zCall = function(fn, argsJson) {
           var args = [];
           try { args = JSON.parse(argsJson); } catch (e) {
@@ -204,6 +263,10 @@ object ZangetsuRuntime {
                 out.put("body", text)
                 out.put("url", res.request.url.toString())
                 if (!res.isSuccessful) out.put("error", "HTTP " + res.code)
+                if (!res.isSuccessful) {
+                    val host = runCatching { res.request.url.host }.getOrDefault("?")
+                    runCatching { Logs.log("Zangetsu", "fetch " + host + " HTTP " + res.code) }
+                }
             }
         } catch (e: Throwable) {
             out.put("ok", false)
@@ -328,7 +391,14 @@ object ZangetsuRuntime {
                                 }
                             }
                         }
-                        if (deferred.isCompleted) deferred.await()
+                        if (deferred.isCompleted) {
+                            val payload = deferred.await()
+                            if (runCatching { !JSONObject(payload).optBoolean("ok", false) }.getOrDefault(false)) {
+                                val err = runCatching { JSONObject(payload).optString("error").take(150) }.getOrDefault("")
+                                Logs.log("Zangetsu", "$sourceId $fnName: $err")
+                            }
+                            payload
+                        }
                         else if (idleBail) failure("the extension stopped responding before it could finish")
                         else failure("timed out after ${budgetMs / 1000}s")
                     } catch (e: Throwable) {

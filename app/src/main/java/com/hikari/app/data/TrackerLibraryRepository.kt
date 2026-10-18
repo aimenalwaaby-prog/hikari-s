@@ -11,8 +11,14 @@ import java.net.URLEncoder
 object TrackerLibraryRepository {
     data class Shelf(val key: String, val title: String, val items: List<MediaItem>)
 
+    /** Why a tracker pick last produced nothing, keyed by pick key
+     *  (`tracker:trakt`) — read by Home's empty state so a dead login says
+     *  so instead of a blank "Couldn't load". */
+    val errors = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     suspend fun load(app: HikariApp, sourceOverride: String? = null): Result<List<Shelf>> = withContext(Dispatchers.IO) {
-        when ((sourceOverride ?: runCatching { app.store.trackerLibrarySource() }.getOrDefault("nuvio")).lowercase()) {
+        val key = (sourceOverride ?: runCatching { app.store.trackerLibrarySource() }.getOrDefault("nuvio")).lowercase()
+        val r = when (key) {
             "trakt" -> loadTrakt(app)
             "simkl" -> loadSimkl(app)
             "anilist" -> loadAniList(app)
@@ -22,6 +28,9 @@ object TrackerLibraryRepository {
             "mdblist" -> Result.failure(IllegalStateException("MDBList library requires a connected MDBList account."))
             else -> Result.success(emptyList())
         }
+        r.onFailure { errors["tracker:$key"] = it.message ?: "couldn't load" }
+            .onSuccess { errors.remove("tracker:$key") }
+        r
     }
 
     private suspend fun loadTrakt(app: HikariApp): Result<List<Shelf>> {
@@ -47,7 +56,10 @@ object TrackerLibraryRepository {
         suspend fun get(path: String): JSONArray? = runCatching {
             val response = Http.get("https://api.trakt.tv$path", headers)
             if (response.code == 401) { traktUnauthorized = true; return@runCatching null }
-            if (!response.isSuccessful) return@runCatching null
+            if (!response.isSuccessful) {
+                Logs.log("Tracker", "trakt $path HTTP " + response.code)
+                return@runCatching null
+            }
             JSONArray(response.body?.string().orEmpty())
         }.getOrNull()
 
