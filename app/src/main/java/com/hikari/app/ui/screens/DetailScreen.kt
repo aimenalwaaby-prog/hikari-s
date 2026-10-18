@@ -2512,8 +2512,16 @@ fun DetailScreen(
                             "Searching this playlist for servers…"
                         exceptionN > 0 ->
                             "Searching your extension + $exceptionN more…"
-                        !com.hikari.app.data.SearchScope.allExtensions ->
-                            "Searching your extension for servers…"
+                        !com.hikari.app.data.SearchScope.allExtensions -> {
+                            // Name the extension being searched the moment the
+                            // search starts, so a "this extension only" tap
+                            // never sits on a nameless line while its 15
+                            // servers resolve one by one.
+                            val originName = providers.firstOrNull { it.config.id == (m?.providerId ?: providerId) }
+                                ?.config?.name?.ifBlank { null }
+                            if (originName != null) "Searching $originName for servers…"
+                            else "Searching your extension for servers…"
+                        }
                         else ->
                             "Searching $searchable extension" + (if (searchable == 1) "" else "s") + "…"
                     },
@@ -5535,13 +5543,24 @@ fun DetailScreen(
             )
             Spacer(Modifier.height(8.dp))
             when {
-                streams.isEmpty() && loadingStreams -> Box(
+                streams.isEmpty() && loadingStreams -> Column(
                     Modifier
                         .fillMaxWidth()
                         .padding(24.dp),
-                    contentAlignment = Alignment.Center
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     CircularProgressIndicator()
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        run {
+                            val originName = providers.firstOrNull { it.config.id == (m?.providerId ?: providerId) }
+                                ?.config?.name?.ifBlank { null }
+                            if (originName != null) "Searching $originName for servers…"
+                            else tr("Searching for servers…")
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
                 streams.isEmpty() -> Column(
                     Modifier

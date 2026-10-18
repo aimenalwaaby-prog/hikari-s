@@ -154,6 +154,8 @@ class AppStore(private val ctx: Context) {
         val CF_AUTO_SOLVE = booleanPreferencesKey("cfAutoSolve")
         val EXT_VERIFY_WEBVIEW = booleanPreferencesKey("extVerifyWebview")
         val WEBVIEW_REDIRECT_ALLOW = stringPreferencesKey("webviewRedirectAllow")
+        val WEBVIEW_POPUP_ALLOW = stringPreferencesKey("webviewPopupAllow")
+        val WEBVIEW_POPUP_BLOCK = stringPreferencesKey("webviewPopupBlock")
         val WEBVIEW_DEFAULT_UA = booleanPreferencesKey("webviewDefaultUa")
         val WEBVIEW_CUSTOM_UA = stringPreferencesKey("webviewCustomUa")
         val LANGUAGE = stringPreferencesKey("appLanguage")
@@ -3953,6 +3955,26 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
         // would leave that first redirect blocked.
         RedirectAllow.set(list)
         write("WEBVIEW_REDIRECT_ALLOW") { it[K.WEBVIEW_REDIRECT_ALLOW] = encodeStringList(list) }
+    }
+
+    /** Popup hosts the user chose "Always allow" for (WebView popup dialog). */
+    fun webviewPopupAllowFlow(): Flow<List<String>> =
+        store.data.map { parseStringList(it[K.WEBVIEW_POPUP_ALLOW]) }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun webviewPopupAllow(): List<String> = webviewPopupAllowFlow().first()
+
+    suspend fun setWebviewPopupAllow(list: List<String>) {
+        write("WEBVIEW_POPUP_ALLOW") { it[K.WEBVIEW_POPUP_ALLOW] = encodeStringList(list) }
+    }
+
+    /** Popup hosts the user chose "Block always" for (never ask again). */
+    fun webviewPopupBlockFlow(): Flow<List<String>> =
+        store.data.map { parseStringList(it[K.WEBVIEW_POPUP_BLOCK]) }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun webviewPopupBlock(): List<String> = webviewPopupBlockFlow().first()
+
+    suspend fun setWebviewPopupBlock(list: List<String>) {
+        write("WEBVIEW_POPUP_BLOCK") { it[K.WEBVIEW_POPUP_BLOCK] = encodeStringList(list) }
     }
 
     // ---- WebView user agent (stock Android default vs custom) ----

@@ -4042,9 +4042,33 @@ class ContentRepository(private val manager: ProviderManager) {
                     extractJobs.forEach { merge(it) }
                     // Progressive emission: hand over every newly-found server
                     // so the UI can show them while the rest keep searching.
-                    if (onProgress != null && merged.size != lastEmitted) {
+                    // PLUS each still-running provider's own running total
+                    // (see ContentProvider.partialStreams): a single extension
+                    // resolving 15 links one by one used to hold all of them
+                    // until its whole run finished — 15-20s of nothing, then
+                    // everything at once. Now server 2 prints the second it
+                    // resolves, server 3 right after, and so on.
+                    var progress: List<StreamSource>? = null
+                    if (onProgress != null) {
+                        if (merged.size != lastEmitted) {
+                            progress = merged.values.toList()
+                        } else {
+                            for (t in targets) {
+                                val part = runCatching { t.partialStreams() }.getOrDefault(emptyList())
+                                if (part.isEmpty()) continue
+                                var grew = false
+                                for (s in part) {
+                                    if (merged.putIfAbsent(s.identityKey(), s) == null) grew = true
+                                }
+                                if (grew) break
+                            }
+                            if (merged.size != lastEmitted) progress = merged.values.toList()
+                        }
+                    }
+                    if (progress != null) {
                         lastEmitted = merged.size
-                        onProgress(merged.values.toList())
+                        passFound = merged.values.toList()
+                        onProgress(progress)
                     }
                     val now = System.currentTimeMillis()
                     // New servers landing IS progress: a pass that is producing

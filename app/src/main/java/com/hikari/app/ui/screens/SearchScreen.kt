@@ -334,6 +334,24 @@ fun SearchScreen(
     // phones are untouched, and a set that shows the full frame keeps the
     // user's 0.
     val context = LocalContext.current
+    // Auto-focus the search box (phones only): opening the Search tab puts
+    // the cursor in the bar and raises the keyboard, so the user types
+    // straight away instead of tapping the bar a second time. One-shot per
+    // visit — results updates must never steal focus back. TV never raises
+    // a software keyboard, so it only takes focus when a query is preset.
+    val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    var searchAutoFocused by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (searchAutoFocused) return@LaunchedEffect
+        searchAutoFocused = true
+        if (TvMode.current()) return@LaunchedEffect
+        kotlinx.coroutines.delay(250)
+        runCatching {
+            searchFocus.requestFocus()
+            keyboard?.show()
+        }
+    }
     val overscanFlow = remember(context) {
         (context.applicationContext as HikariApp).store.tvOverscanFlow()
     }
@@ -516,6 +534,7 @@ fun SearchScreen(
                 soleName != null -> "Search in $soleName…"
                 else -> "Search in ${selected.size} selected sources…"
             },
+            focusRequester = searchFocus,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(

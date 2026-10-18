@@ -1,3 +1,10 @@
+## 0.11.58 (continuous build only)
+
+### Fixed
+- WebView ad overlay surviving the blockers (the "1 MESSAGE FROM: CINDY" card on bunkr.cr): chat-bait overlays are now hidden like any other ad box (fixed cards matching dating/chat-bait wording, video never touched), the ⋯ menu carries "Block this ad site" for the ad host behind the last popup/blocked redirect (adds it to the blocklist AND the popup block-always list, reverts in Settings), and the popup question is now Allow once / Always allow / Block always / Cancel — both popup lists live in Settings → Privacy & Browsing → WebView safety with one-tap revert
+- Server list holding one extension's 15 servers until all finished (15-20s of nothing, then everything at once): a running extraction now publishes each server the moment it resolves, so server 2 prints in a second and server 3 right after — plus the search names the extension it is asking ("Searching PenguPlay…") on the player cover and the sheet instead of a nameless line
+- Search tab needing a second tap on the bar: opening Search now puts the cursor in the bar and raises the keyboard at once (phones only, one-shot — results never steal focus back)
+
 ## 0.11.57 (continuous build only)
 
 ### Fixed

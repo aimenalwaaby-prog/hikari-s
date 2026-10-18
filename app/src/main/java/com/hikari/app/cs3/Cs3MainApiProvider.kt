@@ -144,6 +144,20 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
         @Volatile
         var lastStreamsTimeMs: Long = 0L
 
+        /**
+         * Servers resolved SO FAR by each provider's running extraction (see
+         * [com.hikari.app.providers.ContentProvider.partialStreams]): the
+         * plugin's loadLinks callbacks land one extractor at a time, and the
+         * merge loop below publishes its running total here every pass so the
+         * search can print server 2 the second it resolves instead of holding
+         * all 15 until the whole run finishes. Entries are cleared when the
+         * run ends, so a stale list can never leak into the next title.
+         */
+        private val partialServers = java.util.concurrent.ConcurrentHashMap<String, List<com.hikari.app.data.StreamSource>>()
+
+        fun partialFor(providerId: String): List<com.hikari.app.data.StreamSource> =
+            partialServers[providerId] ?: emptyList()
+
         /** Budget for the direct MovieBlast movie fallback. */
         private const val MOVIEBLAST_CAP_MS = 20_000L
 
@@ -877,6 +891,9 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
         }
     }
 
+    override fun partialStreams(): List<StreamSource> =
+        partialFor(config.id)
+
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
         withContext(Dispatchers.IO) {
             val a = api ?: return@withContext emptyList()
@@ -1182,6 +1199,11 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                     val ps = pluginSources()
                     if (ps.isNotEmpty()) sawPluginSource = true
                     for (s in ps) merged.putIfAbsent(s.url, s)
+                    // Publish the running total for the live server list (see
+                    // partialStreams): each extractor callback lands here the
+                    // moment it resolves, so the search prints server 2, 3, …
+                    // as they arrive instead of all 15 at once at the end.
+                    if (merged.isNotEmpty()) partialServers[config.id] = merged.values.toList()
                     val pluginDone = pluginJob.isCompleted
                     // CloudStream-faithful authority, CS3-only: the plugin's
                     // own loadLinks IS the source list, exactly like the
@@ -1253,6 +1275,7 @@ class Cs3MainApiProvider(override val config: ProviderConfig) : ContentProvider 
                 }
                 result
             } finally {
+                partialServers.remove(config.id)
                 scope.cancel()
             }
 

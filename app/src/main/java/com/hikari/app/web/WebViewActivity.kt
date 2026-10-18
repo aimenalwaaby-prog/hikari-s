@@ -271,45 +271,122 @@ class WebViewActivity : ComponentActivity() {
         getSharedPreferences("webview_popup_allow", MODE_PRIVATE)
     }
 
+    /** Popup allow/block hosts for this view (Settings → Privacy & Browsing → WebView safety). */
+    @Volatile
+    private var popupAllowHosts: Set<String> = emptySet()
+    @Volatile
+    private var popupBlockHosts: Set<String> = emptySet()
+
+    /** Last popup URL/host the page tried to open (for the ⋯ "block this ad" offer). */
+    @Volatile
+    private var lastPopupUrl: String? = null
+    @Volatile
+    private var lastPopupHost: String? = null
+
     private fun isPopupHostAllowed(host: String?): Boolean {
         if (host.isNullOrBlank()) return false
+        val h = host.lowercase()
+        if (popupAllowHosts.contains(h)) return true
         return popupAllowPrefs.getStringSet("hosts", emptySet()).orEmpty()
-            .contains(host.lowercase())
+            .contains(h)
+    }
+
+    private fun isPopupHostBlocked(host: String?): Boolean {
+        if (host.isNullOrBlank()) return false
+        return popupBlockHosts.contains(host.lowercase())
     }
 
     private fun rememberPopupHost(host: String) {
+        val norm = host.lowercase()
         val allow = popupAllowPrefs.getStringSet("hosts", emptySet()).orEmpty()
             .toMutableSet()
-        if (allow.add(host.lowercase())) {
+        if (allow.add(norm)) {
             popupAllowPrefs.edit().putStringSet("hosts", allow).apply()
         }
+        popupAllowHosts = popupAllowHosts + norm
+        popupBlockHosts = popupBlockHosts - norm
+        lifecycleScope.launch(Dispatchers.IO) {
+            val app = applicationContext as HikariApp
+            runCatching {
+                val cur = app.store.webviewPopupAllow().toMutableSet()
+                if (cur.add(norm)) app.store.setWebviewPopupAllow(cur.toList())
+                val blk = app.store.webviewPopupBlock().toMutableSet()
+                if (blk.remove(norm)) app.store.setWebviewPopupBlock(blk.toList())
+            }
+        }
+    }
+
+    /** "Block always": popups from this host are dropped silently, never asked again. */
+    private fun rememberPopupBlocked(host: String) {
+        val norm = host.lowercase()
+        popupBlockHosts = popupBlockHosts + norm
+        popupAllowHosts = popupAllowHosts - norm
+        lifecycleScope.launch(Dispatchers.IO) {
+            val app = applicationContext as HikariApp
+            runCatching {
+                val cur = app.store.webviewPopupBlock().toMutableSet()
+                if (cur.add(norm)) app.store.setWebviewPopupBlock(cur.toList())
+                val allow = app.store.webviewPopupAllow().toMutableSet()
+                if (allow.remove(norm)) app.store.setWebviewPopupAllow(allow.toList())
+            }
+        }
+        val prefsAllow = popupAllowPrefs.getStringSet("hosts", emptySet()).orEmpty().toMutableSet()
+        if (prefsAllow.remove(norm)) popupAllowPrefs.edit().putStringSet("hosts", prefsAllow).apply()
     }
 
     /**
      * A popup the user's own tap opened, but protection would drop: instead of
      * a "Blocked popup" toast and a dead end, the tap gets a choice — Allow
-     * once, Always allow this site, or Cancel (which just drops it, like
-     * before). Only ever called for popups a real tap produced: automatic
-     * popunders never reach here, so they can never nag.
+     * once, Always allow this site, Block always, or Cancel (which just drops
+     * it, like before). Only ever called for popups a real tap produced:
+     * automatic popunders never reach here, so they can never nag. A host on
+     * the Block-always list never reaches here either — it is dropped
+     * silently in the relay below.
      */
     private fun askPopupPermission(url: String, host: String?, onAllow: (String) -> Unit) {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
+            val label = host ?: url
+            val items = arrayOf(
+                I18n.t("Allow once"),
+                I18n.t("Always allow") + (if (host != null) " $host" else ""),
+                I18n.t("Block always") + (if (host != null) " $host" else ""),
+                I18n.t("Cancel"),
+            )
             AlertDialog.Builder(this@WebViewActivity)
                 .setTitle(I18n.t("Open this popup?"))
                 .setMessage(
-                    I18n.t("This page tried to open a popup:") + "\n" + (host ?: url)
+                    I18n.t("This page tried to open a popup:") + "\n" + label
                 )
-                .setPositiveButton(I18n.t("Allow once")) { d, _ ->
-                    d.dismiss()
-                    onAllow(url)
+                .setItems(items) { d, which ->
+                    when (which) {
+                        0 -> { d.dismiss(); onAllow(url) }
+                        1 -> {
+                            d.dismiss()
+                            if (!host.isNullOrBlank()) {
+                                rememberPopupHost(host)
+                                Toast.makeText(
+                                    this@WebViewActivity,
+                                    "Popups from $host will always open — change it in Settings → Privacy & Browsing",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            onAllow(url)
+                        }
+                        2 -> {
+                            d.dismiss()
+                            if (!host.isNullOrBlank()) {
+                                rememberPopupBlocked(host)
+                                Toast.makeText(
+                                    this@WebViewActivity,
+                                    "Popups from $host will always be blocked — change it in Settings → Privacy & Browsing",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                        else -> d.dismiss()
+                    }
                 }
-                .setNegativeButton(I18n.t("Always allow")) { d, _ ->
-                    d.dismiss()
-                    if (!host.isNullOrBlank()) rememberPopupHost(host)
-                    onAllow(url)
-                }
-                .setNeutralButton(I18n.t("Cancel")) { d, _ -> d.dismiss() }
                 .show()
         }
     }
@@ -503,6 +580,29 @@ class WebViewActivity : ComponentActivity() {
             popupProtection = app.store.webviewPopup()
             allowedRedirectHosts = app.store.webviewRedirectAllow().toSet() +
                 com.hikari.app.data.RedirectAllow.now()
+            // Popup exceptions (Settings → Privacy & Browsing → WebView safety).
+            // One-time migration: older builds kept "always allow" in this
+            // view's own preferences — fold them into the store once, so the
+            // Settings list shows them and they can be reverted there.
+            popupAllowHosts = runCatching { app.store.webviewPopupAllow() }.getOrDefault(emptyList())
+                .map { it.trim().trimEnd('.').lowercase() }.filter { it.isNotBlank() }.toSet()
+            popupBlockHosts = runCatching { app.store.webviewPopupBlock() }.getOrDefault(emptyList())
+                .map { it.trim().trimEnd('.').lowercase() }.filter { it.isNotBlank() }.toSet()
+            runCatching {
+                val legacy = getSharedPreferences("webview_popup_allow", MODE_PRIVATE)
+                    .getStringSet("hosts", emptySet()).orEmpty()
+                    .map { it.trim().trimEnd('.').lowercase() }.filter { it.isNotBlank() }.toSet()
+                if (legacy.isNotEmpty() && popupAllowHosts.isEmpty() && popupBlockHosts.isEmpty()) {
+                    popupAllowHosts = legacy
+                    app.store.setWebviewPopupAllow(legacy.toList())
+                } else if (legacy.isNotEmpty()) {
+                    val merged = (popupAllowHosts + legacy) - popupBlockHosts
+                    if (merged != popupAllowHosts) {
+                        popupAllowHosts = merged
+                        app.store.setWebviewPopupAllow(merged.toList())
+                    }
+                }
+            }
             val enabled = app.store.adEnabled()
             if (enabled) {
                 val lists = app.store.adLists()
@@ -920,6 +1020,11 @@ class WebViewActivity : ComponentActivity() {
                         private fun relay(url: String?) {
                             if (relayed || url.isNullOrBlank()) return
                             relayed = true
+                            runCatching {
+                                lastPopupUrl = url
+                                lastPopupHost = runCatching { java.net.URI(url).host }
+                                    .getOrNull()?.trim()?.trimEnd('.')?.lowercase()
+                            }
                             // A config page's "install" popup is the install
                             // signal, exactly like a main-frame navigation to it
                             // (see addonInstallUrl).
@@ -976,6 +1081,13 @@ class WebViewActivity : ComponentActivity() {
                             if (popupProtection && !addonConfig) {
                                 val host = runCatching { java.net.URI(url).host }.getOrNull()
                                 val cur = currentPageHost()
+                                // "Block always" wins over everything: dropped
+                                // silently, never asked again (revert it in
+                                // Settings → Privacy & Browsing → WebView safety).
+                                if (!host.isNullOrBlank() && isPopupHostBlocked(host)) {
+                                    showBlockedToast("Blocked popup from $host")
+                                    return
+                                }
                                 if (host == null || cur == null ||
                                     (host != cur && !AdBlocker.matches(host, whitelistDomains) && !isSameSite(host, cur))
                                 ) {
@@ -1120,6 +1232,21 @@ class WebViewActivity : ComponentActivity() {
         if (blockedHost != null && blockedHost.isNotBlank()) {
             menu.menu.add(0, 11, 6, "✔ Allow redirect to $blockedHost")
         }
+        // "Block this ad site": the ad host behind the last popup or the last
+        // blocked redirect — the thing that opened (or tried to open) the ad
+        // page. Offered only for a FOREIGN host, never for the site being
+        // browsed: blocking the site's own domain would break the site
+        // itself (the Cindy-style overlay lives on the page, use the Element
+        // blocker for that). One tap adds it to the manual blocklist AND to
+        // the popup block-always list, so its requests never load and its
+        // popups never ask again. Revert it in Settings.
+        val adHost = (lastPopupHost?.takeIf { it.isNotBlank() }
+            ?: lastBlockedRedirectHost?.takeIf { it.isNotBlank() })
+            ?.trim()?.trimEnd('.')?.lowercase()
+        val curHost = currentPageHost()?.trim()?.trimEnd('.')?.lowercase().orEmpty()
+        if (!adHost.isNullOrBlank() && adHost != curHost) {
+            menu.menu.add(0, 14, 6, "⛔ Block this ad site ($adHost)")
+        }
         menu.menu.add(0, 7, 7, "\u2298 Element blocker")
         menu.menu.add(0, 8, 8, "\u21A9 Undo last block")
         menu.menu.add(0, 9, 9, "\u2715 Clear all blocks")
@@ -1171,10 +1298,54 @@ class WebViewActivity : ComponentActivity() {
                 11 -> allowBlockedRedirect()
                 12 -> toggleMouse()
                 13 -> toggleSiteAdblock()
+                14 -> blockAdSite()
             }
             true
         }
         menu.show()
+    }
+
+    /**
+     * The ⋯ menu's "Block this ad site" (see [showMenu]): the ad host behind
+     * the last popup or blocked redirect goes on the manual blocklist (its
+     * requests never load again) AND on the popup block-always list (its
+     * popups never ask again). Both lists are the same ones Settings edits,
+     * so a mistaken block is reverted there, not here.
+     */
+    private fun blockAdSite() {
+        val host = (lastPopupHost?.takeIf { it.isNotBlank() }
+            ?: lastBlockedRedirectHost?.takeIf { it.isNotBlank() })
+            ?.trim()?.trimEnd('.')?.lowercase()
+        if (host.isNullOrBlank()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val app = applicationContext as HikariApp
+            val norm = AdBlocker.normalizeDomain(host)
+            runCatching {
+                val cur = app.store.adBlock()
+                if (cur.none { AdBlocker.normalizeDomain(it) == norm }) {
+                    runCatching { app.store.setAdBlock((cur + norm).distinct()) }
+                }
+                val blk = app.store.webviewPopupBlock().toMutableSet()
+                if (blk.add(norm)) app.store.setWebviewPopupBlock(blk.toList())
+                val allow = app.store.webviewPopupAllow().toMutableSet()
+                if (allow.remove(norm)) app.store.setWebviewPopupAllow(allow.toList())
+            }
+            val (blocked, white) = runCatching {
+                AdBlocker.resolve(app, app.store.adLists(), app.store.adBlock(), app.store.adWhite())
+            }.getOrDefault(blockedDomains to whitelistDomains)
+            blockedDomains = blocked
+            whitelistDomains = white
+            popupBlockHosts = popupBlockHosts + norm
+            popupAllowHosts = popupAllowHosts - norm
+            runOnUiThread {
+                Toast.makeText(
+                    this@WebViewActivity,
+                    "Blocked $host — ads and popups from it will not load. Revert in Settings → Privacy.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                webView.reload()
+            }
+        }
     }
 
     /**
@@ -1967,8 +2138,43 @@ class WebViewActivity : ComponentActivity() {
                 '[class*="ad-overlay"]','[id*="ad-overlay"]','[class*="ad_container"]','[id*="ad_container"]',
                 '[class*="ad-slot"]','[id*="ad-slot"]','[class*="ads-container"]','[id*="ads-container"]',
                 'iframe[src*="popads"]','iframe[src*="popcash"]','iframe[src*="propellerads"]','iframe[src*="adnxs"]',
-                'iframe[src*="exoclick"]','iframe[src*="juicyads"]','iframe[src*="trafficjunky"]'
+                'iframe[src*="exoclick"]','iframe[src*="juicyads"]','iframe[src*="trafficjunky"]',
+                '[class*="chat-widget"]','[id*="chat-widget"]','[class*="chat-bubble"]','[class*="message-from"]',
+                '[class*="fake-chat"]','[class*="fake-message"]','[class*="dating-widget"]','[class*="meet-widget"]'
               ];
+              // Fake chat/date bait overlays (the "1 MESSAGE FROM: CINDY / Haha
+              // loved your joke, let's chat more" card): a small fixed box with
+              // a photo, a message count and a chat invitation. Never a video.
+              var BAIT=/\b\d+\s*messages?\s*from\b|message from\s*:\s*\w+|loved your joke|let'?s chat|chat (with )?me|hot singles|meet (hot |lonely |local )?(singles|girls|women)|verify you are (human|18|over 18)|you'?ve won|claim your (prize|reward)/i;
+              function isBaitBox(e){
+                try{
+                  if(!e||!e.parentNode)return false;
+                  if(e.closest('video')||e.querySelector('video'))return false;
+                  var cs=getComputedStyle(e);
+                  if(cs.position!=='fixed'&&cs.position!=='absolute'&&cs.position!=='sticky')return false;
+                  var r=e.getBoundingClientRect();
+                  var vw=window.innerWidth||0,vh=window.innerHeight||0;
+                  if(vw<=0||vh<=0)return false;
+                  // A bait card: bigger than a button, smaller than the page.
+                  if(r.width<200||r.height<140)return false;
+                  if(r.width>vw*0.92||r.height>vh*0.92)return false;
+                  var t=(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim();
+                  if(t.length<12||t.length>600)return false;
+                  return BAIT.test(t);
+                }catch(x){return false;}
+              }
+              function cleanBait(){
+                try{
+                  var els=document.querySelectorAll('div,section,aside,dialog');
+                  for(var i=0;i<els.length;i++){
+                    var e=els[i];
+                    if(isBaitBox(e)){
+                      e.style.setProperty('display','none','important');
+                      e.style.setProperty('pointer-events','none','important');
+                    }
+                  }
+                }catch(x){}
+              }
               function clean(){
                 for(var i=0;i<SEL.length;i++){
                   try{
@@ -1981,6 +2187,7 @@ class WebViewActivity : ComponentActivity() {
                     }
                   }catch(e){}
                 }
+                cleanBait();
               }
               clean();
               try{

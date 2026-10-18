@@ -7001,11 +7001,16 @@ private fun WebViewSafetyCard(app: HikariApp) {
     var popupProtection by remember { mutableStateOf(true) }
     var allowedRedirects by remember { mutableStateOf(listOf<String>()) }
     var newAllowedDomain by remember { mutableStateOf("") }
+    var popupAllow by remember { mutableStateOf(listOf<String>()) }
+    var popupBlock by remember { mutableStateOf(listOf<String>()) }
+    var newPopupDomain by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         redirectProtection = app.store.webviewRedirect()
         popupProtection = app.store.webviewPopup()
         allowedRedirects = app.store.webviewRedirectAllow()
+        popupAllow = app.store.webviewPopupAllow()
+        popupBlock = app.store.webviewPopupBlock()
     }
 
     SettingsSection(
@@ -7093,6 +7098,103 @@ private fun WebViewSafetyCard(app: HikariApp) {
                     )
                 }
             }
+        }
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(10.dp))
+        Text(
+            tr("Popup exceptions"),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(4.dp))
+        if (!LocalHideHelp.current) {
+        Text(
+            tr("Chosen from the popup's Allow once / Always allow / Block always question, or added here. Block-always sites never ask again. Remove one to undo a mistaken tap. Ad-domain blocks live under Ad Blocking → Manual blocklist."),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            tr("Always allow popups from"),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        popupAllow.forEach { domain ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    domain,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = {
+                    val next = popupAllow.filterNot { it == domain }
+                    popupAllow = next
+                    scope.launch { app.store.setWebviewPopupAllow(next) }
+                }) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "Remove $domain from popup allow",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+        Text(
+            tr("Always block popups from"),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        popupBlock.forEach { domain ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    domain,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = {
+                    val next = popupBlock.filterNot { it == domain }
+                    popupBlock = next
+                    scope.launch { app.store.setWebviewPopupBlock(next) }
+                }) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "Unblock popups from $domain",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newPopupDomain,
+                onValueChange = { newPopupDomain = it },
+                placeholder = { Text(tr("ads.example.com")) },
+                singleLine = true,
+                shape = GlassShape,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = {
+                val d = AdBlocker.normalizeDomain(newPopupDomain)
+                if (d.isNotBlank() && d !in popupBlock) {
+                    val next = (popupBlock + d).distinct()
+                    popupBlock = next
+                    newPopupDomain = ""
+                    scope.launch { app.store.setWebviewPopupBlock(next) }
+                }
+            }) { Text(tr("Block")) }
         }
     }
 }

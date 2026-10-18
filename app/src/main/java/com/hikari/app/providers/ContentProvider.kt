@@ -90,4 +90,14 @@ interface ContentProvider {
     suspend fun getMeta(item: MediaItem): MediaItem
     suspend fun getEpisodes(item: MediaItem): List<Episode>?
     suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource>
+
+    /**
+     * Servers this provider has resolved SO FAR while a [getStreams] call is
+     * still running. The default is empty (the provider reports only its
+     * final list); providers whose extraction resolves links one by one
+     * (CloudStream loadLinks callbacks) publish their running total here so
+     * the search can print each server the moment it lands instead of holding
+     * all 15 until the whole run finishes.
+     */
+    fun partialStreams(): List<StreamSource> = emptyList()
 }

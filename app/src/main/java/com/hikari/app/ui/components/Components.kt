@@ -502,6 +502,8 @@ fun GlassSearchField(
     /** Optional controls rendered at the end of the field (e.g. the search
      *  screen's translate button). Shown after the clear button. */
     trailing: (@Composable () -> Unit)? = null,
+    /** When set, the inner text field takes focus through this requester. */
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
 ) {
     val glass = rememberGlassTokens()
     val fieldShape = RoundedCornerShape(30.dp)
@@ -548,6 +550,7 @@ fun GlassSearchField(
                     // arrows belong to the caret, and a caret at the end of the
                     // line leaves the focus stuck in the search bar.
                     modifier = Modifier.fillMaxWidth().tvTextFieldKeys(value)
+                        .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 )
             }
             if (value.isNotEmpty()) {
