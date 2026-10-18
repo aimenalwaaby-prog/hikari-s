@@ -1083,13 +1083,25 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
 
         val reasons = mutableListOf<String>()
         var placeholder: String? = null
+        // The addon's FULL answer for this title is the union over every id
+        // spelling tried below — never just the first spelling that answered.
+        // Spellings are different routes to the same video, and the addon may
+        // serve a different subset on each (debrid-gated rows appear on one
+        // and not another): stopping at the first answer is a lottery where
+        // the same lookup returns 14 servers once and 34 the next, with rows
+        // like VidLink present in one and missing in the other. Every
+        // spelling is a cheap same-host GET, so all of them are asked and
+        // merged (deduped by identity) before anything is returned.
+        val union = LinkedHashMap<String, StreamSource>()
+        var anyPlayable = false
         // The best LINK-ONLY answer seen on the way: rows that are a page ("watch
-        // it on the site") or a YouTube id rather than a video file. Such a row
-        // parses as an ordinary stream and used to END the walk on the first
-        // spelling that produced it, so the spelling that carried the addon's
-        // real servers was never asked. A movie hid this; a series did not — it
-        // is what "Found 1 link in your extensions, but none could be turned
-        // into a video" over a title Stremio plays dozens of servers for was.
+        // it on the site") or a YouTube id rather than a video file. Such rows
+        // parse as ordinary streams but must never END the walk: a row that
+        // CAN be played ends nothing either now — the walk always runs to the
+        // end so the union above is complete (a movie hid this; a series did
+        // not — it is what "Found 1 link in your extensions, but none could
+        // be turned into a video" over a title Stremio plays dozens of
+        // servers for was).
         var linkOnly: List<StreamSource>? = null
         for (u in attempts) {
             val json = getJson(u) ?: run {
@@ -1098,15 +1110,11 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
             }
             val streams = parseStreams(json)
             if (streams.isNotEmpty()) {
-                // A NON-EMPTY stream list is not automatically an answer. A row
-                // that is a page is not a server (see [linkOnly] above), so the
-                // walk goes on; a row that CAN be played ends it.
-                if (streams.any { !isLinkRow(it) }) {
-                    streamErrors.remove(config.id)
-                    return streams
-                }
-                if (linkOnly == null) linkOnly = streams
-                reasons += "addon answered only ${streams.size} link row(s) from ${u.take(120)}"
+                // Merge, don't stop: this spelling's rows join the union and
+                // the walk goes on to the next spelling.
+                for (s in streams) union.putIfAbsent(s.identityKey(), s)
+                if (streams.any { !isLinkRow(it) }) anyPlayable = true
+                else if (linkOnly == null) linkOnly = streams
                 continue
             }
             val n = json.optJSONArray("streams")?.length() ?: -1
@@ -1128,6 +1136,16 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                 reasons += if (n >= 0) "addon returned $n empty stream rows from ${u.take(120)}"
                 else "no 'streams' field in ${u.take(120)}"
             }
+        }
+
+        // The union is the answer whenever ANY spelling produced a playable
+        // row: the complete set no matter which spelling answered first or
+        // which subset each one served. Link rows merged in along the way ride
+        // along exactly as before (the sheet labels them, the player skips
+        // them for playback).
+        if (anyPlayable && union.isNotEmpty()) {
+            streamErrors.remove(config.id)
+            return union.values.toList()
         }
 
         // Nothing produced a video, but something DID answer with link rows: that

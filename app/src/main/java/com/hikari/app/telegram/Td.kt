@@ -1844,9 +1844,7 @@ object Td {
      * range TDLib is already fetching (`FileNode::set_download_offset` →
      * `update_downloaded_part`). Renewing every couple of MiB therefore restarted
      * the download just ahead of the playhead forever, which is what made the
-     * old 2 MiB window unable to run ahead. 24 MiB is several minutes of 1080p
-     * and still small enough that a seek starts at the seek, not at the start of
-     * the film.
+     * old 2 MiB window unable to run ahead. 64 MiB is the runway a high-bitrate file needs to ride out throughput dips on a fast link (a minute-plus at 1080p, tens of seconds at 4K): while the link outruns playback the player banks it, and a dip costs buffered seconds instead of a spinner. Disk, not heap, and a seek still starts at the seek.
      */
-    const val AHEAD_BYTES: Long = 24L * 1024 * 1024
+    const val AHEAD_BYTES: Long = 64L * 1024 * 1024
 }

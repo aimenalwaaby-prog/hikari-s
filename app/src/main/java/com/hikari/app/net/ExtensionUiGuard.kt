@@ -45,6 +45,33 @@ object ExtensionUiGuard {
     /** How long a deliberate plugin-UI entry keeps follow-on opens allowed. */
     const val SETTINGS_ALLOW_MS = 120_000L
 
+    /**
+     * Marks the current thread's next [checkStartActivity] as ours.
+     *
+     * Our own taps (Compose screens and dialogs) were convicted by the
+     * stack scan below: a library frame sits between the Activity override
+     * and our code on the real device (log-proven:
+     * `convict=com.google.common.base.Ascii.checkStartActivity`), so the
+     * "first frame decides" rule blamed a library instead of our caller and
+     * every browser tap died silently. Stamping our own launches is
+     * deterministic — no inference. Our helpers ([launch] in ExternalLinks
+     * and the rating-page fallback) wrap their `startActivity` in this; a
+     * background plugin fire never carries the stamp and is still scanned.
+     * Thread-local and synchronous: the launch happens inside [block] on the
+     * same thread, so no flag ever leaks to another tap.
+     */
+    private val trusted = ThreadLocal.withInitial { false }
+
+    /** Runs [block] with this thread's launches stamped as ours (see above). */
+    fun <T> runTrusted(block: () -> T): T {
+        trusted.set(true)
+        try {
+            return block()
+        } finally {
+            trusted.set(false)
+        }
+    }
+
     @Volatile
     private var allowUntil = 0L
 
@@ -65,6 +92,9 @@ object ExtensionUiGuard {
      */
     fun checkStartActivity(intent: Intent?): Boolean {
         if (intent == null) return false
+        // Stamped by our own launch helpers (see [runTrusted]): a tap from
+        // our own UI, always allowed — no stack inference involved.
+        if (trusted.get() == true) return true
         // Internal navigation is never an "external open": an explicit intent
         // into one of our own activities (player, web view, settings...) always
         // passes. The abuse this guard targets is extensions firing the OUTSIDE
@@ -87,14 +117,32 @@ object ExtensionUiGuard {
         return false
     }
 
-    /** Class prefixes that are never extension code. */
+    /** Class prefixes that are never extension code: the framework, Kotlin, and
+     *  every third-party library the app ships (networking, JSON, image
+     *  loading, Guava...). A library frame between the Activity override and
+     *  our caller must be SKIPPED, never convicted — convicting one is what
+     *  turned every tracker browser tap into a silent no-op
+     *  (`convict=com.google.common.base.Ascii`). */
     private fun isNeutral(className: String): Boolean =
         className.startsWith("java.") ||
+            className.startsWith("javax.") ||
             className.startsWith("kotlin.") ||
             className.startsWith("kotlinx.") ||
             className.startsWith("android.") ||
             className.startsWith("androidx.") ||
             className.startsWith("com.android.") ||
+            className.startsWith("com.google.") ||
+            className.startsWith("com.squareup.") ||
+            className.startsWith("com.bumptech.") ||
+            className.startsWith("com.github.") ||
+            className.startsWith("coil.") ||
+            className.startsWith("okhttp3.") ||
+            className.startsWith("okio.") ||
+            className.startsWith("retrofit2.") ||
+            className.startsWith("org.") ||
+            className.startsWith("io.") ||
+            className.startsWith("net.") ||
+            className.startsWith("com.sun.") ||
             className.startsWith("dalvik.") ||
             className.startsWith("jdk.") ||
             className.startsWith("sun.") ||

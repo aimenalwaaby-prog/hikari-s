@@ -1,3 +1,10 @@
+## 0.11.56 (continuous build only)
+
+### Fixed
+- Tracker "Open in browser" / "Open developer page" / "Open confirmation page" dead (log-proven, convict=Guava frame): our own browser launches are now stamped trusted at the launch site instead of inferred from the stack, and library packages are never convicted — unstamped background plugin fires are still blocked exactly as before
+- Same lookup sometimes missing servers the addon has (VidLink present once, gone the next): Stremio id-spelling walk returned the first spelling that answered — it now merges every spelling's rows into one union, so the full set shows whatever order they answer in
+- Telegram high-quality buffering on fast links: TDLib run-ahead window 24→64 MiB (disk, not heap), so dips cost banked seconds instead of a spinner; priority was already max, player buffers untouched
+
 ## 0.11.55 (continuous build only)
 
 ### Fixed

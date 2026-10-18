@@ -133,8 +133,15 @@ fun openUrl(context: Context, url: String): Boolean {
 /** Starts [intent], tagging it with NEW_TASK when [context] is not an Activity
  *  (e.g. an application context) so Android doesn't reject the launch. Returns
  *  false when nothing can handle it — the caller falls through to the next
- *  option. */
+ *  option.
+ *
+ *  Stamped via [com.hikari.app.net.ExtensionUiGuard.runTrusted]: this is our
+ *  own UI opening a browser/app the user asked for, so the extension
+ *  auto-open guard lets it through without stack inference (which convicted
+ *  a library frame and silently killed tracker login taps). */
 private fun launch(context: Context, intent: Intent): Boolean {
     if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    return runCatching { context.startActivity(intent) }.isSuccess
+    return runCatching {
+        com.hikari.app.net.ExtensionUiGuard.runTrusted { context.startActivity(intent) }
+    }.isSuccess
 }

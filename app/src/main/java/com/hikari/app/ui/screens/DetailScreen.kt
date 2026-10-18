@@ -7823,10 +7823,13 @@ private fun formatCount(n: Long): String {
 }
 
 /** Opens a rating site in whatever the device uses for links, falling back to
- *  the in-app web view when nothing answers. */
+ *  the in-app web view when nothing answers. The browser launch is stamped
+ *  trusted (see ExternalLinks.launch): our own UI, never an extension. */
 private fun openRatingPage(context: android.content.Context, url: String, title: String) {
     val opened = runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        com.hikari.app.net.ExtensionUiGuard.runTrusted {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
     }.isSuccess
     if (opened) return
     runCatching {
