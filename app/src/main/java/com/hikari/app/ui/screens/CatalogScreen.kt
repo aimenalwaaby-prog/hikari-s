@@ -213,6 +213,7 @@ class CatalogViewModel(
             ProviderType.STREMIO -> com.hikari.app.providers.StremioAddon.catalogErrors[p.config.id]
             ProviderType.CS3 -> com.hikari.app.cs3.Cs3MainApiProvider.catalogErrors[p.config.id]
             ProviderType.VEGA -> com.hikari.app.providers.vega.VegaProvider.catalogErrors[p.config.id]
+            ProviderType.ZANGETSU -> com.hikari.app.zangetsu.ZangetsuProvider.catalogErrors[p.config.id]
             ProviderType.HIKARI -> com.hikari.app.providers.HikariProviderAdapter.catalogErrors[p.config.id]
             ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider.catalogErrors[p.config.id]
                 ?: com.hikari.app.anymex.AnymexProvider.lastOutcome[p.config.id]

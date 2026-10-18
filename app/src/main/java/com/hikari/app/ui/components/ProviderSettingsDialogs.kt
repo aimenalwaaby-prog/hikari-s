@@ -876,6 +876,7 @@ fun ProviderInfoDialog(provider: ContentProvider, onDismiss: () -> Unit) {
         ProviderType.HIKARI -> tr("Hikari extension")
         ProviderType.NUVIO -> tr("Nuvio scraper")
         ProviderType.VEGA -> tr("Vega provider")
+        ProviderType.ZANGETSU -> tr("Zangetsu source")
         ProviderType.SORA -> tr("Sora source")
          ProviderType.ANYMEX -> tr("Anymex extension")
          ProviderType.ANYMEX_MANGA -> tr("Anymex manga")
@@ -1279,7 +1280,7 @@ fun ProviderSettingsDialog(provider: ContentProvider, onDismiss: () -> Unit) {
         ProviderType.SKYSTREAM ->
             SkyStreamSettingsDialog(provider = provider, onDismiss = onDismiss)
         ProviderType.CS3, ProviderType.HIKARI, ProviderType.UNIVERSAL,
-        ProviderType.STREMIO, ProviderType.IPTV ->
+        ProviderType.STREMIO, ProviderType.IPTV, ProviderType.ZANGETSU ->
             ProviderInfoDialog(provider = provider, onDismiss = onDismiss)
         else -> NuvioSettingsDialog(provider = provider, onDismiss = onDismiss)
     }

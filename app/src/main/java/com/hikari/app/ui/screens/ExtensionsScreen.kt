@@ -1384,7 +1384,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 val source = when (p.type) {
                     ProviderType.CS3, ProviderType.NUVIO, ProviderType.SKYSTREAM,
                     ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.VEGA,
-                    ProviderType.SORA, ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA -> extra
+                    ProviderType.SORA, ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA, ProviderType.ZANGETSU -> extra
                     ProviderType.HIKARI -> extra.substringBeforeLast('|')
                     else -> return@forEach
                 }
@@ -1472,6 +1472,28 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
      *  installed providers were actually removed. */
     suspend fun uninstallVegaPlugin(pluginUrl: String): Int {
         val removed = com.hikari.app.providers.vega.VegaPluginManager
+            .uninstall(getApplication<Application>(), pluginUrl)
+        requestRefresh()
+        return removed
+    }
+
+    /** Registers a Zangetsu source repository — an `index.json` manifest of
+     *  `{id, name, version, type, lang, file, logo, nsfw}` entries, each
+     *  source one self-contained `.js` scraper (see
+     *  [com.hikari.app.zangetsu.ZangetsuPluginManager.repoPlugins]). */
+    suspend fun addZangetsuRepo(rawUrl: String): Result<Cs3Repo> = addRepo(rawUrl, RepoKind.ZANGETSU)
+
+    /** Installs one Zangetsu source: its `.js` is downloaded and validated in
+     *  the QuickJS runtime ([com.hikari.app.zangetsu.ZangetsuPluginManager.install]). */
+    suspend fun installZangetsuPlugin(plugin: Cs3RepoPlugin): Result<Int> =
+        com.hikari.app.zangetsu.ZangetsuPluginManager
+            .install(getApplication<Application>(), plugin)
+            .also { requestRefresh() }
+
+    /** Removes every ZANGETSU source installed from [pluginUrl]. Returns how
+     *  many installed sources were actually removed. */
+    suspend fun uninstallZangetsuPlugin(pluginUrl: String): Int {
+        val removed = com.hikari.app.zangetsu.ZangetsuPluginManager
             .uninstall(getApplication<Application>(), pluginUrl)
         requestRefresh()
         return removed
@@ -2027,6 +2049,10 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         val vegaOfficial = vega(
             "https://raw.githubusercontent.com/Zenda-Cross/vega-providers/main/manifest.json"
         )
+        fun zangetsu(url: String) = RepoAlias(url, RepoKind.ZANGETSU)
+        val zangetsuOfficial = zangetsu(
+            "https://raw.githubusercontent.com/Spyou/zangetsu-providers/main/index.json"
+        )
         // The official LNReader plugin index (a bare-array plugins.min.json).
         val lnreaderOfficial = lnreader(
             "https://raw.githubusercontent.com/lnreader/lnreader-plugins/plugins/v3.0.0/.dist/plugins.min.json"
@@ -2119,6 +2145,10 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         put("mangarepo", listOf(keiyoushi))
         put("keiyoushimanga", listOf(keiyoushi))
         put("vega", listOf(vegaOfficial))
+        put("zangetsu", listOf(zangetsuOfficial))
+        put("zangetsuofficial", listOf(zangetsuOfficial))
+        put("zangetsuproviders", listOf(zangetsuOfficial))
+        put("spyou", listOf(zangetsuOfficial))
         put("vegarepo", listOf(vegaOfficial))
         put("vegarepos", listOf(vegaOfficial))
         put("vegaproviders", listOf(vegaOfficial))
@@ -2382,9 +2412,16 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                     val repo = addRepo(served, RepoKind.VEGA).getOrThrow()
                     return@runCatching RepoLinkResult(repo)
                 }
+                val zg = runCatching {
+                    com.hikari.app.zangetsu.ZangetsuPluginManager.repoPlugins(body, served)
+                }.getOrDefault(emptyList())
+                if (zg.isNotEmpty()) {
+                    val repo = addRepo(served, RepoKind.ZANGETSU).getOrThrow()
+                    return@runCatching RepoLinkResult(repo)
+                }
                 throw Exception(
                     "That file is a JSON array Hikari does not recognise — Aniyomi " +
-                        "indexes, Vega manifests and LNReader indexes are supported"
+                        "indexes, Vega manifests, Zangetsu manifests and LNReader indexes are supported"
                 )
             }
             throw Exception("That file is not a repo Hikari understands (not JSON)")
@@ -2502,6 +2539,44 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                         kind = kind,
                     )
                     lastGoodRepoUrl = axGood
+                    store.addCs3Repo(repo)
+                    val saved = store.repos().firstOrNull {
+                        com.hikari.app.data.SourceUrls.repoKey(it.url) ==
+                            com.hikari.app.data.SourceUrls.repoKey(repo.url)
+                    }
+                    repos.value = store.repos()
+                    return@withContext Result.success(saved ?: repo)
+                }
+                if (kind == RepoKind.ZANGETSU) {
+                    // A Zangetsu manifest is the index.json file itself
+                    // (`{sources: [...]}`) — the pasted URL names the file,
+                    // so it is fetched as-given (plus the jsDelivr mirror),
+                    // never with a filename appended.
+                    val zgCandidates = listOfNotNull(url, jsDelivrMirror(url))
+                    var zgText: String? = null
+                    var zgGood = url
+                    for (c in zgCandidates) {
+                        val body = Http.fetchStringRobust(c, emptyMap(), 30L).getOrNull()
+                        if (body != null && !looksLikeHtml(body)) {
+                            zgText = body
+                            zgGood = c
+                            break
+                        }
+                    }
+                    val zgBody = zgText
+                        ?: throw Exception("Could not fetch repo: $url")
+                    val zgPlugins = com.hikari.app.zangetsu.ZangetsuPluginManager
+                        .repoPlugins(zgBody, zgGood)
+                    if (zgPlugins.isEmpty()) {
+                        throw Exception("That file lists no Zangetsu sources")
+                    }
+                    val repo = Cs3Repo(
+                        url = zgGood,
+                        name = niceRepoName(url, ""),
+                        description = "Zangetsu source repository",
+                        kind = kind,
+                    )
+                    lastGoodRepoUrl = zgGood
                     store.addCs3Repo(repo)
                     val saved = store.repos().firstOrNull {
                         com.hikari.app.data.SourceUrls.repoKey(it.url) ==
@@ -2774,6 +2849,24 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 .forEach { out[it.url] = it }
             return out.values.toList() to null
         }
+        if (repo.kind == RepoKind.ZANGETSU) {
+            // A Zangetsu repo's manifest is its own index.json URL — fetched
+            // as stored (plus the jsDelivr mirror), parsed by
+            // ZangetsuPluginManager.repoPlugins.
+            val candidatesZg = listOfNotNull(repo.url, jsDelivrMirror(repo.url))
+            var lastErrZg: Throwable? = null
+            for (c in candidatesZg) {
+                val text = Http.fetchStringRobust(c, emptyMap(), 30L).getOrNull()
+                if (text == null || looksLikeHtml(text)) {
+                    lastErrZg = Exception("Could not fetch repo")
+                    continue
+                }
+                val plugins = com.hikari.app.zangetsu.ZangetsuPluginManager.repoPlugins(text, c)
+                if (plugins.isNotEmpty()) return plugins to null
+                lastErrZg = Exception("That file lists no Zangetsu sources")
+            }
+            throw lastErrZg ?: Exception("Could not fetch repo: ${repo.url}")
+        }
         if (repo.kind == RepoKind.LNREADER) {
             // An LNReader repo's index is a bare array of novel sources (see
             // LnReaderPluginManager.repoPlugins); a stored GitHub page URL
@@ -2840,6 +2933,17 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     store.removeCs3Repo(repo.url)
                     store.addCs3Repo(repo.copy(kind = RepoKind.VEGA))
+                }
+                repos.value = store.repos()
+                return vegaPlugins to null
+            }
+            val zgPlugins = runCatching {
+                com.hikari.app.zangetsu.ZangetsuPluginManager.repoPlugins(text, repo.url)
+            }.getOrDefault(emptyList())
+            if (zgPlugins.isNotEmpty()) {
+                runCatching {
+                    store.removeCs3Repo(repo.url)
+                    store.addCs3Repo(repo.copy(kind = RepoKind.ZANGETSU))
                 }
                 repos.value = store.repos()
                 return vegaPlugins to null
@@ -3279,6 +3383,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             RepoKind.SKYSTREAM -> "extension"
             RepoKind.ANIYOMI -> "extension"
             RepoKind.VEGA -> "provider"
+            RepoKind.ZANGETSU -> "source"
             RepoKind.SORA -> "source"
             RepoKind.LNREADER -> "source"
                                     RepoKind.ANYMEX -> "extension"
@@ -3318,6 +3423,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                                 RepoKind.SKYSTREAM -> installSkyStreamPlugin(p)
                                 RepoKind.ANIYOMI -> installAniyomiPlugin(p)
                                 RepoKind.VEGA -> installVegaPlugin(p)
+                                RepoKind.ZANGETSU -> installZangetsuPlugin(p)
                                 RepoKind.LNREADER -> installLnReaderPlugin(p)
                                 RepoKind.SORA -> installScriptPlugin(p, RepoKind.SORA)
                                 RepoKind.ANYMEX -> installScriptPlugin(p, RepoKind.ANYMEX)
@@ -3476,6 +3582,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                                 RepoKind.SKYSTREAM -> installSkyStreamPlugin(p)
                                 RepoKind.ANIYOMI -> installAniyomiPlugin(p)
                                 RepoKind.VEGA -> installVegaPlugin(p)
+                                RepoKind.ZANGETSU -> installZangetsuPlugin(p)
                                 RepoKind.LNREADER -> installLnReaderPlugin(p)
                                 RepoKind.SORA -> installScriptPlugin(p, RepoKind.SORA)
                                 RepoKind.ANYMEX -> installScriptPlugin(p, RepoKind.ANYMEX)
@@ -3891,6 +3998,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 RepoKind.SKYSTREAM -> vm.installSkyStreamPlugin(p)
                 RepoKind.ANIYOMI -> vm.installAniyomiPlugin(p)
                 RepoKind.VEGA -> vm.installVegaPlugin(p)
+                RepoKind.ZANGETSU -> vm.installZangetsuPlugin(p)
                 RepoKind.LNREADER -> vm.installLnReaderPlugin(p)
                 RepoKind.SORA -> vm.installScriptPlugin(p, RepoKind.SORA)
                 RepoKind.ANYMEX -> vm.installScriptPlugin(p, RepoKind.ANYMEX)
@@ -3915,6 +4023,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 RepoKind.SKYSTREAM -> vm.uninstallSkyStreamPlugin(p.url)
                 RepoKind.ANIYOMI -> vm.uninstallAniyomiPlugin(p.url)
                 RepoKind.VEGA -> vm.uninstallVegaPlugin(p.url)
+                RepoKind.ZANGETSU -> vm.uninstallZangetsuPlugin(p.url)
                 RepoKind.LNREADER -> vm.uninstallLnReaderPlugin(p.url)
                 RepoKind.SORA -> vm.uninstallSoraPlugin(p.url)
                  RepoKind.ANYMEX -> vm.uninstallAnymexPlugin(p.url)
@@ -4068,6 +4177,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                     SourceFolder.SKYSTREAM -> RepoKind.SKYSTREAM
                     SourceFolder.ANIYOMI -> RepoKind.ANIYOMI
                     SourceFolder.VEGA -> RepoKind.VEGA
+                    SourceFolder.ZANGETSU -> RepoKind.ZANGETSU
                     SourceFolder.LNREADER -> RepoKind.LNREADER
                     SourceFolder.SORA -> RepoKind.SORA
                     SourceFolder.ANYMEX -> RepoKind.ANYMEX
@@ -4156,6 +4266,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             onAddSkyStreamRepo = { vm.clearStatus(); repoDialogKind = RepoKind.SKYSTREAM; showRepoDialog = true },
             onAddAniyomiRepo = { vm.clearStatus(); repoDialogKind = RepoKind.ANIYOMI; showRepoDialog = true },
             onAddVegaRepo = { vm.clearStatus(); repoDialogKind = RepoKind.VEGA; showRepoDialog = true },
+            onAddZangetsuRepo = { vm.clearStatus(); repoDialogKind = RepoKind.ZANGETSU; showRepoDialog = true },
             onAddLnReaderRepo = { vm.clearStatus(); repoDialogKind = RepoKind.LNREADER; showRepoDialog = true },
             onAddSoraRepo = { vm.clearStatus(); repoDialogKind = RepoKind.SORA; showRepoDialog = true },
              onAddAnymexRepo = { vm.clearStatus(); repoDialogKind = RepoKind.ANYMEX; showRepoDialog = true },
@@ -4282,6 +4393,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
         val isSky = repoDialogKind == RepoKind.SKYSTREAM
         val isAniyomi = repoDialogKind == RepoKind.ANIYOMI
         val isVega = repoDialogKind == RepoKind.VEGA
+        val isZangetsu = repoDialogKind == RepoKind.ZANGETSU
         val isLnReader = repoDialogKind == RepoKind.LNREADER
         val isSora = repoDialogKind == RepoKind.SORA
         val isAnymex = repoDialogKind == RepoKind.ANYMEX
@@ -4295,6 +4407,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         RepoKind.SKYSTREAM -> "Add SkyStream repo"
                         RepoKind.ANIYOMI -> "Add Aniyomi repo"
                         RepoKind.VEGA -> "Add Vega repo"
+                        RepoKind.ZANGETSU -> "Add Zangetsu repo"
                         RepoKind.LNREADER -> "Add LNReader repo"
                         RepoKind.SORA -> "Add Sora repo"
                          RepoKind.ANYMEX -> "Add Anymex repo"
@@ -4325,6 +4438,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 "Paste a Vega provider repo URL (a manifest.json — a JSON " +
                                     "array of the repo's providers). For example:\n" +
                                     "https://raw.githubusercontent.com/Zenda-Cross/vega-providers/main/manifest.json"
+                            isZangetsu ->
+                                "Paste a Zangetsu source repo URL (its index.json manifest of sources). For example:\n" +
+                                    "https://raw.githubusercontent.com/Spyou/zangetsu-providers/main/index.json"
                             isLnReader ->
                                 "Paste an LNReader novel-source repo — its plugins.min.json " +
                                     "index, or just the GitHub repo page. For example:\n" +
@@ -4357,7 +4473,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 "mooncrown, kennethjys, eclipsia. SkyStream repos: skystream, " +
                                 "akash, skyourge, rougegz. Aniyomi repos: aniyomiext " +
                                 "(the official Aniyomi extensions repo). Vega repos: vega " +
-                                "(Zenda-Cross's official Vega providers). LNReader repos: " +
+                                "(Zenda-Cross's official Vega providers). Zangetsu repos: zangetsu (Spyou's official Zangetsu sources). LNReader repos: " +
                                 "lnreader (the official plugin index)."
                         ),
                         style = MaterialTheme.typography.bodySmall,
@@ -4374,6 +4490,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     when {
                                         isAniyomi -> "https://…/index.min.json"
                                         isVega -> "https://…/manifest.json"
+                                        isZangetsu -> "https://…/index.json"
                                         isLnReader -> "https://…/plugins.min.json"
                                         isSora -> "https://…/streamex.json"
                                         isAnymex -> "https://…/anime_index.json"
@@ -4413,6 +4530,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     RepoKind.SKYSTREAM -> vm.addSkyStreamRepo(repoUrl)
                                     RepoKind.ANIYOMI -> vm.addAniyomiRepo(repoUrl)
                                     RepoKind.VEGA -> vm.addVegaRepo(repoUrl)
+                                    RepoKind.ZANGETSU -> vm.addZangetsuRepo(repoUrl)
                                     RepoKind.LNREADER -> vm.addLnReaderRepo(repoUrl)
                                     RepoKind.SORA -> vm.addSoraRepo(repoUrl)
                                      RepoKind.ANYMEX -> vm.addAnymexRepo(repoUrl)
@@ -5201,6 +5319,7 @@ private fun RepoBrowserView(
                                                 RepoKind.SKYSTREAM -> "SkyStream extension"
                                                 RepoKind.ANIYOMI -> "Aniyomi extension"
                                                 RepoKind.VEGA -> "Vega provider"
+                                                RepoKind.ZANGETSU -> "Zangetsu source"
                                                 RepoKind.LNREADER -> "LNReader source"
                                                 RepoKind.SORA -> "Sora source"
                                                  RepoKind.ANYMEX -> "Anymex extension"
@@ -5471,6 +5590,7 @@ private fun RepoBrowserView(
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Spa, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) })
                         srcCard(Icons.Filled.Tv, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
+                        srcCard(Icons.Filled.VideoLibrary, tr("Zangetsu repos"), tr("index.json · Zangetsu sources"), { onOpenFolder(SourceFolder.ZANGETSU) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.MenuBook, tr("LNReader repos"), tr("plugins.min.json · LNReader novel sources"), { onOpenFolder(SourceFolder.LNREADER) })
@@ -5544,6 +5664,13 @@ private fun RepoBrowserView(
                         title = tr("Vega repos"),
                         subtitle = tr("manifest.json · Vega providers"),
                         onClick = { onOpenFolder(SourceFolder.VEGA) }
+                    )
+                    SourceDivider()
+                    SourceActionRow(
+                        icon = Icons.Filled.VideoLibrary,
+                        title = tr("Zangetsu repos"),
+                        subtitle = tr("index.json · Zangetsu sources"),
+                        onClick = { onOpenFolder(SourceFolder.ZANGETSU) }
                     )
                     SourceDivider()
                     SourceActionRow(
@@ -6053,6 +6180,7 @@ private fun RepoPluginsView(
             RepoKind.SKYSTREAM -> "extension"
             RepoKind.ANIYOMI -> "extension"
             RepoKind.VEGA -> "provider"
+            RepoKind.ZANGETSU -> "source"
             RepoKind.LNREADER -> "source"
             RepoKind.SORA -> "source"
                                     RepoKind.ANYMEX -> "extension"
@@ -7044,6 +7172,7 @@ private fun RepoCard(
                             RepoKind.SKYSTREAM -> "SkyStream"
                             RepoKind.ANIYOMI -> "Aniyomi"
                             RepoKind.VEGA -> "Vega"
+                            RepoKind.ZANGETSU -> "Zangetsu"
                             RepoKind.LNREADER -> "LNReader"
                             RepoKind.SORA -> "Sora"
                             RepoKind.ANYMEX -> "Anymex"
@@ -7068,6 +7197,7 @@ private fun RepoCard(
                                     RepoKind.SKYSTREAM -> "extension"
                                     RepoKind.ANIYOMI -> "extension"
                                     RepoKind.VEGA -> "provider"
+                                    RepoKind.ZANGETSU -> "source"
                                     RepoKind.LNREADER -> "source"
                                     RepoKind.SORA -> "source"
                                     RepoKind.ANYMEX -> "extension"
@@ -7694,7 +7824,7 @@ private fun isMangayomiRepo(repo: Cs3Repo): Boolean {
         (n.contains("mangayomi") && !n.contains("anymex") && !n.contains("kegareta"))
 }
 
-enum class SourceFolder { CLOUDSTREAM, HIKARI, NUVIO, SKYSTREAM, ANIYOMI, VEGA, LNREADER, SORA, ANYMEX, MANGAYOMI, ANYMEX_HOME, STREMIO, IPTV }
+enum class SourceFolder { CLOUDSTREAM, HIKARI, NUVIO, SKYSTREAM, ANIYOMI, VEGA, ZANGETSU, LNREADER, SORA, ANYMEX, MANGAYOMI, ANYMEX_HOME, STREMIO, IPTV }
 
 @Composable
 private fun SourceFolderView(
@@ -7746,6 +7876,7 @@ private fun SourceFolderView(
         SourceFolder.SKYSTREAM -> RepoKind.SKYSTREAM
         SourceFolder.ANIYOMI -> RepoKind.ANIYOMI
         SourceFolder.VEGA -> RepoKind.VEGA
+        SourceFolder.ZANGETSU -> RepoKind.ZANGETSU
         SourceFolder.LNREADER -> RepoKind.LNREADER
         SourceFolder.SORA -> RepoKind.SORA
         SourceFolder.ANYMEX, SourceFolder.MANGAYOMI -> RepoKind.ANYMEX
@@ -7758,6 +7889,7 @@ private fun SourceFolderView(
         SourceFolder.SKYSTREAM -> "SkyStream repos" to "repo.json · SkyStream extensions"
         SourceFolder.ANIYOMI -> "Aniyomi repos" to "index.min.json · Aniyomi extensions"
         SourceFolder.VEGA -> "Vega repos" to "manifest.json · Vega providers"
+        SourceFolder.ZANGETSU -> "Zangetsu repos" to "index.json · Zangetsu sources"
         SourceFolder.LNREADER -> "LNReader repos" to "plugins.min.json · LNReader novel sources"
         SourceFolder.SORA -> "Sora repos" to "AnymeX script index · Sora sources"
         SourceFolder.ANYMEX -> "Anymex repos" to "index.json · Anymex / Kegareta"
@@ -7773,6 +7905,7 @@ private fun SourceFolderView(
         SourceFolder.SKYSTREAM -> "SkyStream"
         SourceFolder.ANIYOMI -> "Aniyomi"
         SourceFolder.VEGA -> "Vega"
+        SourceFolder.ZANGETSU -> "Zangetsu"
         SourceFolder.LNREADER -> "LNReader"
         SourceFolder.SORA -> "Sora"
         SourceFolder.ANYMEX -> "Anymex"
@@ -8177,6 +8310,7 @@ private fun SourcesOverviewView(
     onAddSkyStreamRepo: () -> Unit,
     onAddAniyomiRepo: () -> Unit,
     onAddVegaRepo: () -> Unit,
+    onAddZangetsuRepo: () -> Unit,
     onAddLnReaderRepo: () -> Unit,
     onAddSoraRepo: () -> Unit,
     onAddAnymexRepo: () -> Unit,
@@ -8217,6 +8351,7 @@ private fun SourcesOverviewView(
     val skyGroupTitle = tr("SkyStream")
     val aniyomiGroupTitle = tr("Aniyomi")
     val vegaGroupTitle = tr("Vega")
+    val zangetsuGroupTitle = tr("Zangetsu")
     val lnreaderGroupTitle = tr("LNReader")
     val soraGroupTitle = tr("Sora")
     val anymexGroupTitle = tr("Anymex")
@@ -8344,6 +8479,16 @@ private fun SourcesOverviewView(
                 pluginsByRepo = pluginsByRepo,
                 repoState = repoState,
                 onAdd = onAddVegaRepo,
+                onOpenRepo = onOpenRepo,
+                onRefreshRepo = onRefreshRepo,
+                onRemoveRepo = onRemoveRepo,
+            )
+            repoGroup(
+                title = zangetsuGroupTitle,
+                groupRepos = repos.filter { it.kind == RepoKind.ZANGETSU },
+                pluginsByRepo = pluginsByRepo,
+                repoState = repoState,
+                onAdd = onAddZangetsuRepo,
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,

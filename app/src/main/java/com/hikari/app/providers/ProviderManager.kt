@@ -192,6 +192,7 @@ class ProviderManager(private val store: AppStore, private val context: Context)
         ProviderType.SORA -> com.hikari.app.sora.SoraProvider(c)
         ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider(c)
         ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider(c)
+        ProviderType.ZANGETSU -> com.hikari.app.zangetsu.ZangetsuProvider(c)
     }
 
     fun byId(id: String): ContentProvider? =

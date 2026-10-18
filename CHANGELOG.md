@@ -1,3 +1,10 @@
+## 0.11.66 (continuous build only)
+
+### Fixed
+- Back landing below the tile you tapped (Japan/Netflix folders from Home: late shelves arriving above misread as you scrolling, so the follow stood down early): the follow now tells feed insertions apart from your scroll and only stands down when you move
+- Tracker libraries showing nothing (Trakt only read the watchlist and swallowed expired logins; MAL read the title as an object so every row said Untitled; Shikimori dropped all posters and only read the first 50 per shelf): Trakt now reads watchlist plus history, collection and your lists with expired-login errors surfaced, MAL titles/posters fixed, Shikimori posters fixed with full paging, Kitsu/MAL/Shikimori/Trakt 401s now say reconnect instead of empty
+- Zangetsu repos adding with no sources inside (CloudStream folder said no plugin for Spyou/zangetsu-providers index.json): Zangetsu is now a full source type — its own Extensions folder, repo add by URL or short name, per-source install/update/uninstall, catalogue/search/detail/episodes/streams through its JS runtime
+
 ## 0.11.65 (continuous build only)
 
 ### Fixed

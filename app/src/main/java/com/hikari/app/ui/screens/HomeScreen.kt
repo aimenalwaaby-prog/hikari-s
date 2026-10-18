@@ -2838,6 +2838,7 @@ internal fun webUrlFor(p: ContentProvider): String? = when (p.config.type) {
             ?: sourceSiteUrl(java.io.File(dir, "posts.js"), p.config.name)
             ?: sourceSiteUrl(java.io.File(dir, "stream.js"), p.config.name)
     }.getOrNull()
+    ProviderType.ZANGETSU -> com.hikari.app.zangetsu.ZangetsuPluginManager.siteUrlOf(p.config)
     ProviderType.CS3 -> runCatching {
         val file = java.io.File(p.config.url); if (!file.exists()) return@runCatching null
         val apis = com.hikari.app.cs3.Cs3PluginManager.apisFor(com.hikari.app.HikariApp.instance, file)

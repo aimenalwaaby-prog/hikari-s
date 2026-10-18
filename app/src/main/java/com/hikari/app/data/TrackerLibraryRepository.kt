@@ -31,11 +31,22 @@ object TrackerLibraryRepository {
             ?: TrackerClient(TrackerKind.TRAKT)
         if (!client.ready) return Result.failure(IllegalStateException("Trakt app credentials are not configured."))
         val headers = mapOf("Authorization" to "Bearer ${account.token}", "trakt-api-version" to "2", "trakt-api-key" to client.id)
-        val user = account.user.ifBlank { return Result.failure(IllegalStateException("Trakt username is unavailable; reconnect Trakt.")) }
+        var user = account.user
+        if (user.isBlank()) {
+            user = runCatching {
+                val r = Http.get("https://api.trakt.tv/users/settings", headers)
+                if (r.code == 401) return Result.failure(IllegalStateException("Trakt login expired (HTTP 401) — reconnect Trakt in Settings → Trackers."))
+                if (!r.isSuccessful) return Result.failure(IllegalStateException("Trakt username is unavailable; reconnect Trakt."))
+                org.json.JSONObject(r.body?.string().orEmpty()).optJSONObject("user")?.optString("username").orEmpty()
+            }.getOrDefault("")
+        }
+        if (user.isBlank()) return Result.failure(IllegalStateException("Trakt username is unavailable; reconnect Trakt."))
         val out = ArrayList<Shelf>()
 
+        var traktUnauthorized = false
         suspend fun get(path: String): JSONArray? = runCatching {
             val response = Http.get("https://api.trakt.tv$path", headers)
+            if (response.code == 401) { traktUnauthorized = true; return@runCatching null }
             if (!response.isSuccessful) return@runCatching null
             JSONArray(response.body?.string().orEmpty())
         }.getOrNull()
@@ -54,6 +65,34 @@ object TrackerLibraryRepository {
         }
         if (movies.isNotEmpty()) out += Shelf("trakt.watchlist.movies", "Trakt Watchlist · Movies", movies)
         if (shows.isNotEmpty()) out += Shelf("trakt.watchlist.shows", "Trakt Watchlist · Shows", shows)
+        val histMovies = get("/users/${enc(user)}/watched/movies?extended=full&page=1&limit=250") ?: JSONArray()
+        val hm = buildList {
+            for (i in 0 until histMovies.length()) {
+                traktItem(histMovies.optJSONObject(i), MediaType.MOVIE)?.let(::add)
+            }
+        }.distinctBy { it.uniqueId }
+        if (hm.isNotEmpty()) out += Shelf("trakt.history.movies", "Trakt History · Movies", hm)
+        val histShows = get("/users/${enc(user)}/watched/shows?extended=full&page=1&limit=250") ?: JSONArray()
+        val hs = buildList {
+            for (i in 0 until histShows.length()) {
+                traktItem(histShows.optJSONObject(i), MediaType.SERIES)?.let(::add)
+            }
+        }.distinctBy { it.uniqueId }
+        if (hs.isNotEmpty()) out += Shelf("trakt.history.shows", "Trakt History · Shows", hs)
+        val collMovies = get("/users/${enc(user)}/collection/movies?extended=full&page=1&limit=250") ?: JSONArray()
+        val cm = buildList {
+            for (i in 0 until collMovies.length()) {
+                traktItem(collMovies.optJSONObject(i), MediaType.MOVIE)?.let(::add)
+            }
+        }.distinctBy { it.uniqueId }
+        if (cm.isNotEmpty()) out += Shelf("trakt.collection.movies", "Trakt Collection · Movies", cm)
+        val collShows = get("/users/${enc(user)}/collection/shows?extended=full&page=1&limit=250") ?: JSONArray()
+        val cs = buildList {
+            for (i in 0 until collShows.length()) {
+                traktItem(collShows.optJSONObject(i), MediaType.SERIES)?.let(::add)
+            }
+        }.distinctBy { it.uniqueId }
+        if (cs.isNotEmpty()) out += Shelf("trakt.collection.shows", "Trakt Collection · Shows", cs)
 
         val lists = runCatching {
             val response = Http.get("https://api.trakt.tv/users/${enc(user)}/lists", headers)
@@ -83,6 +122,7 @@ object TrackerLibraryRepository {
             }.distinctBy { it.uniqueId }
             if (items.isNotEmpty()) out += Shelf("trakt.list.$slug", list.optString("name", slug), items)
         }
+        if (out.isEmpty() && traktUnauthorized) return Result.failure(IllegalStateException("Trakt login expired (HTTP 401) — reconnect Trakt in Settings → Trackers."))
         return Result.success(out)
     }
 
@@ -176,6 +216,11 @@ object TrackerLibraryRepository {
     private suspend fun loadMal(app:HikariApp):Result<List<Shelf>>{
         val account=app.store.trackers().firstOrNull{it.kind==TrackerKind.MAL}
             ?:return Result.failure(IllegalStateException("Connect MyAnimeList in Settings → Trackers first."))
+        // One authenticated probe so an expired token reports 401 instead of
+        // five silent empty shelves.
+        runCatching { Http.get("https://api.myanimelist.net/v2/users/@me", mapOf("Authorization" to "Bearer "+account.token)) }.getOrNull()?.let {
+            if (it.code == 401) return Result.failure(IllegalStateException("MyAnimeList login expired (HTTP 401) — reconnect MAL in Settings → Trackers."))
+        }
         val statuses=listOf("watching" to "Watching","plan_to_watch" to "Plan to Watch","completed" to "Completed","on_hold" to "On Hold","dropped" to "Dropped")
         val out=ArrayList<Shelf>()
         for((status,label) in statuses){
@@ -198,8 +243,11 @@ object TrackerLibraryRepository {
         val account=app.store.trackers().firstOrNull{it.kind==TrackerKind.KITSU}
             ?:return Result.failure(IllegalStateException("Connect Kitsu in Settings → Trackers first."))
         if(account.userId.isBlank())return Result.failure(IllegalStateException("Kitsu user id is unavailable; reconnect Kitsu."))
+        runCatching { Http.get("https://kitsu.io/api/edge/users/${enc(account.userId)}", mapOf("Authorization" to "Bearer "+account.token)) }.getOrNull()?.let {
+            if (it.code == 401) return Result.failure(IllegalStateException("Kitsu login expired (HTTP 401) — reconnect Kitsu in Settings → Trackers."))
+        }
         val raw=Http.getStringQuiet("https://kitsu.io/api/edge/users/"+enc(account.userId)+"/library-entries?page%5Blimit%5D=500&include=anime",mapOf("Authorization" to "Bearer "+account.token))
-            ?:return Result.failure(IllegalStateException("Kitsu library could not be loaded."))
+            ?:return Result.failure(IllegalStateException("Kitsu library could not be loaded — check the connection, then reconnect Kitsu if it stays empty."))
         val root=JSONObject(raw);val data=root.optJSONArray("data")?:JSONArray();val inc=root.optJSONArray("included")?:JSONArray();val anime=HashMap<String,JSONObject>()
         for(i in 0 until inc.length()){val o=inc.optJSONObject(i)?:continue;if(o.optString("type")=="anime")anime[o.optString("id")]=o}
         val groups=linkedMapOf<String,MutableList<MediaItem>>()
@@ -234,20 +282,34 @@ object TrackerLibraryRepository {
     private suspend fun loadShikimori(app:HikariApp):Result<List<Shelf>>{
         val account=app.store.trackers().firstOrNull{it.kind==TrackerKind.SHIKIMORI}
             ?:return Result.failure(IllegalStateException("Connect Shikimori in Settings → Trackers first."))
+        runCatching { Http.get("https://shikimori.one/api/users/whoami", mapOf("Authorization" to "Bearer "+account.token)) }.getOrNull()?.let {
+            if (it.code == 401) return Result.failure(IllegalStateException("Shikimori login expired (HTTP 401) — reconnect Shikimori in Settings → Trackers."))
+        }
         val uid=account.userId.ifBlank{
             val raw=Http.getStringQuiet("https://shikimori.one/api/users/whoami",mapOf("Authorization" to "Bearer "+account.token))
-            JSONObject(raw?:return Result.failure(IllegalStateException("Shikimori account id is unavailable."))).optInt("id",0).toString()
+            JSONObject(raw?:return Result.failure(IllegalStateException("Shikimori account id is unavailable — reconnect Shikimori."))).optInt("id",0).toString()
+        }
+        suspend fun pages(target: String, status: String, key: String): List<org.json.JSONObject> {
+            val rows = ArrayList<org.json.JSONObject>()
+            for (page in 1..20) {
+                val raw=Http.getStringQuiet("https://shikimori.one/api/user_rates?user_id="+uid+"&target_type="+target+"&status="+status+"&limit=100&page="+page,mapOf("Authorization" to "Bearer "+account.token))?:break
+                val a=runCatching { JSONArray(raw) }.getOrNull() ?: break
+                if (a.length() == 0) break
+                for(i in 0 until a.length()){ a.optJSONObject(i)?.let { rows += it } }
+                if (a.length() < 100) break
+            }
+            return rows
         }
         val statuses=listOf("watching" to "Watching","planned" to "Planned","completed" to "Completed","on_hold" to "On Hold","dropped" to "Dropped","rewatching" to "Rewatching")
         val out=ArrayList<Shelf>()
         for((status,label) in statuses){
-            val raw=Http.getStringQuiet("https://shikimori.one/api/user_rates?user_id="+uid+"&target_type=Anime&status="+status+"&limit=50&page=1",mapOf("Authorization" to "Bearer "+account.token))?:continue
-            val a=JSONArray(raw);val items=buildList{for(i in 0 until a.length())shikiMedia(a.optJSONObject(i)?.optJSONObject("anime"))?.let(::add)}
+            val rows = pages("Anime", status, "anime")
+            val items=buildList{for(r in rows)shikiMedia(r.optJSONObject("anime"))?.let(::add)}.distinctBy { it.uniqueId }
             if(items.isNotEmpty())out+=Shelf("shikimori."+status,"Shikimori · "+label,items)
         }
         for((status,label) in statuses){
-            val raw=Http.getStringQuiet("https://shikimori.one/api/user_rates?user_id="+uid+"&target_type=Manga&status="+status+"&limit=50&page=1",mapOf("Authorization" to "Bearer "+account.token))?:continue
-            val a=JSONArray(raw);val items=buildList{for(i in 0 until a.length())shikiMedia(a.optJSONObject(i)?.optJSONObject("manga"), manga=true)?.let(::add)}
+            val rows = pages("Manga", status, "manga")
+            val items=buildList{for(r in rows)shikiMedia(r.optJSONObject("manga"), manga=true)?.let(::add)}.distinctBy { it.uniqueId }
             if(items.isNotEmpty())out+=Shelf("shikimori.manga."+status,"Shikimori · Manga · "+label,items)
         }
         return Result.success(out)
@@ -264,11 +326,19 @@ object TrackerLibraryRepository {
     }
     private fun malMedia(o:JSONObject?, manga: Boolean = false):MediaItem?{
         if(o==null)return null;val id=o.optInt("id",0);if(id<=0)return null
-        return MediaItem("mal",id.toString(),o.optJSONObject("title")?.optString("title").orEmpty().ifBlank{"Untitled"},MediaType.SERIES,o.optJSONObject("main_picture")?.optString("large"),o.optString("start_date").take(4).toIntOrNull(),rawType=if(manga)"manga" else "anime",rating=o.optDouble("mean",0.0).takeIf{it>0},metadataSource="MyAnimeList")
+        return MediaItem("mal",id.toString(),o.optString("title").ifBlank{o.optJSONObject("title")?.optString("title").orEmpty()}.ifBlank{"Untitled"},MediaType.SERIES,o.optJSONObject("main_picture")?.optString("large")?.ifBlank{o.optJSONObject("main_picture")?.optString("medium")},o.optString("start_date").take(4).toIntOrNull(),rawType=if(manga)"manga" else "anime",rating=o.optDouble("mean",0.0).takeIf{it>0},metadataSource="MyAnimeList")
     }
     private fun shikiMedia(o:JSONObject?, manga: Boolean = false):MediaItem?{
         if(o==null)return null;val id=o.optInt("id",0);if(id<=0)return null
-        return MediaItem("shikimori",id.toString(),o.optString("name").ifBlank{"Untitled"},MediaType.SERIES,o.optString("image").takeIf{it.startsWith("http")},o.optString("aired_on").take(4).toIntOrNull(),rawType=if(manga)"manga" else "anime",metadataSource="Shikimori")
+        val rawImg = o.optString("image").trim().ifBlank{o.optJSONObject("image")?.optString("original").orEmpty()}
+        val img = when {
+            rawImg.startsWith("http") -> rawImg
+            rawImg.startsWith("//") -> "https:$rawImg"
+            rawImg.startsWith("/") -> "https://shikimori.one$rawImg"
+            rawImg.isNotBlank() -> "https://shikimori.one/$rawImg"
+            else -> null
+        }
+        return MediaItem("shikimori",id.toString(),o.optString("name").ifBlank{o.optString("russian").ifBlank{"Untitled"}},MediaType.SERIES,img,o.optString("aired_on").take(4).toIntOrNull(),rawType=if(manga)"manga" else "anime",metadataSource="Shikimori")
     }
     private fun traktItem(row: JSONObject?, type: MediaType): MediaItem? =
         row?.let { traktMedia(it.optJSONObject("movie") ?: it.optJSONObject("show") ?: return@let null, type) }

@@ -5338,6 +5338,7 @@ class ContentRepository(private val manager: ProviderManager) {
             t == ProviderType.SKYSTREAM -> 3
             t == ProviderType.ANIYOMI -> 3
             t == ProviderType.VEGA -> 3
+            t == ProviderType.ZANGETSU -> 3
             else -> 4
         }
         // `all` is the pass's snapshot of the enabled provider list, NOT a fresh
@@ -5434,6 +5435,9 @@ class ContentRepository(private val manager: ProviderManager) {
                     // else can still be found by name there and its streams
                     // extracted through the same search → meta → stream path.
                     ProviderType.VEGA -> true
+                    // Zangetsu sources export their own search too, so they
+                    // are asked exactly like the other site-scraper families.
+                    ProviderType.ZANGETSU -> true
                     // Sora sources export their own search too
                     // (`searchResults`), so they are asked exactly like the
                     // other site-scraper families.
@@ -5914,6 +5918,7 @@ class ContentRepository(private val manager: ProviderManager) {
         ProviderType.SKYSTREAM -> com.hikari.app.skystream.SkyStreamProvider.streamErrors[p.config.id]
         ProviderType.ANIYOMI -> com.hikari.app.aniyomi.AniyomiProvider.streamErrors[p.config.id]
         ProviderType.VEGA -> com.hikari.app.providers.vega.VegaProvider.streamErrors[p.config.id]
+        ProviderType.ZANGETSU -> com.hikari.app.zangetsu.ZangetsuProvider.streamErrors[p.config.id]
         ProviderType.SORA -> com.hikari.app.sora.SoraProvider.streamErrors[p.config.id]
             ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider.streamErrors[p.config.id]
             ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[p.config.id]
@@ -6327,6 +6332,7 @@ class ContentRepository(private val manager: ProviderManager) {
             ProviderType.SKYSTREAM -> com.hikari.app.skystream.SkyStreamProvider.streamErrors
             ProviderType.ANIYOMI -> com.hikari.app.aniyomi.AniyomiProvider.streamErrors
             ProviderType.VEGA -> com.hikari.app.providers.vega.VegaProvider.streamErrors
+            ProviderType.ZANGETSU -> com.hikari.app.zangetsu.ZangetsuProvider.streamErrors
             ProviderType.SORA -> com.hikari.app.sora.SoraProvider.streamErrors
             ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider.streamErrors
             ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider.lastOutcome
@@ -6746,7 +6752,7 @@ class ContentRepository(private val manager: ProviderManager) {
         when (manager.byId(item.providerId)?.config?.type) {
             ProviderType.CS3, ProviderType.HIKARI, ProviderType.UNIVERSAL,
             ProviderType.SKYSTREAM, ProviderType.ANIYOMI, ProviderType.VEGA,
-            ProviderType.SORA, ProviderType.ANYMEX -> true
+            ProviderType.SORA, ProviderType.ANYMEX, ProviderType.ZANGETSU -> true
             else -> false
         }
 
@@ -7187,6 +7193,7 @@ class ContentRepository(private val manager: ProviderManager) {
                         ProviderType.SORA,
                         ProviderType.ANYMEX,
                         ProviderType.ANYMEX_MANGA,
+                        ProviderType.ZANGETSU,
                         ProviderType.IPTV -> true
                         else -> false
                     }

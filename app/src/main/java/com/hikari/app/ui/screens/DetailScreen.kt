@@ -587,6 +587,8 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
                         ?: com.hikari.app.aniyomi.AniyomiProvider.streamErrors[item.providerId]
                 ProviderType.VEGA ->
                     com.hikari.app.providers.vega.VegaProvider.streamErrors[item.providerId]
+                ProviderType.ZANGETSU ->
+                    com.hikari.app.zangetsu.ZangetsuProvider.streamErrors[item.providerId]
                 ProviderType.SORA ->
                     com.hikari.app.sora.SoraProvider.streamErrors[item.providerId]
                 ProviderType.ANYMEX ->
@@ -1528,6 +1530,8 @@ private fun providerOutcomeLine(p: ContentProvider): String? {
                 ?: com.hikari.app.aniyomi.AniyomiProvider.streamErrors[p.config.id]
         ProviderType.VEGA ->
             com.hikari.app.providers.vega.VegaProvider.streamErrors[p.config.id]
+        ProviderType.ZANGETSU ->
+            com.hikari.app.zangetsu.ZangetsuProvider.streamErrors[p.config.id]
         ProviderType.SORA ->
             com.hikari.app.sora.SoraProvider.streamErrors[p.config.id]
         ProviderType.ANYMEX ->

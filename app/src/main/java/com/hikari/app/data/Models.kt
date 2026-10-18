@@ -37,7 +37,13 @@ enum class ProviderType {
      * extension, so its catalogues are titles, its "episodes" chapters and its
      * "streams" page images, and the reader is the screen that opens on them.
      */
-    ANYMEX_MANGA;
+    ANYMEX_MANGA,
+    /**
+     * A ZANGETSU source — one self-contained `.js` scraper speaking `getHome`
+     * / `search` / `getDetail` / `getEpisodes` / `getVideoSources`, installed
+     * from a Zangetsu `index.json` manifest (see com.hikari.app.zangetsu).
+     */
+    ZANGETSU;
 
     /**
      * Which section of the player's server chooser a source from this engine
@@ -59,6 +65,7 @@ enum class ProviderType {
             SORA -> "Sora"
             ANYMEX -> "Anymex"
             ANYMEX_MANGA -> "Anymex"
+            ZANGETSU -> "Zangetsu"
             IPTV -> "IPTV"
             HIKARI, UNIVERSAL -> "Hikari"
         }
@@ -90,7 +97,7 @@ data class ProviderConfig(
 )
 
 /** A CloudStream-style plugin repository (repo.json → pluginLists → plugin list). */
-enum class RepoKind { CS3, HIKARI, NUVIO, SKYSTREAM, ANIYOMI, VEGA, SORA, ANYMEX, LNREADER }
+enum class RepoKind { CS3, HIKARI, NUVIO, SKYSTREAM, ANIYOMI, VEGA, SORA, ANYMEX, LNREADER, ZANGETSU }
 
 /**
  * A user-made PROVIDER FOLDER: a name, and the provider ids it holds (see
