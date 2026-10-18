@@ -1,3 +1,8 @@
+## 0.11.61 (continuous build only)
+
+### Fixed
+- Back still landing up/down somewhere else (Japan folder, movie/series catalogues, main catalogue): the keeper saved only the row number, so rows arriving in a different order parked you on the wrong content, deep catalogue spots stalled (more pages only load at the bottom) and then jumped to the very end after 10s — it now remembers the exact item at the top and lands on THAT item wherever it sits, pulls more pages itself while the saved cell is not loaded yet, opens at the saved spot instead of flashing the top first, and never jumps to the end on a miss; every save/load/restore is also in Settings → Logs under the Scroll tag so the next log export proves it
+
 ## 0.11.60 (continuous build only)
 
 ### Fixed

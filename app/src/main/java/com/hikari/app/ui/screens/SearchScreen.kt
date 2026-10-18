@@ -1082,6 +1082,7 @@ fun SearchScreen(
                 // screen, which is a lot of subscriptions for one grid (see
                 // [com.hikari.app.ui.components.MediaRow]).
                 val gridItems = rememberVisibleItems(visible)
+                val searchKeys = remember(gridItems) { gridItems.map { it.uniqueId } }
                 val style = rememberPosterStyle()
                 val tvSearch = TvMode.current()
                 val searchCols = if (tvSearch) 3 else TvUi.resultsColumns()
@@ -1090,7 +1091,10 @@ fun SearchScreen(
                     // Results position held per query+engine (see
                     // ScrollKeeper): Back from a title lands where the grid
                     // was, and a new query starts at its own slot.
-                    state = com.hikari.app.ui.components.keptGridState("search:$query|$activeEngine"),
+                    state = com.hikari.app.ui.components.keptGridState(
+                        "search:$query|$activeEngine",
+                        itemKeys = searchKeys,
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),

@@ -4561,9 +4561,11 @@ private fun FolderRowList(
         }
         return
     }
-    // Row-list position held per page (see ScrollKeeper).
+    // Row-list position held per page (see ScrollKeeper). Keys re-find the
+    // exact row when sources finish in a different order.
+    val rowKeys = remember(loaded) { loaded.distinctBy { it.key }.map { it.key } }
     val rowListState = if (keeperKey.isBlank()) androidx.compose.foundation.lazy.rememberLazyListState()
-    else com.hikari.app.ui.components.keptListState(keeperKey)
+    else com.hikari.app.ui.components.keptListState(keeperKey, itemKeys = rowKeys)
     LazyColumn(
         state = rowListState,
         modifier = Modifier.fillMaxSize(),
@@ -4937,8 +4939,15 @@ fun TmdbGridScreen(
     }
 
     // Grid position held per preset+search (see ScrollKeeper): Back from a
-    // title lands where the grid was.
-    val gridState = com.hikari.app.ui.components.keptGridState("tmdbGrid:$presetKey|$specJson|$needle|$kindKey")
+    // title lands where the grid was. Keys re-find the exact item when the
+    // order shifts, and the waiter keeps pulling pages while the saved cell
+    // is not loaded yet.
+    val tmdbKeys = remember(shown) { shown.map { it.uniqueId } }
+    val gridState = com.hikari.app.ui.components.keptGridState(
+        "tmdbGrid:$presetKey|$specJson|$needle|$kindKey",
+        itemKeys = tmdbKeys,
+        onNeedMore = { if (!done && !loading) vm.loadNext() },
+    )
     LaunchedEffect(gridState) {
         snapshotFlow {
             val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
@@ -5247,10 +5256,22 @@ fun CollectionGridScreen(nav: NavHostController, collectionId: String) {
             }
             return@Column
         }
+        // Collection grid position held per collection (see ScrollKeeper).
+        // Keys mirror the grid order (headers + cells) so the return lands
+        // on the exact item even when rows arrive in a different order.
+        val colKeys = remember(loaded) {
+            buildList {
+                loaded.forEachIndexed { rowIndex, row ->
+                    add("shelf|$rowIndex|" + row.key)
+                    row.items.distinctBy { it.uniqueId }.forEach { item ->
+                        add("$rowIndex|" + row.key + "|" + item.uniqueId)
+                    }
+                }
+            }
+        }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = TvUi.gridMinFor(84)),
-            // Collection grid position held per collection (see ScrollKeeper).
-            state = com.hikari.app.ui.components.keptGridState("colGrid:$collectionId"),
+            state = com.hikari.app.ui.components.keptGridState("colGrid:$collectionId", itemKeys = colKeys),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -601,8 +601,14 @@ fun CatalogScreen(
 
     // Grid position held across visits (see ScrollKeeper): tabs and searches
     // get their own slot, so each catalog/query/tab combination reopens where
-    // it was left.
-    val gridState = com.hikari.app.ui.components.keptGridState("catalog:$providerId|$catalogId|$type|$selectedCatalog|$appliedQuery")
+    // it was left. Keys re-find the exact item when row order shifts, and the
+    // waiter pulls more pages while the saved cell is not loaded yet.
+    val catalogKeys = remember(items) { items.distinctBy { it.uniqueId }.map { it.uniqueId } }
+    val gridState = com.hikari.app.ui.components.keptGridState(
+        "catalog:$providerId|$catalogId|$type|$selectedCatalog|$appliedQuery",
+        itemKeys = catalogKeys,
+        onNeedMore = { if (!done && !loading) vm.loadNext() },
+    )
     // Nuvio's catalogue column count: a FIXED count chosen from the screen
     // rather than an adaptive minimum (see [catalogColumnsFor]) — three on a
     // phone, which is the visible difference from the old 84dp adaptive grid

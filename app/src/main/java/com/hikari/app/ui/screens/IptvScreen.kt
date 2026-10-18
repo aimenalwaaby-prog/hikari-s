@@ -356,7 +356,10 @@ fun IptvScreen(nav: NavHostController) {
                 columns = GridCells.Adaptive(minSize = tileMinFor(shape)),
                 // Playlist cards position held across visits (see
                 // ScrollKeeper).
-                state = com.hikari.app.ui.components.keptGridState("iptv"),
+                state = com.hikari.app.ui.components.keptGridState(
+                    "iptv",
+                    itemKeys = remember(cards) { cards.map { it.id } },
+                ),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 12.dp,
@@ -1101,7 +1104,10 @@ fun IptvPlaylistScreen(nav: NavHostController, providerId: String) {
             columns = GridCells.Adaptive(minSize = tileMinFor(shape)),
             // Group grid position held per playlist (see ScrollKeeper): Back
             // from a channel lands where the grid was.
-            state = com.hikari.app.ui.components.keptGridState("iptvGroups:$providerId"),
+            state = com.hikari.app.ui.components.keptGridState(
+                "iptvGroups:$providerId",
+                itemKeys = remember(loaded) { loaded.map { it.catalogId } },
+            ),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 12.dp,
