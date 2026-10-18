@@ -342,10 +342,11 @@ fun SearchScreen(
     val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var searchAutoFocused by rememberSaveable { mutableStateOf(false) }
+    val searchIsTv = TvMode.current()
     LaunchedEffect(Unit) {
         if (searchAutoFocused) return@LaunchedEffect
         searchAutoFocused = true
-        if (TvMode.current()) return@LaunchedEffect
+        if (searchIsTv) return@LaunchedEffect
         kotlinx.coroutines.delay(250)
         runCatching {
             searchFocus.requestFocus()

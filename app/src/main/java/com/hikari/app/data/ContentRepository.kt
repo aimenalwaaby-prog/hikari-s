@@ -4068,7 +4068,7 @@ class ContentRepository(private val manager: ProviderManager) {
                     if (progress != null) {
                         lastEmitted = merged.size
                         passFound = merged.values.toList()
-                        onProgress(progress)
+                        onProgress?.invoke(progress)
                     }
                     val now = System.currentTimeMillis()
                     // New servers landing IS progress: a pass that is producing
