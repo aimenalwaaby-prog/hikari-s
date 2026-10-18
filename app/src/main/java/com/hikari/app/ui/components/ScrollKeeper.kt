@@ -50,6 +50,17 @@ object ScrollKeeper {
 
 private const val RESTORE_WAIT_MS = 10_000L
 
+/**
+ * How long after landing the restore keeps following its anchor.
+ *
+ * Shelves stream in AFTER the page opens (history, collections, provider
+ * rows each arrive on their own beat and insert above the landing spot):
+ * a one-shot restore lands right and is then pushed off by late arrivals.
+ * While the user has not touched the list, the restore follows the anchor
+ * to its new index instead.
+ */
+private const val FOLLOW_MS = 15_000L
+
 private fun scrollLog(msg: String) {
     runCatching { Logs.log("Scroll", msg) }
 }
@@ -100,6 +111,24 @@ fun keptListState(
                     runCatching { state.scrollToItem(target, s.offset) }
                 }
                 scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount}")
+                // Follow the anchor while late content streams in above the
+                // landing spot (see FOLLOW_MS): sitting still would leave the
+                // wrong rows on screen. Stands down the moment the user
+                // scrolls and never fights them.
+                if (s.anchor == null) return@LaunchedEffect
+                var lastTarget = target
+                val followUntil = System.currentTimeMillis() + FOLLOW_MS
+                while (System.currentTimeMillis() < followUntil) {
+                    delay(250L)
+                    if (state.isScrollInProgress) return@LaunchedEffect
+                    if (state.firstVisibleItemIndex != lastTarget) return@LaunchedEffect
+                    val ai = keysNow.value.indexOf(s.anchor)
+                    if (ai >= 0 && ai != lastTarget) {
+                        runCatching { state.scrollToItem(ai, s.offset) }
+                        lastTarget = ai
+                        scrollLog("followed key=$key target=$ai")
+                    }
+                }
                 return@LaunchedEffect
             }
             if (ticks % 5 == 0) runCatching { needMoreNow.value?.invoke() }
@@ -171,6 +200,24 @@ fun keptGridState(
                     runCatching { state.scrollToItem(target, s.offset) }
                 }
                 scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount}")
+                // Follow the anchor while late content streams in above the
+                // landing spot (see FOLLOW_MS): sitting still would leave the
+                // wrong rows on screen. Stands down the moment the user
+                // scrolls and never fights them.
+                if (s.anchor == null) return@LaunchedEffect
+                var lastTarget = target
+                val followUntil = System.currentTimeMillis() + FOLLOW_MS
+                while (System.currentTimeMillis() < followUntil) {
+                    delay(250L)
+                    if (state.isScrollInProgress) return@LaunchedEffect
+                    if (state.firstVisibleItemIndex != lastTarget) return@LaunchedEffect
+                    val ai = keysNow.value.indexOf(s.anchor)
+                    if (ai >= 0 && ai != lastTarget) {
+                        runCatching { state.scrollToItem(ai, s.offset) }
+                        lastTarget = ai
+                        scrollLog("followed key=$key target=$ai")
+                    }
+                }
                 return@LaunchedEffect
             }
             if (ticks % 5 == 0) runCatching { needMoreNow.value?.invoke() }

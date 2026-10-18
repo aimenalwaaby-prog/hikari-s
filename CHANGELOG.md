@@ -1,3 +1,8 @@
+## 0.11.64 (continuous build only)
+
+### Fixed
+- Home feed drifting off right after landing (log-proven: restore hit its row, then late shelves inserted above it and pushed it off — open Netflix folder, back, wrong rows): the restore now follows its row for 15s while late shelves stream in, and stands down the moment you scroll
+
 ## 0.11.63 (continuous build only)
 
 ### Fixed
