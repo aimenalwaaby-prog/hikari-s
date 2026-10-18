@@ -198,9 +198,13 @@ object TrackerApi {
      * redirect we intercept is provably ours.
      */
     fun authorizeUrl(kind: TrackerKind, clientId: String, state: String): String = when (kind) {
-        // AniList's implicit grant: the token itself comes back in the redirect.
+        // AniList's authorization-code grant: a code comes back in the
+        // redirect and is exchanged for a token (see [exchangeCode]). The
+        // old implicit grant (`response_type=token`) is dead — AniList's
+        // server answers it with `unsupported_grant_type`, which is the JSON
+        // the user sees instead of a login page.
         TrackerKind.ANILIST ->
-            "https://anilist.co/api/v2/oauth/authorize?client_id=" + enc(clientId) + "&response_type=token" + "&redirect_uri=" + enc(REDIRECT_URI) + "&state=" + enc(state)
+            "https://anilist.co/api/v2/oauth/authorize?client_id=" + enc(clientId) + "&response_type=code" + "&redirect_uri=" + enc(REDIRECT_URI) + "&state=" + enc(state)
 
         TrackerKind.MAL ->
             "https://myanimelist.net/v1/oauth2/authorize?response_type=code" +
@@ -396,21 +400,41 @@ object TrackerApi {
 
     // --------------------------------------------------------- sign-in: token in
 
-    /** Confirms an implicit-grant token and asks the service who the user is. */
+    /**
+     * Who an AniList token belongs to — the "who am I" half of both AniList
+     * sign-ins (the legacy implicit token and the code exchange below share
+     * it, because a token is a token however it arrived).
+     */
+    private fun anilistIdentity(reply: Reply): Pair<String, String>? {
+        val viewer = reply.json()?.optJSONObject("data")?.optJSONObject("Viewer")
+        val name = viewer?.optString("name").orEmpty()
+        if (viewer == null || name.isBlank()) return null
+        return name to viewer.optInt("id", 0).toString()
+    }
+
+    private suspend fun anilistMe(token: String): Pair<String, String>? =
+        anilistIdentity(graphql(token, "{ Viewer { id name } }"))
+
+    /**
+     * Confirms a token and asks the service who the user is.
+     *
+     * Legacy path: AniList tokens issued before the implicit grant died are
+     * still valid sessions, so a link or paste carrying one still finishes.
+     * Nothing STARTS this flow any more — AniList is a code flow now.
+     */
     suspend fun signInWithToken(client: TrackerClient, token: String): Result<TrackerAccount> = when (client.kind) {
         TrackerKind.ANILIST -> {
             val reply = graphql(token, "{ Viewer { id name } }")
-            val viewer = reply.json()?.optJSONObject("data")?.optJSONObject("Viewer")
-            val name = viewer?.optString("name").orEmpty()
-            if (viewer == null || name.isBlank()) {
+            val identity = anilistIdentity(reply)
+            if (identity == null) {
                 Result.failure(Exception(reply.graphQlError()?.let { "AniList: $it" }
                     ?: problem(reply, "AniList sign-in")))
             } else {
                 Result.success(
                     TrackerAccount(
                         kind = client.kind,
-                        user = name,
-                        userId = viewer.optInt("id", 0).toString(),
+                        user = identity.first,
+                        userId = identity.second,
                         token = token,
                     )
                 )
@@ -427,6 +451,26 @@ object TrackerApi {
         state: String,
         redirect: String = REDIRECT_URI,
     ): Result<TrackerAccount> = when (client.kind) {
+        TrackerKind.ANILIST -> {
+            // The authorization-code grant: unlike MyAnimeList's public-client
+            // PKCE, AniList's token endpoint wants the app's client secret, so
+            // the shipped app id alone is not enough — the secret for it must
+            // be stored too (see TrackerBuiltIn), or the user pastes both.
+            val body = form(
+                "grant_type" to "authorization_code",
+                "client_id" to client.id,
+                "client_secret" to client.secret,
+                "code" to code,
+                "redirect_uri" to redirect,
+            )
+            tokenAccount(
+                client,
+                post("https://anilist.co/api/v2/oauth/token", body, contentType = FORM),
+                which = "AniList",
+                me = { token -> anilistMe(token) },
+            )
+        }
+
         TrackerKind.MAL -> {
             // PKCE with `plain`: the verifier IS the state we sent, so the
             // exchange needs nothing but the code — which is what makes a

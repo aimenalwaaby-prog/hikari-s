@@ -161,8 +161,7 @@ object AdBlocker {
     /** True when a request looks like actual media (never ad-block these —
      *  blocklists routinely contain tube-site CDN domains that serve the
      *  real video). */
-    fun isMediaLike(request: android.webkit.WebResourceRequest): Boolean {
-        val h = request.requestHeaders
+    fun isMediaLike(request: android.webkit.WebResourceRequest): Boolean {        val h = request.requestHeaders
         if (h?.containsKey("Range") == true) return true
         val accept = h?.get("Accept")?.lowercase().orEmpty()
         if (accept.contains("video/") || accept.contains("application/octet-stream")) return true
@@ -177,4 +176,247 @@ object AdBlocker {
             .removePrefix("http://").removePrefix("https://")
             .substringBefore('/').substringBefore('?')
             .substringBefore('#').trim().trimEnd('.').lowercase()
+
+    // ------------------------------------------------ URL-pattern blocking
+    //
+    // The uBO-style half a hosts file cannot do. Hosts only match whole
+    // DOMAINS, so everything below sailed straight through even with lists
+    // added and enabled (the user's own report): ads served from the site's
+    // OWN domain (`site.com/ads/banner.js`, `site.com/pop.js`), from ad
+    // subdomains no list names yet (`xyz.ads-network.foo`), and rotating
+    // popunder/popup hosts. These EasyList-subset network rules match the
+    // URL itself, and run in the WebView's request interceptor right after
+    // the hosts check (whitelist and the media exemption both still win —
+    // see the call site).
+    //
+    // Supported syntax (the practical core of EasyList/uBO network rules):
+    //   ||domain^path*   domain-anchored (any subdomain, any scheme)
+    //   |http…|          start/end anchored
+    //   plain substring  (with * wildcards)
+    //   ^               a "separator" (end of host, /, ?, &, =, : …)
+    //   @@…             exception — never block, wins over everything
+    //   $third-party / $~third-party, $domain=a|~b, $script,stylesheet,image,
+    //   font,media,xmlhttprequest,subdocument,other, $match-case
+
+    data class PatternRule(
+        val raw: String,
+        val isException: Boolean,
+        val regex: Regex,
+        /** null = either; true = third-party requests only. */
+        val thirdParty: Boolean?,
+        /** null = any page; otherwise page hosts this rule applies to. */
+        val domains: List<DomainOpt>?,
+        /** null = any resource kind. */
+        val types: Set<String>?,
+        val matchCase: Boolean,
+    )
+
+    data class DomainOpt(val domain: String, val negated: Boolean)
+
+    /** Curated built-ins: the ad networks video/streaming sites actually use
+     *  (popunders, redirect gates, in-page widgets), as URL patterns so
+     *  same-host servings and rotating subdomains are caught too. */
+    val BUILTIN_PATTERNS = listOf(
+        // Popunder / popup delivery.
+        "||popads.net^", "||popcash.net^", "||popunder.net^",
+        "||adsterra.com^", "||propellerads.com^", "||propeller-tracking.com^",
+        "||adcash.com^", "||exoclick.com^", "||trafficjunky.net^",
+        "||juicyads.com^", "||adxpansion.com^", "||hilltopads.net^",
+        "||clickadu.com^", "||mgid.com^", "||revcontent.com^",
+        "||outbrain.com^", "||taboola.com^", "||criteo.com^",
+        "||adnxs.com^", "||rubiconproject.com^", "||pubmatic.com^",
+        "||doubleclick.net^", "||googlesyndication.com^",
+        "||googleadservices.com^", "||amazon-adsystem.com^",
+        "||imasdk.googleapis.com^",
+        "/popunder", "/pop-under", "/popup-ad", "/popad.", "/pop.js",
+        "/popunder.js", "/popup.js", "/popcash.js", "/pst.js",
+        // Same-host ad scripts and redirect gates (hosts files never see these).
+        "/ads/banner", "/ads/pop", "/advertising/", "/adserver/",
+        "/promo-redirect", "/redirect-ads", "/out.php?",
+        // Video-player ad injection.
+        "||vast.com^", "/vast.xml", "/vmap", "imasdk",
+        "/jwplayer-ads", "/video-ads/", "/preroll",
+        // Trackers that exist only to profile ad clicks.
+        "||moatads.com^", "||scorecardresearch.com^", "||quantserve.com^",
+        // Never break logins / payments / the video itself.
+        "@@||accounts.google.com^", "@@||paypal.com^", "@@||stripe.com^",
+        "@@||cloudflare.com^", "@@||challenges.cloudflare.com^",
+    )
+
+    private val compiledPatterns: List<PatternRule> by lazy {
+        BUILTIN_PATTERNS.mapNotNull { parsePattern(it) }
+    }
+
+    private val optionsRe = Regex("^[a-z~\\-]+(=[^,]*)?(,[a-z~\\-]+(=[^,]*)?)*$")
+
+    /** Parses one EasyList-subset rule, or null when it is not a network rule. */
+    fun parsePattern(raw: String): PatternRule? {
+        var s = raw.trim()
+        if (s.isEmpty() || s.startsWith("!") || s.startsWith("[")) return null
+        if (s.contains("##") || s.contains("#@#") || s.contains("#?#")) return null
+        val isException = s.startsWith("@@")
+        if (isException) s = s.substringAfter("@@")
+        var thirdParty: Boolean? = null
+        var domains: List<DomainOpt>? = null
+        var types: Set<String>? = null
+        var matchCase = false
+        val optIdx = s.lastIndexOf('$')
+        if (optIdx > 0) {
+            val opts = s.substring(optIdx + 1)
+            // A `$` inside a real pattern (rare) is not options: options look
+            // like `name` or `name=value` lists, nothing else.
+            if (optionsRe.matches(opts)) {
+                s = s.substring(0, optIdx)
+                for (o in opts.split(',')) {
+                    val name = o.substringBefore('=')
+                    val value = o.substringAfter('=', "")
+                    when (name) {
+                        "third-party" -> thirdParty = true
+                        "~third-party" -> thirdParty = false
+                        "domain" -> domains = value.split('|')
+                            .filter { it.isNotBlank() }
+                            .map { DomainOpt(it.trimStart('~').lowercase(), it.startsWith("~")) }
+                            .takeIf { it.isNotEmpty() }
+                        "match-case" -> matchCase = true
+                        "script", "stylesheet", "image", "font", "media",
+                        "xmlhttprequest", "subdocument", "other", "object",
+                        "ping", "websocket" -> types = (types ?: emptySet()) + name
+                        "~script", "~stylesheet", "~image", "~font", "~media",
+                        "~xmlhttprequest", "~subdocument", "~other" -> {
+                            // Negated types are rare in practice; treat the
+                            // rule as untyped rather than misread it.
+                        }
+                        "document", "elemhide", "generichide", "important",
+                        "redirect", "csp", "removeparam", "cookie" -> {
+                            // Page-level / cosmetic / header options: not
+                            // network-block semantics — ignore the option.
+                        }
+                        else -> {
+                            // Unknown option: safest to keep the rule but
+                            // untyped would MISREAD it, so drop the rule.
+                            if (name.isNotBlank()) return null
+                        }
+                    }
+                }
+            }
+        }
+        if (s.isEmpty()) return null
+        val startAnchor = s.startsWith("|") && !s.startsWith("||")
+        val domainAnchor = s.startsWith("||")
+        var endAnchor = false
+        var core = when {
+            domainAnchor -> s.substring(2)
+            startAnchor -> s.substring(1)
+            else -> s
+        }
+        if (core.endsWith("|") && !core.endsWith("\\|")) {
+            endAnchor = true
+            core = core.dropLast(1)
+        }
+        val body = buildString {
+            for (c in core) {
+                when (c) {
+                    '*' -> append(".*")
+                    '^' -> append("(?:[^a-zA-Z0-9_.%-]|$)")
+                    else -> append(Regex.escape(c.toString()))
+                }
+            }
+        }
+        val pattern = when {
+            domainAnchor -> "^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]*\\.)?" + body
+            startAnchor -> "^" + body
+            else -> body
+        } + if (endAnchor) "$" else ""
+        val regex = runCatching {
+            Regex(pattern, if (matchCase) emptySet() else setOf(RegexOption.IGNORE_CASE))
+        }.getOrNull() ?: return null
+        return PatternRule(raw, isException, regex, thirdParty, domains, types, matchCase)
+    }
+
+    /** The request's coarse kind, inferred from its URL and headers (the
+     *  WebView never tells us the type directly). Unknown → "other". */
+    fun requestType(request: android.webkit.WebResourceRequest): String {
+        val u = request.url.toString().lowercase()
+        val path = u.substringBefore('?')
+        return when {
+            path.endsWith(".js") || path.endsWith(".mjs") -> "script"
+            path.endsWith(".css") -> "stylesheet"
+            path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") ||
+                path.endsWith(".gif") || path.endsWith(".webp") || path.endsWith(".svg") ||
+                path.endsWith(".ico") || path.endsWith(".avif") || path.endsWith(".bmp") -> "image"
+            path.endsWith(".woff") || path.endsWith(".woff2") || path.endsWith(".ttf") ||
+                path.endsWith(".otf") || path.endsWith(".eot") -> "font"
+            path.endsWith(".mp4") || path.endsWith(".m3u8") || path.endsWith(".mpd") ||
+                path.endsWith(".ts") || path.endsWith(".webm") || path.endsWith(".m4s") -> "media"
+            else -> {
+                val accept = request.requestHeaders?.get("Accept")?.lowercase().orEmpty()
+                when {
+                    accept.contains("javascript") || accept.contains("ecmascript") -> "script"
+                    accept.contains("css") -> "stylesheet"
+                    accept.startsWith("image/") -> "image"
+                    accept.contains("font") -> "font"
+                    accept.contains("video/") || accept.contains("audio/") ||
+                        accept.contains("mpegurl") || accept.contains("mpd") -> "media"
+                    request.method.equals("POST", ignoreCase = true) -> "xmlhttprequest"
+                    else -> "other"
+                }
+            }
+        }
+    }
+
+    private fun sameParty(reqHost: String, pageHost: String): Boolean {
+        val r = reqHost.lowercase()
+        val p = pageHost.trim().trimEnd('.').lowercase()
+        return r == p || r.endsWith(".$p") || p.endsWith(".$r")
+    }
+
+    private fun ruleApplies(
+        rule: PatternRule,
+        url: String,
+        reqHost: String,
+        pageHost: String?,
+        type: String,
+    ): Boolean {
+        if (!rule.regex.containsMatchIn(url)) return false
+        if (rule.thirdParty != null && pageHost != null) {
+            val third = !sameParty(reqHost, pageHost)
+            if (rule.thirdParty != third) return false
+        }
+        rule.domains?.let { opts ->
+            val ph = (pageHost ?: "").lowercase()
+            var included = opts.none { !it.negated }
+            for (o in opts) {
+                if (ph == o.domain || ph.endsWith("." + o.domain)) {
+                    if (o.negated) return false
+                    included = true
+                }
+            }
+            if (!included) return false
+        }
+        rule.types?.let { if (type !in it) return false }
+        return true
+    }
+
+    /**
+     * True when a URL is blocked by pattern rules (exceptions win). The
+     * caller still checks the whitelist first and never blocks media —
+     * this answers only "does a rule match".
+     */
+    fun matchesPatternUrl(url: String, pageHost: String?, type: String = "other"): Boolean {
+        val reqHost = runCatching {
+            java.net.URI(url).host
+        }.getOrNull()?.trim()?.trimEnd('.')?.lowercase().orEmpty()
+        if (reqHost.isEmpty()) return false
+        var blocked = false
+        for (rule in compiledPatterns) {
+            if (!ruleApplies(rule, url, reqHost, pageHost, type)) continue
+            if (rule.isException) return false
+            blocked = true
+        }
+        return blocked
+    }
+
+    /** Same as [matchesPatternUrl] for a live WebView request (type inferred). */
+    fun matchesPattern(request: android.webkit.WebResourceRequest, pageHost: String?): Boolean =
+        matchesPatternUrl(request.url.toString(), pageHost, requestType(request))
 }

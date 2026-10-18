@@ -199,6 +199,11 @@ import java.util.UUID
 class DetailViewModel(app: Application) : AndroidViewModel(app) {
     private val manager = (app as HikariApp).providers
     private val repo = ContentRepository(manager)
+    /** The title's own provider asked alone on a short budget — the fast
+     *  first half of a re-extract (see the refresh collector in the play
+     *  flow below): the dead links almost always came from it. */
+    suspend fun originStreamsFast(item: MediaItem, episode: Episode?): List<StreamSource> =
+        runCatching { repo.originStreams(item, episode) }.getOrDefault(emptyList())
     suspend fun serversForBatch(item: MediaItem, episode: Episode): List<StreamSource> {
         val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
         val playable = origin.filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
@@ -2594,6 +2599,30 @@ fun DetailScreen(
                         if (n == lastRefresh) return@collect
                         lastRefresh = n
                         StreamsLive.setStatus(sid, "Re-extracting expired links…")
+                        // Targeted first: the dead links almost always came
+                        // from the title's OWN provider, so re-ask it ALONE on
+                        // a short budget and hand the player fresh links in
+                        // seconds. The old code ran the whole cross-extension
+                        // pass first, which is what kept "Re-extracting
+                        // expired links…" on screen for a minute while the one
+                        // provider that mattered had answered long ago. The
+                        // full pass still runs below for everyone else.
+                        val mm = m
+                        if (mm != null) {
+                            val originFirst = vm.originStreamsFast(mm, epForSearch)
+                            if (originFirst.isNotEmpty()) {
+                                found = originFirst
+                                onUi { streams = originFirst }
+                                val originPlayable = playableEvery(originFirst)
+                                StreamProbe.warmAsync(originPlayable)
+                                StreamsLive.setStatus(
+                                    sid,
+                                    "Found " + originPlayable.size + " fresh server" +
+                                        (if (originPlayable.size == 1) "" else "s") + " — retrying…",
+                                )
+                                StreamsLive.append(sid, originPlayable)
+                            }
+                        }
                         val fresh = vm.getStreams(epForSearch, force = true)
                         if (fresh.isNotEmpty()) {
                             found = fresh

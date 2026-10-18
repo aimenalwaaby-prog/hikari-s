@@ -907,12 +907,12 @@ fun TrackerLoginDialog(
                                             "bar of the page you land on and paste it below."
                                     )
                                 }) +
-                                    if (kind.flow == TrackerFlow.TOKEN) {
+                                    if (kind == TrackerKind.ANILIST) {
                                         " " + tr(
                                             "If your browser will not let you copy the address either, set " +
                                                 "this app's redirect URL to"
                                         ) + " https://anilist.co/api/v2/oauth/pin " + tr(
-                                            "in AniList's developer page: AniList will then show the token " +
+                                            "in AniList's developer page: AniList will then show the code " +
                                                 "as text you can copy. (That redirect URL works for the " +
                                                 "browser route only — the WebView above needs hikari://oauth.)"
                                         )

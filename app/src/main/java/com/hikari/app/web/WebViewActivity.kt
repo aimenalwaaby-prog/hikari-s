@@ -705,6 +705,16 @@ class WebViewActivity : ComponentActivity() {
                             return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
                         }
                     }
+                    // URL-pattern rules (the uBO-style half): catches what
+                    // hosts cannot — ads from the site's OWN domain, ad
+                    // subdomains no list names, rotating popunder hosts. Same
+                    // guarantees as above: whitelist already won, media never
+                    // blocked.
+                    if (!isMediaRequest(request) &&
+                        AdBlocker.matchesPattern(request, currentPageHost())
+                    ) {
+                        return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                    }
                 }
                 // Only count it as a video if it actually IS one: probe the
                 // content-type in the background so ad previews, gifs and
@@ -923,6 +933,24 @@ class WebViewActivity : ComponentActivity() {
                                 showBlockedToast("Blocked a donation page")
                                 return
                             }
+                            // A popup to an ad-pattern URL is an ad popup, not
+                            // a choice: dropped outright instead of asking
+                            // Allow once / Always for it (the deputize…-class
+                            // popunders from the user's own screenshot). Same
+                            // guarantees as request blocking — whitelisted
+                            // hosts are checked before this is ever reached…
+                            // (checked below via the same whitelistDomains).
+                            if (popupProtection && !addonConfig) {
+                                val ph = runCatching { java.net.URI(url).host }
+                                    .getOrNull()?.trim()?.trimEnd('.').orEmpty()
+                                if (ph.isNotEmpty() &&
+                                    !AdBlocker.matches(ph, whitelistDomains) &&
+                                    AdBlocker.matchesPatternUrl(url, currentPageHost())
+                                ) {
+                                    showBlockedToast("Blocked ad popup")
+                                    return
+                                }
+                            }
                             // Popup protection: only relay popups that belong to
                             // the site (same host/subdomain or whitelisted).
                             // about:blank popunders and foreign ad popups are
@@ -1097,6 +1125,19 @@ class WebViewActivity : ComponentActivity() {
         menu.menu.add(0, 9, 9, "\u2715 Clear all blocks")
         if (translateEnabled) menu.menu.add(0, 10, 10, "\u2716 Translation off")
         menu.menu.add(0, 12, 12, if (mouseMode) "\u2716 Mouse cursor off" else "\u2316 Mouse cursor on")
+        // Per-site adblock switch, instant: a site the blocker breaks goes on
+        // the whitelist from here (and back off with the same tap), no trip
+        // to Settings. The in-memory set is swapped and the page reloaded, so
+        // the new rule applies to the very next load.
+        val menuHost = currentPageHost()?.trim()?.trimEnd('.').orEmpty()
+        if (menuHost.isNotBlank()) {
+            val siteOpen = AdBlocker.matches(menuHost, whitelistDomains)
+            menu.menu.add(
+                0, 13, 11,
+                if (siteOpen) "\u2714 Ads allowed on $menuHost — tap to block"
+                else "\u2298 Allow ads on $menuHost",
+            )
+        }
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> if (webView.canGoBack()) webView.goBack()
@@ -1129,10 +1170,41 @@ class WebViewActivity : ComponentActivity() {
                 }
                 11 -> allowBlockedRedirect()
                 12 -> toggleMouse()
+                13 -> toggleSiteAdblock()
             }
             true
         }
         menu.show()
+    }
+
+    /**
+     * The ⋯ menu's per-site adblock switch (see [showMenu]): flips the current
+     * site on/off the Settings whitelist, swaps the in-memory set this page
+     * checks, and reloads — so the change bites on the very next load, not on
+     * the next visit. Subdomains ride along (the whitelist matches them too).
+     */
+    private fun toggleSiteAdblock() {
+        val host = currentPageHost()?.trim()?.trimEnd('.')?.lowercase()
+        if (host.isNullOrBlank()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val app = applicationContext as HikariApp
+            val norm = AdBlocker.normalizeDomain(host)
+            val cur = app.store.adWhite()
+            val has = cur.any { AdBlocker.normalizeDomain(it) == norm }
+            val next = if (has) cur.filterNot { AdBlocker.normalizeDomain(it) == norm }
+            else cur + norm
+            runCatching { app.store.setAdWhite(next) }
+            whitelistDomains =
+                next.map { AdBlocker.normalizeDomain(it) }.filter { it.isNotBlank() }.toSet()
+            runOnUiThread {
+                Toast.makeText(
+                    this@WebViewActivity,
+                    if (has) "Blocking ads on $host" else "Ads allowed on $host",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                webView.reload()
+            }
+        }
     }
 
     /**

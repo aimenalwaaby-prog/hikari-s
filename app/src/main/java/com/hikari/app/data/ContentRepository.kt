@@ -421,6 +421,59 @@ class ContentRepository(private val manager: ProviderManager) {
          *  perfectly minutes later, so the blacklist now expires. */
         const val HUNG_TTL_MS = 120_000L
 
+        /**
+         * Providers that gave NO answer within a full sweep budget twice in a
+         * row this session (provider id → when they were marked): the
+         * HdHub shape from the user's own log — "no answer within 45s —
+         * moving on (it will be asked again)" every 45s forever, one dead repo
+         * holding "1 still searching" on screen for the whole session. One
+         * no-answer is a hiccup; two consecutive full-budget ones is a dead
+         * host, and re-asking it every round is pure wait. Marked providers
+         * are skipped by [isHung] below (the single choke point every pass
+         * and sweep already consults) for [DEAD_SESSION_TTL_MS] — long enough
+         * to end the burn, short enough that a host that comes back is asked
+         * again within the session. An actual answer clears the strikes (see
+         * [noteAnswered]) — an empty-but-answered "no servers" counts as
+         * alive, only silence counts as dead.
+         */
+        val deadSessionUntil = ConcurrentHashMap<String, Long>()
+
+        /** How long a twice-silent provider sits out (see [deadSessionUntil]). */
+        const val DEAD_SESSION_TTL_MS = 30 * 60 * 1000L
+
+        /** Consecutive full-budget silences per provider (see [deadSessionUntil]). */
+        val noAnswerStrikes = ConcurrentHashMap<String, Int>()
+
+        /** Two consecutive silences retire a provider for the session. */
+        const val DEAD_SESSION_STRIKES = 2
+
+        /** Records a full-budget silence from [providerId] (see [deadSessionUntil]). */
+        fun noteNoAnswer(providerId: String) {
+            val strikes = (noAnswerStrikes[providerId] ?: 0) + 1
+            if (strikes >= DEAD_SESSION_STRIKES) {
+                noAnswerStrikes.remove(providerId)
+                val prev = deadSessionUntil.put(
+                    providerId, System.currentTimeMillis() + DEAD_SESSION_TTL_MS
+                )
+                if (prev == null || System.currentTimeMillis() >= prev) {
+                    com.hikari.app.data.Logs.log(
+                        "Search",
+                        "extension '" + providerId + "' gave no answer " + strikes +
+                            " times in a row — sitting out for " +
+                            (DEAD_SESSION_TTL_MS / 60000) + "m instead of holding " +
+                            "\"still searching\" open",
+                    )
+                }
+            } else {
+                noAnswerStrikes[providerId] = strikes
+            }
+        }
+
+        /** Records an actual answer from [providerId] — silence streak over. */
+        fun noteAnswered(providerId: String) {
+            noAnswerStrikes.remove(providerId)
+        }
+
         /** …and for a meta/episode fetch, whose own budget is 20-40s. */
         const val DETAIL_HANG_AFTER_MS = 120_000L
 
@@ -462,9 +515,14 @@ class ContentRepository(private val manager: ProviderManager) {
         private val outcomeSeq = java.util.concurrent.atomic.AtomicLong(0L)
 
         /** True while [providerId] should be left out of the search entirely —
-         *  i.e. until its wedge expires (see [HUNG_TTL_MS]). After that it is
-         *  asked again like any other extension. */
+         *  i.e. until its wedge expires (see [HUNG_TTL_MS]), or while it sits
+         *  out its twice-silent session break (see [deadSessionUntil]). After
+         *  either expires it is asked again like any other extension. */
         fun isHung(providerId: String): Boolean {
+            deadSessionUntil[providerId]?.let { until ->
+                if (System.currentTimeMillis() < until) return true
+                deadSessionUntil.remove(providerId, until)
+            }
             val at = crossHung[providerId] ?: return false
             if (System.currentTimeMillis() - at < HUNG_TTL_MS) return true
             crossHung.remove(providerId, at)
@@ -4918,8 +4976,17 @@ class ContentRepository(private val manager: ProviderManager) {
                         }
                         // Wedged recently (see [crossHung], which now EXPIRES):
                         // skip it rather than hold a worker on a call that cannot
-                        // come back.
-                        if (isHung(p.config.id)) continue
+                        // come back. Twice-silent providers sit out longer (see
+                        // [deadSessionUntil]) — say so on the tally, or the
+                        // sheet keeps whatever an earlier round wrote.
+                        if (isHung(p.config.id)) {
+                            if (deadSessionUntil[p.config.id]?.let { System.currentTimeMillis() < it } == true) {
+                                val rn = p.config.name.ifBlank { p.config.id }
+                                tally.verdict[p.config.id] = "$rn — sitting out (silent twice in a row)"
+                                bumpCrossStatus()
+                            }
+                            continue
+                        }
                         val id = p.config.id
                         val repo = p.config.name.ifBlank { id }
                         // The live tally (not a captured one): a later pass for
@@ -4954,6 +5021,7 @@ class ContentRepository(private val manager: ProviderManager) {
                             tally.verdict[id] = "$repo — did not answer in time"
                             bumpCrossStatus()
                             sweep.lastProgressAt = System.currentTimeMillis()
+                            noteNoAnswer(id)
                             com.hikari.app.data.Logs.log(
                                 "Search",
                                 "sweep \"${item.title}\" → $repo: no answer within " +
@@ -4972,6 +5040,8 @@ class ContentRepository(private val manager: ProviderManager) {
                                     tally.verdict.remove(id)
                                     tally.asked.remove(id)
                                 } else {
+                                    // An answer, even when it is "nothing here".
+                                    noteAnswered(id)
                                     tally.verdict[id] = "$repo — ${verdict ?: "no matching title"}"
                                     com.hikari.app.data.Logs.log(
                                         "Search",
@@ -4990,6 +5060,7 @@ class ContentRepository(private val manager: ProviderManager) {
                             }
                             if (extracted == null) {
                                 tally.verdict[id] = "$repo — did not answer in time"
+                                noteNoAnswer(id)
                                 com.hikari.app.data.Logs.log(
                                     "Search",
                                     "sweep \"${item.title}\" → $repo: extraction gave no answer " +
@@ -5000,6 +5071,10 @@ class ContentRepository(private val manager: ProviderManager) {
                             val found = extracted.first
                             val why = extracted.second
                             if (found.isEmpty()) {
+                                // Asked and answered, even when the answer is
+                                // empty — silence is what earns a strike, not
+                                // an honest "nothing".
+                                noteAnswered(id)
                                 tally.verdict[id] = "$repo — ${why ?: "no playable links"}"
                                 com.hikari.app.data.Logs.log(
                                     "Search",
@@ -5010,6 +5085,7 @@ class ContentRepository(private val manager: ProviderManager) {
                                 tally.found[id] = p.config.type.groupLabel
                                 // Proven: asked first on every later lookup.
                                 crossProven.add(id)
+                                noteAnswered(id)
                                 synchronized(acc) {
                                     found.forEach { s -> acc.putIfAbsent(s.identityKey(), s) }
                                 }
@@ -5094,6 +5170,7 @@ class ContentRepository(private val manager: ProviderManager) {
         }
         try {
             if (got == null) {
+                noteNoAnswer(id)
                 com.hikari.app.data.Logs.log(
                     "Search",
                     "sweep \"${item.title}\" → $repo (" + p.config.type.groupLabel +
@@ -5107,6 +5184,7 @@ class ContentRepository(private val manager: ProviderManager) {
                 // What the provider said about itself, when it said anything:
                 // "no servers" is an answer; anything else is the reason it could
                 // not answer. Either way it HAS been asked.
+                noteAnswered(id)
                 val said = providerOutcome[id]
                 com.hikari.app.data.Logs.log(
                     "Search",
@@ -5118,6 +5196,7 @@ class ContentRepository(private val manager: ProviderManager) {
             tally.primaryFound[id] = p.config.type.groupLabel
             // Proven: asked first on every later lookup of any title.
             crossProven.add(id)
+            noteAnswered(id)
             synchronized(acc) {
                 found.forEach { s -> acc.putIfAbsent(s.identityKey(), s) }
             }

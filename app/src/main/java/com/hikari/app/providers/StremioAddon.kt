@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -1103,8 +1105,21 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
         // be turned into a video" over a title Stremio plays dozens of
         // servers for was).
         var linkOnly: List<StreamSource>? = null
-        for (u in attempts) {
-            val json = getJson(u) ?: run {
+        // The walk runs CONCURRENTLY, not one round trip at a time: every
+        // spelling is a cheap same-host GET, and asking them one after another
+        // is what made a lookup cost the SUM of 16 latencies (the user's own
+        // log: the origin addon answered in 37s on a first lookup, 8s on the
+        // next — a search that reads as "0 servers, still searching" for half
+        // a minute). Six at a time keeps small hosts comfortable; merging
+        // below runs in walk order, so the union, the link-only fallback and
+        // the reasons read exactly as the sequential walk produced them.
+        val fetched: List<Pair<String, JSONObject?>> = attempts.chunked(6).flatMap { batch ->
+            coroutineScope {
+                batch.map { u -> async(Dispatchers.IO) { u to getJson(u) } }.awaitAll()
+            }
+        }
+        for ((u, json) in fetched) {
+            if (json == null) {
                 reasons += "no response from ${u.take(120)}"
                 continue
             }

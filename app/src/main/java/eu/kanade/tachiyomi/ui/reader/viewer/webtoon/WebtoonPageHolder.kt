@@ -18,6 +18,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -52,6 +53,17 @@ class WebtoonPageHolder(
     private var loadJob: Job? = null
 
     /**
+     * Automatic retries left for the current failure run (see [setError]).
+     * A failure schedules its own retry instead of waiting for the user; a
+     * success refills the budget, and so does a manual Retry tap — after the
+     * budget is spent the button simply stays put for the user.
+     */
+    private var autoTriesLeft = AUTO_RETRY_MAX
+
+    /** The currently scheduled automatic retry, if any. */
+    private var autoJob: Job? = null
+
+    /**
      * The frame's placeholder height while a page loads: the recycler's viewport height. The
      * recycler is not necessarily measured yet when the FIRST holders are created (the adapter is
      * built during the initial layout), so fall back to the display height rather than 0 — a 0
@@ -82,6 +94,12 @@ class WebtoonPageHolder(
         frame.debugLabel = label
         ReaderDiagnostics.logFor(label, "bind seg=${item.segIndex} page=${item.number}")
         loadJob?.cancel()
+        autoJob?.cancel()
+        // A new page earns a fresh automatic budget; re-binding the SAME page
+        // (the automatic retry below) keeps spending the current one, or the
+        // budget would refill on every try and never run out. Compared by URL
+        // because `item` is already assigned above.
+        if (this.item?.desc?.imageUrl != item.desc.imageUrl) autoTriesLeft = AUTO_RETRY_MAX
         removeErrorLayout()
         progressContainer.isVisible = true
         refreshLayoutParams()
@@ -244,6 +262,9 @@ class WebtoonPageHolder(
     fun recycle() {
         loadJob?.cancel()
         loadJob = null
+        autoJob?.cancel()
+        autoJob = null
+        autoTriesLeft = AUTO_RETRY_MAX
         removeErrorLayout()
         frame.recycle()
         progressContainer.isVisible = true
@@ -251,6 +272,9 @@ class WebtoonPageHolder(
 
     /** Called when the image is decoded and going to be displayed. */
     private fun onImageDecoded() {
+        autoJob?.cancel()
+        autoJob = null
+        autoTriesLeft = AUTO_RETRY_MAX
         progressContainer.isVisible = false
         removeErrorLayout()
     }
@@ -274,12 +298,35 @@ class WebtoonPageHolder(
                 addView(msg)
                 val retry = Button(frame.context).apply {
                     text = "Retry"
-                    setOnClickListener { item?.let { bind(it) } }
+                    setOnClickListener { manualRetry() }
                 }
                 addView(retry, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(12) })
             }
             frame.addView(errorLayout)
         }
+        // The page retries itself: a transient 403/5xx is the common case, and
+        // tapping Retry by hand until it loads is what this replaces. Up to
+        // [AUTO_RETRY_MAX] tries with a growing pause between them; the first
+        // one that decodes refills the budget (see [onImageDecoded]), and when
+        // the budget is spent the button simply stays for a manual tap.
+        if (autoTriesLeft > 0 && (autoJob?.isActive != true)) {
+            autoTriesLeft--
+            val attempt = AUTO_RETRY_MAX - autoTriesLeft
+            autoJob = scope.launch {
+                try {
+                    delay(800L + attempt * 400L)
+                } catch (e: CancellationException) {
+                    throw e
+                }
+                item?.let { bind(it) }
+            }
+        }
+    }
+
+    /** The Retry button: a manual tap always works and refills the automatic budget. */
+    private fun manualRetry() {
+        autoTriesLeft = AUTO_RETRY_MAX
+        item?.let { bind(it) }
     }
 
     /** Removes the error layout from the holder, if found. */
@@ -298,6 +345,11 @@ class WebtoonPageHolder(
             val lp = FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER)
             progressContainer.addView(it, lp)
         }
+    }
+
+    companion object {
+        /** How many times a failed page retries itself before leaving the Retry button to the user. */
+        const val AUTO_RETRY_MAX = 10
     }
 }
 

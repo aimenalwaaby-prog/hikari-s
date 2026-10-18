@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -45,6 +46,17 @@ class PagerPageHolder(
     /** Job for loading the page. */
     private var loadJob: Job? = null
 
+    /**
+     * Automatic retries left for the current failure run (see [setError]).
+     * A failure schedules its own retry instead of waiting for the user; a
+     * success refills the budget, and so does a manual Retry tap — after the
+     * budget is spent the button simply stays put for the user.
+     */
+    private var autoTriesLeft = AUTO_RETRY_MAX
+
+    /** The currently scheduled automatic retry, if any. */
+    private var autoJob: Job? = null
+
     init {
         progressContainer = FrameLayout(context).apply {
             layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
@@ -66,6 +78,7 @@ class PagerPageHolder(
     /** (Re)loads the page — used on creation and for the retry button. */
     fun load() {
         loadJob?.cancel()
+        autoJob?.cancel()
         removeErrorLayout()
         progressContainer.isVisible = true
         loadJob = scope.launch {
@@ -98,6 +111,9 @@ class PagerPageHolder(
     fun onRecycled() {
         loadJob?.cancel()
         loadJob = null
+        autoJob?.cancel()
+        autoJob = null
+        autoTriesLeft = AUTO_RETRY_MAX
         removeErrorLayout()
         super.recycle()
         progressContainer.isVisible = true
@@ -105,6 +121,9 @@ class PagerPageHolder(
 
     /** Called when the image is decoded and going to be displayed. */
     private fun onImageDecoded() {
+        autoJob?.cancel()
+        autoJob = null
+        autoTriesLeft = AUTO_RETRY_MAX
         progressContainer.isVisible = false
         removeErrorLayout()
     }
@@ -125,12 +144,35 @@ class PagerPageHolder(
                 addView(msg)
                 val retry = Button(context).apply {
                     text = "Retry"
-                    setOnClickListener { load() }
+                    setOnClickListener { manualRetry() }
                 }
                 addView(retry, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(12) })
             }
             addView(errorLayout)
         }
+        // The page retries itself: a transient 403/5xx is the common case, and
+        // tapping Retry by hand until it loads is what this replaces. Up to
+        // [AUTO_RETRY_MAX] tries with a growing pause between them; the first
+        // one that decodes refills the budget (see [onImageDecoded]), and when
+        // the budget is spent the button simply stays for a manual tap.
+        if (autoTriesLeft > 0 && (autoJob?.isActive != true)) {
+            autoTriesLeft--
+            val attempt = AUTO_RETRY_MAX - autoTriesLeft
+            autoJob = scope.launch {
+                try {
+                    delay(800L + attempt * 400L)
+                } catch (e: CancellationException) {
+                    throw e
+                }
+                load()
+            }
+        }
+    }
+
+    /** The Retry button: a manual tap always works and refills the automatic budget. */
+    private fun manualRetry() {
+        autoTriesLeft = AUTO_RETRY_MAX
+        load()
     }
 
     /** Removes the error layout from the holder, if found. */
@@ -143,4 +185,9 @@ class PagerPageHolder(
 
     private fun dp(value: Int): Int =
         (value * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
+
+    companion object {
+        /** How many times a failed page retries itself before leaving the Retry button to the user. */
+        const val AUTO_RETRY_MAX = 10
+    }
 }

@@ -1,3 +1,11 @@
+## 0.11.57 (continuous build only)
+
+### Fixed
+- AniList login showing `unsupported_grant_type` JSON instead of the login page: AniList's server killed the old implicit login, so sign-in now uses the authorization-code flow (code → token exchange, secret required — paste the id AND secret from AniList's developer page until the app's own secret is embedded)
+- WebView ads surviving the host blocklists: URL-pattern blocking (uBlock-style rules for popunders, redirect gates and same-host ad scripts) now runs on every request next to the hosts check, ad popups are dropped without even asking, and the ⋯ menu carries a per-site allow/block switch that bites instantly
+- Same title, same extension, "0 servers / still searching / re-extracting" forever (log-proven on LOST: origin answered in 37s, HdHub never): Stremio id-spellings are now asked in parallel instead of one-by-one, a repo silent twice in a row sits out 30 minutes instead of holding "still searching" open, and re-extraction asks the title's own provider alone first so fresh links land in seconds
+- Manga "Couldn't load page" needing manual Retry taps: a failed page now retries itself up to 10 times with a growing pause (stops early the moment it loads), the Retry button stays for after that and always works
+
 ## 0.11.56 (continuous build only)
 
 ### Fixed

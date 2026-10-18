@@ -675,10 +675,11 @@ class MainActivity : AppCompatActivity() {
      *
      * With nothing on screen — a link opened long after the app was closed, or
      * one that arrives before the app has any UI — the activity finishes what it
-     * CAN finish on its own: the token flow (AniList's implicit grant), which
-     * needs nothing but the client id already stored in the settings. Anything
-     * else says so, with the one instruction that works, rather than pretending
-     * the link was received and silently doing nothing with it.
+     * CAN finish on its own: a token link (an old AniList implicit-grant link,
+     * which needs nothing but the client id already stored in the settings) or
+     * a code link whose sign-in record survived (see [TrackerApi.Pending]).
+     * Anything else says so, with the one instruction that works, rather than
+     * pretending the link was received and silently doing nothing with it.
      */
     private fun handleTrackerRedirect(intent: android.content.Intent?) {
         val url = intent?.data?.toString().orEmpty()
@@ -712,7 +713,7 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
-        // A code flow (MyAnimeList, Shikimori, Simkl) with no dialog on screen.
+        // A code flow (MyAnimeList, Shikimori, AniList) with no dialog on screen.
         // The code alone is not enough to exchange: the token endpoint also wants
         // the `state` the redirect echoes back, because for MyAnimeList that same
         // value IS the PKCE `code_verifier`. The dialog persists it when the login

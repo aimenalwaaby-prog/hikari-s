@@ -40,9 +40,9 @@ enum class TrackerKind(
     ANILIST(
         "anilist",
         "AniList",
-        TrackerFlow.TOKEN,
+        TrackerFlow.CODE,
         "https://anilist.co/settings/developer",
-        false,
+        true,
         TrackerScope.ANIME,
         "Anime and manga — the database most extensions already use",
     ),
@@ -100,7 +100,13 @@ enum class TrackerKind(
 
 /** How a service's sign-in works — see [com.hikari.app.tracker.TrackerApi]. */
 enum class TrackerFlow {
-    /** The access token arrives in the redirect (AniList's implicit grant). */
+    /**
+     * Legacy: the access token arrived in the redirect (AniList's implicit
+     * grant). No service uses this any more — AniList's server answers it
+     * with `unsupported_grant_type` (the user's own screenshot), so AniList
+     * is a [CODE] flow now. Kept so old links and old pasted tokens still
+     * finish instead of crashing a `when`.
+     */
     TOKEN,
 
     /** An authorization code arrives in the redirect and is exchanged. */
@@ -171,7 +177,10 @@ data class TrackerClient(
  * Registered by the app owner for Hikari itself (AniList/MAL/Simkl/Trakt ids
  * live-verified at embed time via their device/authorize endpoints). Shikimori
  * is still empty — its id AND secret are both required and were never supplied,
- * so Shikimori keeps the manual step until they are. Kitsu needs nothing at
+ * so Shikimori keeps the manual step until they are. AniList's id is shipped
+ * but its SECRET is still missing (the code flow needs it — see
+ * [com.hikari.app.tracker.TrackerApi.exchangeCode]), so AniList also keeps the
+ * manual step until the secret for app 51890 is embedded below. Kitsu needs nothing at
  * all (password grant with no app registration). A user-typed id/secret in
  * the dialog still overrides these per device.
  */
@@ -188,6 +197,7 @@ object TrackerBuiltIn {
 
     /** Client secrets shipped with the app, keyed by [TrackerKind.key]. */
     private val SECRETS = mapOf(
+        "anilist" to "",
         "shikimori" to "",
     )
 
