@@ -183,6 +183,8 @@ private fun AnimePage(nav: NavHostController) {
     val formatter = DateTimeFormatter.ofPattern("EEE, dd MMM · hh:mm a").withZone(ZoneId.systemDefault())
 
     LazyColumn(
+        // Calendar position held per query (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("animeCal:$q"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -272,6 +274,8 @@ private fun TmdbCalendarPage(nav: NavHostController, defaultKind: ReleaseCalenda
     }
 
     LazyColumn(
+        // Calendar position held per tab+query (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("tmdbCal:$kindKey:$q"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),

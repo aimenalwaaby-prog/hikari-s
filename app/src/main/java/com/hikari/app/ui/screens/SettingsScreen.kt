@@ -724,11 +724,13 @@ fun SettingsScreen(nav: NavHostController) {
     val languageFlow = remember { app.store.languageFlow() }
     val appLanguage by languageFlow.collectAsState(initial = "")
     val installedProviders by app.providers.providers.collectAsState()
-    val indexState = rememberLazyListState()
-    val folderState = rememberLazyListState()
-    val subState = rememberLazyListState()
+    // Page positions held across visits too (see ScrollKeeper): leaving
+    // Settings entirely and coming back lands each page where it was.
+    val indexState = com.hikari.app.ui.components.keptListState("settings:index")
+    val folderState = com.hikari.app.ui.components.keptListState("settings:folder:$openFolder")
+    val subState = com.hikari.app.ui.components.keptListState("settings:sub:$openFolder|$openSub")
     // Television two-pane: the left category list scrolls on its own.
-    val tvLeftState = rememberLazyListState()
+    val tvLeftState = com.hikari.app.ui.components.keptListState("settings:tvLeft")
     // ONE state per PAGE — the index, the open folder, and a sub-folder of it —
     // because one state cannot remember three positions. With a single state (and
     // then with two), going back from a deeper page had to scroll the page it

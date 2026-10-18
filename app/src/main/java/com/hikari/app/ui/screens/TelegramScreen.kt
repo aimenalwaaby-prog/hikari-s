@@ -766,6 +766,8 @@ private fun TelegramMyChats(
         visibleChats.filter { it.archived == archivedScope }
     }
     LazyColumn(
+        // Chat list position held per scope+query (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("tgChats:$archivedScope:$query"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
@@ -859,6 +861,8 @@ private fun TelegramAddedChannels(
     hint: String,
 ) {
     LazyColumn(
+        // Added-channels position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("tgAdded"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
@@ -962,6 +966,8 @@ private fun TelegramLinksSection(
     }
 
     LazyColumn(
+        // Saved-links position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("tgLinks"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
@@ -1827,6 +1833,7 @@ private fun TelegramChatVideos(
             videos = loaded,
             view = view,
             onPlay = { playTdVideo(context, it) },
+            keeperKey = "tgChat:$chatId",
         ) {
             item(key = "telegram-td-more") {
                 if (reachedEnd) {
@@ -1903,6 +1910,7 @@ private fun ChatVideoCollection(
     videos: List<Td.ChatVideo>,
     view: TgView,
     onPlay: (Td.ChatVideo) -> Unit,
+    keeperKey: String,
     footer: (LazyGridScope.() -> Unit)? = null,
 ) {
     LazyVerticalGrid(
@@ -1911,6 +1919,9 @@ private fun ChatVideoCollection(
             TgView.TILE -> GridCells.Adaptive(168.dp)
             TgView.POSTER -> GridCells.Adaptive(112.dp)
         },
+        // Position held per chat (see ScrollKeeper): Back from a video lands
+        // where the grid was.
+        state = com.hikari.app.ui.components.keptGridState(keeperKey),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 12.dp,
@@ -2269,7 +2280,7 @@ private fun ChatVideoSearchResults(
         )
         return
     }
-    ChatVideoCollection(videos = found, view = view, onPlay = onPlay) {
+    ChatVideoCollection(videos = found, view = view, onPlay = onPlay, keeperKey = "tgChatSearch:$chatId:$query") {
         item(key = "telegram-td-search-footer") {
             Column(Modifier.fillMaxWidth().padding(10.dp)) {
                 Text(
@@ -2623,6 +2634,7 @@ private fun TelegramChannelVideos(
                         videos = list,
                         view = view,
                         onPlay = { playTdVideo(context, it) },
+                        keeperKey = "tgChannelGrid:$channel",
                     ) {
                         item(key = "telegram-channel-td-more") {
                             if (tdMore) {
@@ -2664,6 +2676,10 @@ private fun TelegramChannelVideos(
             else -> {
                 val list = videos.orEmpty()
                 LazyColumn(
+                    // Channel videos position held per channel (see
+                    // ScrollKeeper): Back from a video lands where the list
+                    // was.
+                    state = com.hikari.app.ui.components.keptListState("tgChannel:$channel"),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
                         start = 12.dp,

@@ -336,6 +336,9 @@ fun CollectionsScreen(nav: NavHostController, onBack: () -> Unit) {
                 },
             )
             LazyColumn(
+                // Collections index position held across visits (see
+                // ScrollKeeper).
+                state = com.hikari.app.ui.components.keptListState("collections"),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
             ) {
@@ -760,6 +763,8 @@ private fun CollectionEditorPage(
             onBack = onBack,
         )
         LazyColumn(
+            // Collection editor position held per collection (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptListState("colEdit:${collection.id}"),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
         ) {
@@ -1105,7 +1110,8 @@ private fun FolderEditorPage(
     // Long-press rather than plain drag: a plain drag on a scrolling list IS
     // the scroll gesture.
     var liftedKey by remember { mutableStateOf<String?>(null) }
-    val listState = rememberLazyListState()
+    // Editor position held per folder (see ScrollKeeper).
+    val listState = com.hikari.app.ui.components.keptListState("folderEdit:${folder.id}")
     val dragScope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     // Plain holders, not state: these are only ever read inside the drag
@@ -4231,6 +4237,7 @@ private fun CollectionTabsContent(nav: NavHostController, collection: Collection
                 current?.sources.orEmpty()
             },
             loaded = rows,
+            keeperKey = "colTabs:${collection.id}:$index",
             // Only the "All" tab mixes folders, so only it needs each row to say
             // which folder it came from (see FolderRowList.showProviderName).
             showProviderName = showAll && index == allSlot,
@@ -4500,6 +4507,7 @@ private fun CollectionFolderContent(
             nav = nav,
             sources = folder.sources,
             loaded = loaded,
+            keeperKey = "colFolder:${collection.id}:${folder.id}",
             // One folder on screen: its own header says which one, so the rows
             // do not repeat it (see FolderRowList.showProviderName).
             showProviderName = false,
@@ -4537,6 +4545,9 @@ private fun FolderRowList(
      * from different folders and the line is the only thing that says which.
      */
     showProviderName: Boolean = true,
+    /** ScrollKeeper slot for this row list (see ScrollKeeper): Back from a
+     *  title lands where the rows were. Blank keeps a plain state. */
+    keeperKey: String = "",
 ) {
     if (loaded == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -4550,7 +4561,11 @@ private fun FolderRowList(
         }
         return
     }
+    // Row-list position held per page (see ScrollKeeper).
+    val rowListState = if (keeperKey.isBlank()) androidx.compose.foundation.lazy.rememberLazyListState()
+    else com.hikari.app.ui.components.keptListState(keeperKey)
     LazyColumn(
+        state = rowListState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
@@ -4921,7 +4936,9 @@ fun TmdbGridScreen(
         }
     }
 
-    val gridState = rememberLazyGridState()
+    // Grid position held per preset+search (see ScrollKeeper): Back from a
+    // title lands where the grid was.
+    val gridState = com.hikari.app.ui.components.keptGridState("tmdbGrid:$presetKey|$specJson|$needle|$kindKey")
     LaunchedEffect(gridState) {
         snapshotFlow {
             val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
@@ -5232,6 +5249,8 @@ fun CollectionGridScreen(nav: NavHostController, collectionId: String) {
         }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = TvUi.gridMinFor(84)),
+            // Collection grid position held per collection (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptGridState("colGrid:$collectionId"),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

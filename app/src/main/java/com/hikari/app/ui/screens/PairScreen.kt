@@ -253,6 +253,8 @@ fun PairScreen(app: HikariApp, onBack: () -> Unit) {
     }
 
     LazyColumn(
+        // Pairing page position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("pair"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,

@@ -69,7 +69,9 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
     val done = tasks.filter { it.status == DownloadStatus.DONE }
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        // Downloads position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("downloads"),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
             end = 16.dp,

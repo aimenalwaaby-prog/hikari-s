@@ -5234,7 +5234,9 @@ private fun RepoBrowserView(
     }
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        // Extensions position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("extensions"),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             // Clear of the floating taskbar (0 when there is no bar).
             bottom = LocalTaskbarInset.current + 24.dp,
@@ -6177,7 +6179,9 @@ private fun RepoPluginsView(
             }
         }
         LazyColumn(
-            Modifier
+            // Repo browser position held per filter (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptListState("extRepos:$kindFilter"),
+            modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(
@@ -7909,7 +7913,9 @@ private fun SourceFolderView(
             )
         }
         LazyColumn(
-            Modifier
+            // Repo-add position held per folder (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptListState("extRepoAdd:$folder"),
+            modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(
@@ -8272,7 +8278,9 @@ private fun SourcesOverviewView(
             )
         }
         LazyColumn(
-            Modifier
+            // Repo-group position held across visits (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptListState("extRepoGroups"),
+            modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(
@@ -8662,7 +8670,9 @@ private fun AllReposView(
             )
         }
         LazyColumn(
-            Modifier
+            // Installed-repos position held across visits (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptListState("extReposInstalled"),
+            modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(
@@ -8801,7 +8811,9 @@ private fun InstalledExtensionsView(
             )
         }
         LazyColumn(
-            Modifier
+            // Installed-extensions position held per filter (see ScrollKeeper).
+            state = com.hikari.app.ui.components.keptListState("extInstalled:$extFilter"),
+            modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(

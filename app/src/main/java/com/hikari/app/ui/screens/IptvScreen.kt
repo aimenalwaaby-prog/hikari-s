@@ -354,6 +354,9 @@ fun IptvScreen(nav: NavHostController) {
 
             else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = tileMinFor(shape)),
+                // Playlist cards position held across visits (see
+                // ScrollKeeper).
+                state = com.hikari.app.ui.components.keptGridState("iptv"),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 12.dp,
@@ -971,6 +974,8 @@ fun IptvPlaylistScreen(nav: NavHostController, providerId: String) {
         if (folderSearchOpen && !isTorrent && folderQuery.trim().length >= 2) {
             val res = folderResults
             LazyColumn(
+                // In-folder search position held per query (see ScrollKeeper).
+                state = com.hikari.app.ui.components.keptListState("iptvSearch:$providerId:$folderQuery"),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 12.dp,
@@ -1094,6 +1099,9 @@ fun IptvPlaylistScreen(nav: NavHostController, providerId: String) {
         val name = playlist?.displayName ?: providerId
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = tileMinFor(shape)),
+            // Group grid position held per playlist (see ScrollKeeper): Back
+            // from a channel lands where the grid was.
+            state = com.hikari.app.ui.components.keptGridState("iptvGroups:$providerId"),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 12.dp,

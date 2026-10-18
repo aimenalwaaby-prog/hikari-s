@@ -73,7 +73,9 @@ fun HistoryScreen(nav: NavHostController, embedded: Boolean = false) {
     val hasMangaProgress = remember(mangaRev) { com.hikari.app.manga.MangaStore.progress().isNotEmpty() }
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        // History position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("history"),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
             end = 16.dp,

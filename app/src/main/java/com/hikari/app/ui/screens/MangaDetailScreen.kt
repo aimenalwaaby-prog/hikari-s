@@ -306,7 +306,10 @@ fun MangaDetailScreen(
         }
 
         LazyColumn(
-            Modifier.fillMaxSize(),
+            // Chapter list position held per title (see ScrollKeeper): Back
+            // from a chapter lands where the list was.
+            state = com.hikari.app.ui.components.keptListState("mangaDetail:$key"),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,

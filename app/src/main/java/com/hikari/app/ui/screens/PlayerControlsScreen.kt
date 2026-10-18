@@ -92,7 +92,8 @@ fun PlayerControlsPage(app: HikariApp, onBack: () -> Unit) {
     // the user will see — and can be switched to the button names to check one
     // that reads oddly as a glyph.
     var iconsPreview by remember { mutableStateOf(true) }
-    val listState = rememberLazyListState()
+    // Page position held across visits (see ScrollKeeper).
+    val listState = com.hikari.app.ui.components.keptListState("playerControls")
 
     // Brightness/volume swipes (AppStore.playerSwipesFlow, ON by default),
     // plus slide-to-seek (AppStore.playerSlideSeekFlow, ON by default),

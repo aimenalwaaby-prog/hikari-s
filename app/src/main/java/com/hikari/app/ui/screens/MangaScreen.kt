@@ -410,6 +410,9 @@ fun MangaScreen(nav: NavHostController, initialQuery: String = "", initialGenre:
 
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = TvUi.gridMinFor(104)),
+        // Results position held per query (see ScrollKeeper): Back from a
+        // title lands where the grid was.
+        state = com.hikari.app.ui.components.keptGridState("manga:$typed|$genreTag|$enginePick|$engineKey"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,

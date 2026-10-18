@@ -1,3 +1,8 @@
+## 0.11.60 (continuous build only)
+
+### Fixed
+- Every page forgetting where you were: Back from anything (Japan folder, a title, a download link, a settings sub-folder) dumped you somewhere else and you had to scroll back — one shared ScrollKeeper now holds every page-level list, grid and column (Home feed, catalogues, folders, detail, search, library, history, downloads, manga, Telegram chats/channels, extensions, IPTV, collections, calendar, stats, settings pages, TV shelves), each in its own slot per content, waiting for the real rows before landing and standing down if you grab the list first
+
 ## 0.11.59 (continuous build only)
 
 ### Fixed

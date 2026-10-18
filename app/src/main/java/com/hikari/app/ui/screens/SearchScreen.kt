@@ -1087,6 +1087,10 @@ fun SearchScreen(
                 val searchCols = if (tvSearch) 3 else TvUi.resultsColumns()
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(searchCols),
+                    // Results position held per query+engine (see
+                    // ScrollKeeper): Back from a title lands where the grid
+                    // was, and a new query starts at its own slot.
+                    state = com.hikari.app.ui.components.keptGridState("search:$query|$activeEngine"),
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),

@@ -3827,7 +3827,9 @@ fun DetailScreen(
     // one place that fetches it.
     var headerPx by remember { mutableStateOf(0) }
     var logoSizePx by remember { mutableStateOf(0) }
-    val detailList = rememberLazyListState()
+    // Detail page position held across visits (see ScrollKeeper): leaving
+    // for an episode and coming back lands where the page was.
+    val detailList = com.hikari.app.ui.components.keptListState("detail:$providerId|$mediaId")
     LaunchedEffect(m?.uniqueId) {
         val item = m ?: return@LaunchedEffect
         heroLogo = runCatching { TmdbMeta.logo(item) }.getOrNull()
@@ -3999,7 +4001,7 @@ fun DetailScreen(
                             Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
-                                .verticalScroll(rememberScrollState())
+                                .verticalScroll(com.hikari.app.ui.components.keptScrollState("detail:$providerId|${mediaId}:tv"))
                         ) {
                             tvPlayRow(0.dp)
                             Spacer(Modifier.height(6.dp))

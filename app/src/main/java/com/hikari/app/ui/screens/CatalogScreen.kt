@@ -599,7 +599,10 @@ fun CatalogScreen(
         }
     }
 
-    val gridState = rememberLazyGridState()
+    // Grid position held across visits (see ScrollKeeper): tabs and searches
+    // get their own slot, so each catalog/query/tab combination reopens where
+    // it was left.
+    val gridState = com.hikari.app.ui.components.keptGridState("catalog:$providerId|$catalogId|$type|$selectedCatalog|$appliedQuery")
     // Nuvio's catalogue column count: a FIXED count chosen from the screen
     // rather than an adaptive minimum (see [catalogColumnsFor]) — three on a
     // phone, which is the visible difference from the old 84dp adaptive grid

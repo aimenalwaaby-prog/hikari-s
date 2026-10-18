@@ -103,7 +103,8 @@ import kotlinx.coroutines.withContext
 fun ProfilesScreen(app: HikariApp, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
+    // Profiles position held across visits (see ScrollKeeper).
+    val listState = com.hikari.app.ui.components.keptListState("profiles")
 
     val profiles by Profiles.all.collectAsState()
     val activeId by Profiles.activeId.collectAsState()

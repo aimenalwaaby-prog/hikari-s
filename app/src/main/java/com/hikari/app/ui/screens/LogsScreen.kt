@@ -73,7 +73,8 @@ fun LogsPage(app: HikariApp, onBack: () -> Unit) {
     val context = LocalContext.current
     var refreshTick by remember { mutableStateOf(0) }
     var showClearDialog by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
+    // Log page position held across visits (see ScrollKeeper).
+    val listState = com.hikari.app.ui.components.keptListState("logs")
 
     BackHandler { onBack() }
 

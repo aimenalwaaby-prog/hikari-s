@@ -133,6 +133,8 @@ fun StatsScreen(
     }
 
     LazyColumn(
+        // Stats position held across visits (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptListState("stats"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,

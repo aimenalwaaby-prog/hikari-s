@@ -673,28 +673,11 @@ fun HomeScreen(nav: NavHostController) {
     // com.hikari.app.data.TmdbBrowse), so it has rows to show like any other
     // extension; if TMDB is unreachable it says so in its own empty state.
     val activeProviders = providers.filter { it.config.enabled }
-    // The feed's scroll state, hoisted so Back from a folder returns to the
-    // folder that was entered (see [HomeFeedScroll]). Restored ONCE per visit
-    // — re-applying it on every rows change would yank the list while the
-    // user is scrolling a background refresh.
-    val feedState = rememberLazyListState()
-    var feedRestored by remember { mutableStateOf(false) }
-    LaunchedEffect(rows) {
-        if (!feedRestored && rows.isNotEmpty() &&
-            (HomeFeedScroll.index > 0 || HomeFeedScroll.offset > 0)
-        ) {
-            feedRestored = true
-            runCatching { feedState.scrollToItem(HomeFeedScroll.index, HomeFeedScroll.offset) }
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose {
-            runCatching {
-                HomeFeedScroll.index = feedState.firstVisibleItemIndex
-                HomeFeedScroll.offset = feedState.firstVisibleItemScrollOffset
-            }
-        }
-    }
+    // The feed's scroll state, held across visits (see ScrollKeeper): Back
+    // from a folder returns to the folder that was entered. The keeper waits
+    // until the saved row actually exists before jumping, so partial rails
+    // can never clamp it to the wrong spot.
+    val feedState = com.hikari.app.ui.components.keptListState("home")
     // The picker's engine filter ("All", "CloudStream", "Hikari", "Nuvio",
     // "Stremio"). Purely a narrowing device: it never changes what Home shows.
     var providerFilter by remember { mutableStateOf<com.hikari.app.data.ProviderType?>(null) }
@@ -3773,7 +3756,7 @@ private fun HomeSearchOverlay(
                             // "…" until every catalogue has answered empty, so
                             // "keep scroll and keep loading until all really
                             // ends" is what the list actually does.
-                            val browseGridState = rememberLazyGridState()
+                            val browseGridState = com.hikari.app.ui.components.keptGridState("homeBrowse:$label:$applied:$genre")
                             val tailIndex = browseGridState.layoutInfo.visibleItemsInfo
                                 .lastOrNull()?.index ?: 0
                             LaunchedEffect(tailIndex, blankShown.size, browseDone, browseMoreLoading) {
@@ -3941,7 +3924,7 @@ private fun HomeGenreStrip(onPick: (name: String, genresText: String, keywordsTe
     // A new filter starts at the top of the strip: a match that happens to sort
     // late would otherwise be filtered in BEHIND the scrolled-away cards and the
     // strip would look like it had found nothing.
-    val listState = rememberLazyListState()
+    val listState = com.hikari.app.ui.components.keptListState("homeGenres")
     LaunchedEffect(query) { if (shown.isNotEmpty()) listState.scrollToItem(0) }
     Column(
         Modifier

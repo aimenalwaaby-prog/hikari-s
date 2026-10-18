@@ -192,7 +192,8 @@ fun TvCinemaRow(
   if (items.isEmpty()) return
   // The shelf's own scroll position, so the ‹ › arrows below move THIS row
   // (each row keeps its own — one shared state would drag every shelf along).
-  val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
+  // Held across visits too (see ScrollKeeper).
+  val rowState = com.hikari.app.ui.components.keptListState("tvRow:$title:$providerName")
   val rowScope = androidx.compose.runtime.rememberCoroutineScope()
   Column(Modifier.padding(top = 22.dp)) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {

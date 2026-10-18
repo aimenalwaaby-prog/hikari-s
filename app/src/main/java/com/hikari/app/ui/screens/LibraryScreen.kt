@@ -140,6 +140,8 @@ fun LibraryScreen(nav: NavHostController, embedded: Boolean = false) {
 
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = TvUi.gridMinFor(104)),
+        // Library position held per category (see ScrollKeeper).
+        state = com.hikari.app.ui.components.keptGridState("library:$activeCategory"),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 16.dp,
