@@ -1,3 +1,8 @@
+## 0.11.63 (continuous build only)
+
+### Fixed
+- Home feed coming back above where you were (Japan row gone, scroll down to find it): the feed saved only the row number while its shelves reload in arrival order with shimmer placeholders coming and going — it now remembers the exact shelf row and lands on that row wherever it sits
+
 ## 0.11.62 (continuous build only)
 
 ### Fixed

@@ -673,11 +673,8 @@ fun HomeScreen(nav: NavHostController) {
     // com.hikari.app.data.TmdbBrowse), so it has rows to show like any other
     // extension; if TMDB is unreachable it says so in its own empty state.
     val activeProviders = providers.filter { it.config.enabled }
-    // The feed's scroll state, held across visits (see ScrollKeeper): Back
-    // from a folder returns to the folder that was entered. The keeper waits
-    // until the saved row actually exists before jumping, so partial rails
-    // can never clamp it to the wrong spot.
-    val feedState = com.hikari.app.ui.components.keptListState("home")
+    // The feed's scroll state lives next to the feed itself (see feedKeys /
+    // feedState below): its key mirror must be built from the rows.
     // The picker's engine filter ("All", "CloudStream", "Hikari", "Nuvio",
     // "Stremio"). Purely a narrowing device: it never changes what Home shows.
     var providerFilter by remember { mutableStateOf<com.hikari.app.data.ProviderType?>(null) }
@@ -978,6 +975,22 @@ fun HomeScreen(nav: NavHostController) {
     val uniqueRows = remember(rows) {
         rows.distinctBy { it.key.ifBlank { "${it.providerName}|${it.title}" } }
     }
+    // ScrollKeeper mirror of the feed below (see ScrollKeeper): the exact key
+    // of every item in Lazy order, so Back lands on the same ROW even when
+    // shelves stream in differently ordered, shimmer placeholders come and go,
+    // or Continue Watching changes. The order and conditions must stay the
+    // same as the feed itself.
+    val feedKeys = remember(uniqueRows, continueEntries, collectionFolderRows, loading, hideContinue, rows.isEmpty()) {
+        buildList {
+            add("home-header")
+            if (!hideContinue && continueEntries.isNotEmpty()) add("continue-watching")
+            collectionFolderRows.forEach { c -> add("collection-folders|${c.id}") }
+            if (loading && collectionFolderRows.isEmpty()) repeat(4) { i -> add("home-shimmer|$i") }
+            uniqueRows.forEach { row -> add(row.key.ifBlank { "${row.providerName}|${row.title}" }) }
+            if (rows.isEmpty() && !loading && collectionFolderRows.isEmpty()) add("home-empty")
+        }
+    }
+    val feedState = com.hikari.app.ui.components.keptListState("home", itemKeys = feedKeys)
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
