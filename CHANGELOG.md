@@ -1,3 +1,10 @@
+## 0.11.59 (continuous build only)
+
+### Fixed
+- Server list waiting 40-50s then dumping everything at once (log-proven on LOST: origin answered in 37s): Stremio spellings are now asked in ONE concurrent wave with 10s per URL instead of sequential batches on 20s/30s timeouts, each answer merges the moment it lands and publishes live while slower ones fly, empty answers re-ask on a short 10s budget instead of a second full 45s, and the player's fresh-lookup rescue fires after 5s of silence instead of 45s — one stuck server never holds the ones behind it
+- Tapped download links (Filester et al) dying on a bare "Blocked redirect" toast with no choice: a user-tapped foreign link now asks Allow once / Always allow / Block always / Cancel inline (automatic redirects keep the silent block), and the popup question was rebuilt as real buttons after its options rendered invisible on some themes
+- Blocked ad site popping again while a "Close Ad" overlay sits over the page: "Close Ad"-style interstitial overlays are now hidden like any other ad box (overlay ancestor goes, video never touched), alongside the new link Block-always which writes the same two Settings lists "Block this ad site" uses
+
 ## 0.11.58 (continuous build only)
 
 ### Fixed

@@ -2015,6 +2015,14 @@ class ContentRepository(private val manager: ProviderManager) {
         val originSkyBudgetMs =
             if (isOrigin && p.config.type == ProviderType.SKYSTREAM) 90_000L else 0L
         val attemptBudgetMs = maxOf(fullTimeoutMs, originCs3BudgetMs, originSkyBudgetMs)
+        // The re-ask budget SHRINKS when the first attempt was slow: a cold
+        // extension answering empty in milliseconds gets the full budget again
+        // (its runtime is still booting), but an attempt that burned seconds
+        // and yielded nothing gets at most 10s more — never a second full
+        // 45s. Two slow full-budget attempts back to back is the 40-80s hole
+        // the logs kept showing ("attempt 1/3 answered nothing — asking again
+        // with the full 45s budget").
+        var budgetMs = attemptBudgetMs
         val maxAttempts = if (isOrigin) maxOf(NetTuning.attempts(), 3) else NetTuning.attempts()
         var attempt = 0
         var lastWhy: String? = null
@@ -2028,7 +2036,7 @@ class ContentRepository(private val manager: ProviderManager) {
             var timedOut = false
             val at = System.currentTimeMillis()
             val got = cancellableCatching {
-                val r = withTimeoutOrNull(attemptBudgetMs) { p.getStreams(item, playEp) }
+                val r = withTimeoutOrNull(budgetMs) { p.getStreams(item, playEp) }
                 if (r == null) timedOut = true
                 r.orEmpty()
             }.getOrElse { t ->
@@ -2189,18 +2197,24 @@ class ContentRepository(private val manager: ProviderManager) {
                 return got
             }
             // A genuinely EMPTY answer — not an abandoned call, which never
-            // reaches this line — is worth one more ask with the same full
-            // budget: a provider that answers "nothing" in a second is often
-            // the one that answers properly a moment later. This is the only
-            // retry left, and it can only run after the first call really
+            // reaches this line — is worth one more ask, on a budget that fits
+            // what just happened: a provider that answers "nothing" in a
+            // second is often the one that answers properly a moment later
+            // (cold runtime), while one that burned seconds on timeouts has
+            // already proven the full budget does not help it. This is the
+            // only retry left, and it can only run after the first call really
             // returned, so it can never queue a second call behind a running
             // one (which is what the removed probe did).
+            // The next attempt's budget fits what just happened (see the
+            // budgetMs declaration above): fast cold empties re-ask with
+            // the full budget, slow timeout empties with at most 10s.
+            val nextBudget = if (timedOut || took > 5) minOf(budgetMs, 10_000L) else attemptBudgetMs
             com.hikari.app.data.Logs.log(
                 "Provider",
                 p.config.name.ifBlank { p.config.id } + " [" + p.config.type.groupLabel + "]" +
                     ": attempt $attempt/$maxAttempts answered nothing" +
                     (lastWhy?.let { " ($it)" } ?: "") +
-                    " — asking again with the full ${attemptBudgetMs / 1000}s budget",
+                    " — asking again with a ${nextBudget / 1000}s budget",
             )
             // A cold extension answers empty in milliseconds — no timeout, no
             // exception, and its engine reported nothing at all (see the
@@ -2215,6 +2229,7 @@ class ContentRepository(private val manager: ProviderManager) {
             ) {
                 kotlinx.coroutines.delay(ORIGIN_WARM_PAUSE_MS)
             }
+            budgetMs = nextBudget
         }
     }
 

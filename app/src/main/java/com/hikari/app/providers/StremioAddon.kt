@@ -13,8 +13,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -76,6 +77,22 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
         /** Per-provider reason why source lookup came back empty. Displayed in
          *  the playback sheet so "no playable sources found" is explainable. */
         val streamErrors = ConcurrentHashMap<String, String>()
+
+        /**
+         * Servers resolved SO FAR by each addon's running stream walk (see
+         * [ContentProvider.partialStreams]): each spelling's rows join the
+         * running union the moment that spelling answers, so the search
+         * paints them while slower spellings are still in flight instead of
+         * holding everything until the whole walk finishes. Cleared when the
+         * walk ends, so a stale list can never leak into the next title.
+         */
+        private val partialServers = ConcurrentHashMap<String, List<StreamSource>>()
+
+        fun partialFor(providerId: String): List<StreamSource> =
+            partialServers[providerId] ?: emptyList()
+
+        /** One spelling's JSON, with its own short budget (see [getStreamJson]). */
+        private const val STREAM_JSON_TIMEOUT_MS = 10_000L
 
         /**
          * The addon's own configuration page, once its manifest has been read —
@@ -304,16 +321,33 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                 if (attempt == 0) {
                     // transient failures are common on first hit (cold serverless
                     // containers wake up with a 502/504) — retry once
-                    try {
-                        Thread.sleep(400L)
-                    } catch (e: InterruptedException) {
-                        return null
-                    }
+                    delay(400L)
                 }
             }
         }
         return null
     }
+
+    /**
+     * Stream-walk fetch: the same document as [getJson], but one spelling gets
+     * at most [STREAM_JSON_TIMEOUT_MS] instead of the shared client's 20s
+     * connect / 30s read timeouts, a single attempt per spelling (no wake-up
+     * nap), and it never throws. A slow spelling must not hold the servers
+     * behind it: the walk merges every spelling the moment it answers, so one
+     * hanging URL costs at most this budget while the rest paint immediately.
+     */
+    private suspend fun getStreamJson(url: String): JSONObject? {
+        val headers = mapOf("Accept" to "application/json, text/plain, */*")
+        for (u in listOf(url, url.replaceFirst("https://", "http://")).distinct()) {
+            val body = withTimeoutOrNull(STREAM_JSON_TIMEOUT_MS) { Http.getString(u, headers) }
+            val json = body?.let { runCatching { JSONObject(it) }.getOrNull() }
+            if (json != null) return json
+        }
+        return null
+    }
+
+    override fun partialStreams(): List<StreamSource> =
+        partialFor(config.id)
 
     /**
      * The manifest, fetched at most once per addon (and never re-fetched while
@@ -1105,23 +1139,26 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
         // be turned into a video" over a title Stremio plays dozens of
         // servers for was).
         var linkOnly: List<StreamSource>? = null
-        // The walk runs CONCURRENTLY, not one round trip at a time: every
-        // spelling is a cheap same-host GET, and asking them one after another
-        // is what made a lookup cost the SUM of 16 latencies (the user's own
-        // log: the origin addon answered in 37s on a first lookup, 8s on the
-        // next — a search that reads as "0 servers, still searching" for half
-        // a minute). Six at a time keeps small hosts comfortable; merging
-        // below runs in walk order, so the union, the link-only fallback and
-        // the reasons read exactly as the sequential walk produced them.
-        val fetched: List<Pair<String, JSONObject?>> = attempts.chunked(6).flatMap { batch ->
-            coroutineScope {
-                batch.map { u -> async(Dispatchers.IO) { u to getJson(u) } }.awaitAll()
-            }
+        // The walk runs as ONE concurrent wave — never batched, never
+        // sequential: every spelling is asked at once with its own short
+        // budget ([getStreamJson]), and each answer merges into the union the
+        // moment it lands ([select] below). A spelling that hangs costs at
+        // most 10s while the servers behind it paint immediately — no single
+        // URL can hold the list hostage, which is what made the origin addon
+        // answer in 37s on a first lookup. The running union is published as
+        // it grows ([partialServers]), so the search pass paints server 2 the
+        // second it resolves.
+        partialServers[config.id] = emptyList()
+        fun publishPartial() {
+            partialServers[config.id] = union.values.toList()
         }
-        for ((u, json) in fetched) {
+        // One spelling's answer merged into the union. A row that CAN be
+        // played ends nothing — the union stays complete whatever order the
+        // spellings answer in.
+        fun mergeOne(u: String, json: JSONObject?) {
             if (json == null) {
                 reasons += "no response from ${u.take(120)}"
-                continue
+                return
             }
             val streams = parseStreams(json)
             if (streams.isNotEmpty()) {
@@ -1130,7 +1167,8 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                 for (s in streams) union.putIfAbsent(s.identityKey(), s)
                 if (streams.any { !isLinkRow(it) }) anyPlayable = true
                 else if (linkOnly == null) linkOnly = streams
-                continue
+                publishPartial()
+                return
             }
             val n = json.optJSONArray("streams")?.length() ?: -1
             // A NON-EMPTY stream list is not automatically an answer. Addons that
@@ -1152,6 +1190,21 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                 else "no 'streams' field in ${u.take(120)}"
             }
         }
+        coroutineScope {
+            val pending = attempts.associateWith { u ->
+                async(Dispatchers.IO) { getStreamJson(u) }
+            }.toMutableMap()
+            while (pending.isNotEmpty()) {
+                select<Unit> {
+                    pending.forEach { (u, d) ->
+                        d.onAwait { json ->
+                            pending.remove(u)
+                            mergeOne(u, json)
+                        }
+                    }
+                }
+            }
+        }
 
         // The union is the answer whenever ANY spelling produced a playable
         // row: the complete set no matter which spelling answered first or
@@ -1160,6 +1213,7 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
         // them for playback).
         if (anyPlayable && union.isNotEmpty()) {
             streamErrors.remove(config.id)
+            partialServers.remove(config.id)
             return union.values.toList()
         }
 
@@ -1174,6 +1228,7 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
                     spellings.joinToString(", ") { it.first }.take(120) +
                     " as " + types.take(3).joinToString("/") +
                     " (a row that points at a page has to be opened in a browser)."
+            partialServers.remove(config.id)
             return rows
         }
 
@@ -1187,6 +1242,7 @@ class StremioAddon(override val config: ProviderConfig) : ContentProvider {
         } else {
             reasons.take(2).joinToString(" • ").ifBlank { "Addon returned no playable streams." }
         }
+        partialServers.remove(config.id)
         return emptyList()
     }
 

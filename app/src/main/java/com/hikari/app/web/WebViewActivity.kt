@@ -2,6 +2,7 @@ package com.hikari.app.web
 
 import com.hikari.app.i18n.I18n
 import android.app.AlertDialog
+import android.widget.Button
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -342,52 +343,187 @@ class WebViewActivity : ComponentActivity() {
      * automatic popunders never reach here, so they can never nag. A host on
      * the Block-always list never reaches here either — it is dropped
      * silently in the relay below.
+     *
+     * The choice is built as explicit buttons, not a list adapter: on some
+     * themes the list rows rendered with no visible text, which is exactly
+     * the reported "no option" dialog.
      */
     private fun askPopupPermission(url: String, host: String?, onAllow: (String) -> Unit) {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
             val label = host ?: url
-            val items = arrayOf(
-                I18n.t("Allow once"),
-                I18n.t("Always allow") + (if (host != null) " $host" else ""),
-                I18n.t("Block always") + (if (host != null) " $host" else ""),
-                I18n.t("Cancel"),
-            )
-            AlertDialog.Builder(this@WebViewActivity)
+            val dlg = AlertDialog.Builder(this@WebViewActivity)
                 .setTitle(I18n.t("Open this popup?"))
                 .setMessage(
                     I18n.t("This page tried to open a popup:") + "\n" + label
                 )
-                .setItems(items) { d, which ->
-                    when (which) {
-                        0 -> { d.dismiss(); onAllow(url) }
-                        1 -> {
-                            d.dismiss()
-                            if (!host.isNullOrBlank()) {
-                                rememberPopupHost(host)
-                                Toast.makeText(
-                                    this@WebViewActivity,
-                                    "Popups from $host will always open — change it in Settings → Privacy & Browsing",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                            onAllow(url)
-                        }
-                        2 -> {
-                            d.dismiss()
-                            if (!host.isNullOrBlank()) {
-                                rememberPopupBlocked(host)
-                                Toast.makeText(
-                                    this@WebViewActivity,
-                                    "Popups from $host will always be blocked — change it in Settings → Privacy & Browsing",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        }
-                        else -> d.dismiss()
+                .create()
+            dlg.setView(choiceBox(
+                I18n.t("Allow once") to { onAllow(url) },
+                (I18n.t("Always allow") + (if (!host.isNullOrBlank()) " $host" else "")) to {
+                    if (!host.isNullOrBlank()) {
+                        rememberPopupHost(host)
+                        Toast.makeText(
+                            this@WebViewActivity,
+                            "Popups from $host will always open — change it in Settings → Privacy & Browsing",
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
+                    onAllow(url)
+                },
+                (I18n.t("Block always") + (if (!host.isNullOrBlank()) " $host" else "")) to {
+                    if (!host.isNullOrBlank()) {
+                        rememberPopupBlocked(host)
+                        Toast.makeText(
+                            this@WebViewActivity,
+                            "Popups from $host will always be blocked — change it in Settings → Privacy & Browsing",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
+                I18n.t("Cancel") to { },
+            ) { dlg.dismiss() })
+            dlg.show()
+        }
+    }
+
+    /**
+     * A vertical stack of full-width buttons for a choice dialog (see
+     * [askPopupPermission]): every option is always visible and tappable,
+     * whatever the theme does to list rows. [onPick] runs after the dialog
+     * is dismissed, around the option's own action.
+     */
+    private fun choiceBox(vararg options: Pair<String, () -> Unit>, onPick: () -> Unit): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(16)
+            setPadding(pad, dp(4), pad, pad)
+        }
+        for ((text, action) in options) {
+            box.addView(Button(this).apply {
+                this.text = text
+                setOnClickListener { onPick(); action() }
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+        return box
+    }
+
+    /** When the last choice dialog (popup or redirect) was shown for a URL, by
+     *  URL: asking twice for one tap — once from shouldOverrideUrlLoading and
+     *  once from the request backup — would stack two dialogs. */
+    @Volatile
+    private var lastChoiceAt = 0L
+    @Volatile
+    private var lastChoiceUrl: String? = null
+
+    private fun choiceDue(url: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (url == lastChoiceUrl && now - lastChoiceAt < 5_000L) return false
+        lastChoiceUrl = url
+        lastChoiceAt = now
+        return true
+    }
+
+    /**
+     * A main-frame navigation the user's own tap opened toward a foreign host
+     * that redirect protection would refuse: instead of a bare "Blocked
+     * redirect" toast and a trip to the ⋯ menu, the tap gets the same choice
+     * popups get — Allow once, Always allow this host, Block always, Cancel.
+     * Automatic redirects (no gesture) keep the silent block exactly as
+     * before, so ad-hijack redirects can never nag.
+     */
+    private fun askRedirectPermission(url: String, host: String?) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            if (!choiceDue(url)) return@runOnUiThread
+            rememberBlockedRedirect(url)
+            val label = host ?: url
+            val dlg = AlertDialog.Builder(this@WebViewActivity)
+                .setTitle(I18n.t("Open this link?"))
+                .setMessage(
+                    I18n.t("This page tried to open a link:") + "\n" + label
+                )
+                .create()
+            dlg.setView(choiceBox(
+                I18n.t("Allow once") to {
+                    runCatching { webView.loadUrl(url) }
+                },
+                (I18n.t("Always allow") + (if (!host.isNullOrBlank()) " $host" else "")) to {
+                    allowRedirectTo(url, host)
+                },
+                (I18n.t("Block always") + (if (!host.isNullOrBlank()) " $host" else "")) to {
+                    if (!host.isNullOrBlank()) blockHostForever(host)
+                },
+                I18n.t("Cancel") to { },
+            ) { dlg.dismiss() })
+            dlg.show()
+        }
+    }
+
+    /**
+     * Adds [host] to the user's "Allowed redirect links" (the SAME list
+     * Settings edits) and loads [url] straight away — the ⋯ menu's "Allow
+     * redirect" generalized for the tap-choice dialog (see
+     * [askRedirectPermission] and [allowBlockedRedirect]).
+     */
+    private fun allowRedirectTo(url: String, host: String?) {
+        val entry = host?.takeIf { it.isNotBlank() } ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val app = applicationContext as HikariApp
+            val current = runCatching { app.store.webviewRedirectAllow() }.getOrDefault(emptyList())
+            val next = (current + entry).distinct()
+            runCatching { app.store.setWebviewRedirectAllow(next) }
+            runOnUiThread {
+                allowedRedirectHosts = allowedRedirectHosts + entry
+                Toast.makeText(
+                    this@WebViewActivity,
+                    "Allowed redirect to $entry",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                runCatching { webView.loadUrl(url) }
+            }
+        }
+    }
+
+    /**
+     * A host the user chose "Block always" for on a tapped link (see
+     * [askRedirectPermission]): its requests never load again AND its popups
+     * never ask again — the same two lists "Block this ad site" writes (see
+     * [blockAdSite]), so the entry is visible and revertible in Settings.
+     */
+    private fun blockHostForever(host: String) {
+        val norm = AdBlocker.normalizeDomain(host.trim().trimEnd('.').lowercase())
+        if (norm.isBlank()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val app = applicationContext as HikariApp
+            runCatching {
+                val cur = app.store.adBlock()
+                if (cur.none { AdBlocker.normalizeDomain(it) == norm }) {
+                    runCatching { app.store.setAdBlock((cur + norm).distinct()) }
                 }
-                .show()
+                val blk = app.store.webviewPopupBlock().toMutableSet()
+                if (blk.add(norm)) app.store.setWebviewPopupBlock(blk.toList())
+                val allow = app.store.webviewPopupAllow().toMutableSet()
+                if (allow.remove(norm)) app.store.setWebviewPopupAllow(allow.toList())
+            }
+            val (blocked, white) = runCatching {
+                AdBlocker.resolve(app, app.store.adLists(), app.store.adBlock(), app.store.adWhite())
+            }.getOrDefault(blockedDomains to whitelistDomains)
+            blockedDomains = blocked
+            whitelistDomains = white
+            popupBlockHosts = popupBlockHosts + norm
+            popupAllowHosts = popupAllowHosts - norm
+            runOnUiThread {
+                Toast.makeText(
+                    this@WebViewActivity,
+                    "Blocked $host — ads and popups from it will not load. Revert in Settings → Privacy.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                runCatching { webView.reload() }
+            }
         }
     }
 
@@ -759,8 +895,17 @@ class WebViewActivity : ComponentActivity() {
                             !isRedirectAllowed(request.url.toString()) &&
                             !isSameSite(host, cur)
                         ) {
-                            showBlockedToast(blockedRedirectToast(request.url))
-                            rememberBlockedRedirect(request.url.toString())
+                            // The USER tapped this link (a real gesture): it gets
+                            // the Allow / Always / Block-always choice inline
+                            // (see askRedirectPermission), not a bare toast and
+                            // a trip to the ⋯ menu. Automatic redirects keep the
+                            // silent block — they are never the user's tap.
+                            if (request.hasGesture()) {
+                                askRedirectPermission(request.url.toString(), host)
+                            } else {
+                                showBlockedToast(blockedRedirectToast(request.url))
+                                rememberBlockedRedirect(request.url.toString())
+                            }
                             return true
                         }
                     }
@@ -850,8 +995,15 @@ class WebViewActivity : ComponentActivity() {
                             !isRedirectAllowed(u) &&
                             !isSameSite(host, cur)
                         ) {
-                            showBlockedToast(blockedRedirectToast(request.url))
-                            rememberBlockedRedirect(u)
+                            // Same tap-choice as the override gate above: a
+                            // user-gesture navigation asks inline, an
+                            // automatic one is dropped silently.
+                            if (request.hasGesture()) {
+                                askRedirectPermission(u, host)
+                            } else {
+                                showBlockedToast(blockedRedirectToast(request.url))
+                                rememberBlockedRedirect(u)
+                            }
                             return WebResourceResponse(
                                 "text/plain", "utf-8", ByteArrayInputStream(ByteArray(0))
                             )
@@ -2137,6 +2289,7 @@ class WebViewActivity : ComponentActivity() {
                 '[id*="popup"]','[class*="interstitial"]','[class*="overlay-ad"]','[id*="overlay-ad"]',
                 '[class*="ad-overlay"]','[id*="ad-overlay"]','[class*="ad_container"]','[id*="ad_container"]',
                 '[class*="ad-slot"]','[id*="ad-slot"]','[class*="ads-container"]','[id*="ads-container"]',
+                '[class*="close-ad"]','[id*="close-ad"]','[class*="closead"]','[id*="closead"]',
                 'iframe[src*="popads"]','iframe[src*="popcash"]','iframe[src*="propellerads"]','iframe[src*="adnxs"]',
                 'iframe[src*="exoclick"]','iframe[src*="juicyads"]','iframe[src*="trafficjunky"]',
                 '[class*="chat-widget"]','[id*="chat-widget"]','[class*="chat-bubble"]','[class*="message-from"]',
@@ -2175,6 +2328,52 @@ class WebViewActivity : ComponentActivity() {
                   }
                 }catch(x){}
               }
+              // "Close Ad" interstitial overlays (the full-page dim + "Close Ad
+              // x" pill over video/download pages): the pill itself is tiny, so
+              // the pill's overlay ANCESTOR goes — the highest fixed/absolute
+              // box above it that still looks like an overlay (smaller than
+              // the viewport), or the pill alone when there is none. Never a
+              // video: anything holding a <video> is left intact.
+              var CLOSEAD=/^\s*close ad\s*[x\u2715\u00d7]?\$/i;
+              function hasVideo(e){
+                try{
+                  if(!e)return false;
+                  if(e.tagName==='VIDEO')return true;
+                  if(e.closest&&e.closest('video'))return true;
+                  if(e.querySelector&&e.querySelector('video'))return true;
+                }catch(x){}
+                return false;
+              }
+              function cleanCloseAd(){
+                try{
+                  var vw=window.innerWidth||0,vh=window.innerHeight||0;
+                  var els=document.querySelectorAll('div,span,button,a,section,aside');
+                  for(var i=0;i<els.length;i++){
+                    var e=els[i];
+                    var t=(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim();
+                    if(t.length>22||!CLOSEAD.test(t))continue;
+                    if(hasVideo(e))continue;
+                    var cs=getComputedStyle(e);
+                    if(cs.position!=='fixed'&&cs.position!=='absolute'&&cs.position!=='sticky')continue;
+                    var target=e,up=0;
+                    try{
+                      var p=e.parentNode;
+                      while(p&&up<4){
+                        up++;
+                        if(!p.getBoundingClientRect||hasVideo(p))break;
+                        var pcs=getComputedStyle(p);
+                        if(pcs.position!=='fixed'&&pcs.position!=='absolute')break;
+                        var r=p.getBoundingClientRect();
+                        if(vw>0&&vh>0&&(r.width>vw*0.95&&r.height>vh*0.95))break;
+                        target=p;
+                        p=p.parentNode;
+                      }
+                    }catch(x){}
+                    target.style.setProperty('display','none','important');
+                    target.style.setProperty('pointer-events','none','important');
+                  }
+                }catch(x){}
+              }
               function clean(){
                 for(var i=0;i<SEL.length;i++){
                   try{
@@ -2188,6 +2387,7 @@ class WebViewActivity : ComponentActivity() {
                   }catch(e){}
                 }
                 cleanBait();
+                cleanCloseAd();
               }
               clean();
               try{

@@ -16302,8 +16302,14 @@ class PlayerActivity : ComponentActivity() {
         /** How often the failsafe above re-checks "servers in hand, nothing
          *  playing" (see [START_FAILSAFE_MS]). */
         private const val START_FAILSAFE_POLL_MS = 1_000L
-        /** If a live lookup has produced no source at all, ask the detail search once more. */
-        private const val SEARCH_RESCUE_MS = 45_000L
+        /** If a live lookup has produced no source at all after 5s of silence,
+         *  ask the detail search once more. Short on purpose: a lookup that is
+         *  producing servers keeps producing (progress cancels this), but a
+         *  lookup that is silent is almost always a wedged chain — waiting
+         *  45s for it only dresses the wait up as diligence. The extra pass
+         *  runs in parallel and the stale-owner guard arbitrates, so a slow
+         *  but working provider is never harmed. */
+        private const val SEARCH_RESCUE_MS = 5_000L
 
         /** The cover's default line while the detail screen hasn't reported any
          *  search progress yet (matches the layout's initial text). */
