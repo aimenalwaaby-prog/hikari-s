@@ -119,11 +119,11 @@ fun MediaRow(
 ) {
     val style = rememberPosterStyle()
     if (TvMode.current()) {
-        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = onShowAll, vertical = !style.isCinema(true))
+        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = onShowAll, vertical = !style.isCinema(true), keeperKey = keeperKey)
         return
     }
     if (style.isCinema(false)) {
-        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = onShowAll)
+        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = onShowAll, keeperKey = keeperKey)
         return
     }
     Column(Modifier.padding(top = 20.dp)) {

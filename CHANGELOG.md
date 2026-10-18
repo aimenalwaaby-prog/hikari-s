@@ -1,3 +1,8 @@
+## 0.11.65 (continuous build only)
+
+### Fixed
+- Shelf rows still resetting for cinema-style posters (the log showed every vertical restore landing while the rows visibly jumped: cinema rows used a title-only slot with no poster anchor, so the sideways scroll died on every visit): cinema rows now hold the same per-page poster-anchored slot as normal rows
+
 ## 0.11.64 (continuous build only)
 
 ### Fixed

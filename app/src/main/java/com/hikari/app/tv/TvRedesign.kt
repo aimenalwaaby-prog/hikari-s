@@ -188,12 +188,20 @@ fun TvCinemaRow(
   onOpen: (MediaItem) -> Unit,
   onShowAll: (() -> Unit)? = null,
   vertical: Boolean = false,
+  /** ScrollKeeper slot for this row (see ScrollKeeper): Back from a title
+   *  lands where the row was, anchored to the exact poster. Blank keeps the
+   *  legacy title slot. */
+  keeperKey: String = "",
 ) {
   if (items.isEmpty()) return
+  val seen = LinkedHashSet<String>()
+  val unique = items.filter { it.uniqueId.let { k -> if (seen.add(k)) true else false } }
+  val rowKeys = androidx.compose.runtime.remember(unique) { unique.map { it.uniqueId } }
   // The shelf's own scroll position, so the ‹ › arrows below move THIS row
   // (each row keeps its own — one shared state would drag every shelf along).
   // Held across visits too (see ScrollKeeper).
-  val rowState = com.hikari.app.ui.components.keptListState("tvRow:$title:$providerName")
+  val rowState = if (keeperKey.isBlank()) com.hikari.app.ui.components.keptListState("tvRow:$title:$providerName")
+  else com.hikari.app.ui.components.keptListState(keeperKey, itemKeys = rowKeys)
   val rowScope = androidx.compose.runtime.rememberCoroutineScope()
   Column(Modifier.padding(top = 22.dp)) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -239,8 +247,6 @@ fun TvCinemaRow(
     }
     Spacer(Modifier.height(10.dp))
     LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-      val seen = LinkedHashSet<String>()
-      val unique = items.filter { it.uniqueId.let { k -> if (seen.add(k)) true else false } }
       items(unique, key = { it.uniqueId }) { item ->
         if (vertical) TvVerticalCard(item = item, onClick = { onOpen(item) })
         else TvCinemaCard(item = item, onClick = { onOpen(item) })
