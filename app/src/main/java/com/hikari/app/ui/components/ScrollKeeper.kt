@@ -104,6 +104,13 @@ fun keptListState(
                 val ai = keysNow.value.indexOf(a)
                 if (ai >= 0) target = ai
             }
+            if (state.layoutInfo.totalItemsCount > target) {
+                if (state.firstVisibleItemIndex != target ||
+                    state.firstVisibleItemScrollOffset != s.offset
+                ) {
+                    runCatching { state.scrollToItem(target, s.offset) }
+                }
+                scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount}")
                 // Follow the anchor while late content streams in above the
                 // landing spot (see FOLLOW_MS): sitting still would leave the
                 // wrong rows on screen. Stands down only when the USER moves
@@ -199,6 +206,13 @@ fun keptGridState(
                 val ai = keysNow.value.indexOf(a)
                 if (ai >= 0) target = ai
             }
+            if (state.layoutInfo.totalItemsCount > target) {
+                if (state.firstVisibleItemIndex != target ||
+                    state.firstVisibleItemScrollOffset != s.offset
+                ) {
+                    runCatching { state.scrollToItem(target, s.offset) }
+                }
+                scrollLog("restored key=$key target=$target total=${state.layoutInfo.totalItemsCount}")
                 // Follow the anchor while late content streams in above the
                 // landing spot (see FOLLOW_MS): sitting still would leave the
                 // wrong rows on screen. Stands down only when the USER moves

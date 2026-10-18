@@ -129,7 +129,7 @@ object ZangetsuPluginManager {
                 return@withContext Result.failure(Exception("This entry has no provider name"))
             }
         val bytes = runCatching { Http.fetchBytesCancellable(fileUrl) }.getOrNull()
-        if (bytes.isNullOrEmpty()) {
+        if (bytes == null || bytes.isEmpty()) {
             return@withContext Result.failure(
                 Exception("Could not download this provider — its repo did not serve the file")
             )

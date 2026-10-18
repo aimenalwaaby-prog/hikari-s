@@ -5590,7 +5590,7 @@ private fun RepoBrowserView(
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Spa, tr("Aniyomi repos"), tr("index.min.json · Aniyomi extensions"), { onOpenFolder(SourceFolder.ANIYOMI) })
                         srcCard(Icons.Filled.Tv, tr("Vega repos"), tr("manifest.json · Vega providers"), { onOpenFolder(SourceFolder.VEGA) })
-                        srcCard(Icons.Filled.VideoLibrary, tr("Zangetsu repos"), tr("index.json · Zangetsu sources"), { onOpenFolder(SourceFolder.ZANGETSU) })
+                        srcCard(Icons.Filled.Movie, tr("Zangetsu repos"), tr("index.json · Zangetsu sources"), { onOpenFolder(SourceFolder.ZANGETSU) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.MenuBook, tr("LNReader repos"), tr("plugins.min.json · LNReader novel sources"), { onOpenFolder(SourceFolder.LNREADER) })
@@ -5667,7 +5667,7 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.VideoLibrary,
+                        icon = Icons.Filled.Movie,
                         title = tr("Zangetsu repos"),
                         subtitle = tr("index.json · Zangetsu sources"),
                         onClick = { onOpenFolder(SourceFolder.ZANGETSU) }
