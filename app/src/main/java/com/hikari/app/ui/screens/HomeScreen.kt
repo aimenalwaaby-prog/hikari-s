@@ -2848,6 +2848,19 @@ internal fun webUrlFor(p: ContentProvider): String? = when (p.config.type) {
             ?: sourceSiteUrl(java.io.File(dir, "stream.js"), p.config.name)
     }.getOrNull()
     ProviderType.ZANGETSU -> com.hikari.app.zangetsu.ZangetsuPluginManager.siteUrlOf(p.config)
+    ProviderType.FORK_VIDEO -> runCatching {
+        val owner = com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerOf(p.config.id)
+        val enum = com.hikari.app.kotatsu.fork.ForkVideoProvider.enumNameOf(p.config.id)
+        val domain = if (owner == com.hikari.app.kotatsu.fork.ForkVideoProvider.OWNER_SKEPSUN) {
+            com.hikari.app.kotatsu.fork.SkepsunBridge.forSource(enum)?.parserDomain()
+        } else {
+            com.hikari.app.kotatsu.fork.Hany18hBridge.forSource(enum)?.parserDomain()
+        }
+        domain?.trim()?.takeIf { it.isNotBlank() }?.let { d ->
+            val host = d.trim().removePrefix("https://").removePrefix("http://").substringBefore('/').lowercase()
+            if (host.contains(".")) "https://$host/" else null
+        }
+    }.getOrNull()
     ProviderType.CS3 -> runCatching {
         val file = java.io.File(p.config.url); if (!file.exists()) return@runCatching null
         val apis = com.hikari.app.cs3.Cs3PluginManager.apisFor(com.hikari.app.HikariApp.instance, file)

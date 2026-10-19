@@ -20,8 +20,8 @@ android {
         applicationId = "com.hikari.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 343
-        versionName = "0.11.72"
+        versionCode = 344
+        versionName = "0.11.73"
         // CI injects the exact commit SHA the APK was built from, so the
         // in-app update checker can compare it against main's HEAD.
         val gitSha = System.getenv("GIT_SHA") ?: "unknown"
@@ -470,6 +470,15 @@ dependencies {
     // comics / novel sources). Pinned to the same commit Kotatsu itself ships
     // (via JitPack, already a repo). org.json excluded: Android carries it.
     implementation("com.github.KotatsuApp:kotatsu-parsers:4d1e521aef") {
+        exclude(group = "org.json", module = "json")
+    }
+    // Kototoro parsers — skepsun's independent Kotatsu fork (manga/manhwa /
+    // novels PLUS video sources: anime clips, hentai video). A separate
+    // package (org.skepsun.kototoro.parsers) with zero shared classes, so it
+    // links beside the official library with no conflicts. Pinned to the
+    // verified master SHA (same artifact the batch-105 verification built via
+    // JitPack). org.json excluded like above.
+    implementation("com.github.skepsun:kototoro-parsers:c416529309d3b26d0ec0afca90f00290500d4b82") {
         exclude(group = "org.json", module = "json")
     }
     // ---- Device pairing (Settings → Backup & Restore → Pair & sync) ----

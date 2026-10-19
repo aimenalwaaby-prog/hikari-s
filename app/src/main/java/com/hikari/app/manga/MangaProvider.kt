@@ -131,12 +131,29 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 )
             }.getOrNull()
         }
+        // Fork parsers (skepsun kototoro / vendored hany18h) likewise ship
+        // inside the app — their bridges speak CatalogueSource directly.
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkId(config.id)) {
+            return runCatching {
+                com.hikari.app.kotatsu.fork.SkepsunBridge.forSource(
+                    com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkId(config.id),
+                )
+            }.getOrNull()
+        }
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkHanyId(config.id)) {
+            return runCatching {
+                com.hikari.app.kotatsu.fork.Hany18hBridge.forSource(
+                    com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkId(config.id),
+                )
+            }.getOrNull()
+        }
         return MangaExtensionManager.sourceOf(context, extFile, sourceIndex) as? CatalogueSource
     }
 
     /** True when this row is a plain text-chapter (novel) source: no manga
      *  methods, no catalogue or search index — chapters + text only. */
-    private val isNovel: Boolean get() = MangaExtensionManager.isNovelId(config.id)
+    private val isNovel: Boolean get() = MangaExtensionManager.isNovelId(config.id) ||
+        com.hikari.app.kotatsu.fork.ForkRegistry.isForkNovelId(config.id)
 
     /** The novel source for a novel row (null for manga rows). */
     private fun novelSrc(): Source? =
@@ -145,6 +162,8 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     private fun missingReason(): String = when {
         com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id) ->
             "The Kotatsu source could not be created"
+        com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaId(config.id) ->
+            "The fork source could not be created"
         !extFile.exists() -> "The extension file is missing — reinstall it in Extensions"
         else -> MangaExtensionManager.lastError ?: "The extension could not be loaded"
     }
@@ -154,6 +173,18 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         lastOutcome[config.id] = short
         Logs.log("Manga", "${config.name}: $msg")
         return fallback
+    }
+
+    /** Fork `NovelChapterContent.html` (complete rendered HTML) as plain reader
+     *  text: paragraphs in order, blank when there is nothing readable. */
+    private fun htmlToNovelText(html: String): String {
+        if (html.isBlank()) return ""
+        return runCatching {
+            val doc = org.jsoup.Jsoup.parse(html)
+            doc.select("script, style, noscript").remove()
+            val paras = doc.select("p").map { it.text().trim() }.filter { it.isNotBlank() }
+            if (paras.isNotEmpty()) paras.joinToString("\n\n") else doc.body()?.wholeText().orEmpty().trim()
+        }.getOrDefault("").trim()
     }
 
     /**
@@ -729,6 +760,39 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         // skips blank urls, so these can never leak into it). The novel
         // reader joins the parts in order.
         if (isNovel) {
+            // Fork novels (skepsun / hany18h NovelChapterContent HTML) read
+            // through their own bridges — no Tachiyomi novel source exists.
+            if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkNovelId(config.id)) {
+                val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
+                return@gate try {
+                    val html = when {
+                        com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkId(config.id) ->
+                            com.hikari.app.kotatsu.fork.SkepsunBridge.forSource(
+                                com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkId(config.id),
+                            )?.chapterContent(chapter.id, chapter.name)
+                        else ->
+                            com.hikari.app.kotatsu.fork.Hany18hBridge.forSource(
+                                com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkId(config.id),
+                            )?.chapterContent(chapter.id, chapter.name)
+                    }
+                    val text = htmlToNovelText(html.orEmpty())
+                    if (text.isBlank()) fail("chapter text unavailable", emptyList())
+                    else {
+                        lastOutcome[config.id] = "✓ 1 part"
+                        listOf(
+                            StreamSource(
+                                name = chapter.name ?: "Chapter",
+                                url = "",
+                                text = text,
+                                pageUrl = chapter.id,
+                            )
+                        )
+                    }
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    fail("chapter text failed: ${reason(t)}", emptyList())
+                }
+            }
             val nsrc = novelSrc() ?: return@gate fail(missingReason(), emptyList())
             val chapter = episode ?: return@gate fail("No chapter selected", emptyList())
             val nt0 = SystemClock.elapsedRealtime()

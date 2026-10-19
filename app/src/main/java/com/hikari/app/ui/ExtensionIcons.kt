@@ -76,6 +76,14 @@ object ExtensionIcons {
             // the site it reads, so the favicon of that site is the icon.
             ProviderType.MANGA ->
                 com.hikari.app.manga.MangaExtensionManager.iconFallback(config)
+            // A fork video row reads a site like a manga row does — its only
+            // identity is that site, so the same favicon fallback applies
+            // (the repo entry's own icon, when it declared one, is already
+            // stored in [ProviderConfig.iconUrl] and returned by [forConfig]
+            // above; [siteUrlOf] resolves fork video ids to their parser's
+            // live domain).
+            ProviderType.FORK_VIDEO ->
+                com.hikari.app.manga.MangaExtensionManager.iconFallback(config)
             // A Vega provider has no repo-level icon to probe: the manifest
             // entry's own `icon` (a jsDelivr URL) is already stored in
             // [ProviderConfig.iconUrl] when it has one, and there is no site

@@ -464,3 +464,13 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 -dontnote kotlinx.serialization.**
+
+## ---- Kotatsu fork parsers (skepsun via JitPack, hany18h vendored) -----------
+# The skepsun KSP factory is internal and reached reflectively, so R8 cannot
+# see the reference — keep it and the filter it builds. The vendored hany18h
+# parsers are called directly and shrink normally; only warnings are silenced.
+-keep class org.skepsun.kototoro.parsers.ContentParserFactoryKt { *; }
+-keep class org.skepsun.kototoro.parsers.model.ContentListFilter { *; }
+-keep class org.skepsun.kototoro.parsers.model.ContentListFilter$Companion { *; }
+-dontwarn org.skepsun.kototoro.parsers.**
+-dontwarn org.hany18h.parsers.**

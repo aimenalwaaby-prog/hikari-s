@@ -43,7 +43,17 @@ enum class ProviderType {
      * / `search` / `getDetail` / `getEpisodes` / `getVideoSources`, installed
      * from a Zangetsu `index.json` manifest (see com.hikari.app.zangetsu).
      */
-    ZANGETSU;
+    ZANGETSU,
+    /**
+     * A fork-video source — a VIDEO/HENTAI_VIDEO parser from the skepsun
+     * (kototoro) fork or an ANIME parser from the vendored hany18h fork, whose
+     * chapters are episodes and whose pages/AnimeStreams are playable servers
+     * (see com.hikari.app.kotatsu.fork.ForkVideoProvider). Manga/novel rows
+     * from the same forks ride [MANGA] under `manga|forksk|` / `manga|forkhany|`
+     * ids; only video needs its own type so it lands in the video pipeline
+     * (Home rows, search, detail, player) instead of the manga tab.
+     */
+    FORK_VIDEO;
 
     /**
      * Which section of the player's server chooser a source from this engine
@@ -66,6 +76,7 @@ enum class ProviderType {
             ANYMEX -> "Anymex"
             ANYMEX_MANGA -> "Anymex"
             ZANGETSU -> "Zangetsu"
+            FORK_VIDEO -> "Fork"
             IPTV -> "IPTV"
             HIKARI, UNIVERSAL -> "Hikari"
         }
@@ -213,7 +224,7 @@ fun isSiteScraperProviderId(providerId: String): Boolean {
     val p = providerId.lowercase()
     return p.startsWith("cs3|") || p.startsWith("hiki|") || p.startsWith("sky|") ||
         p.startsWith("aniyomi|") || p.startsWith("vega|") || p.startsWith("sora|") ||
-        p.startsWith("anymex|") || p.startsWith("uni|")
+        p.startsWith("anymex|") || p.startsWith("uni|") || p.startsWith("forkvideo|")
 }
 
 /**

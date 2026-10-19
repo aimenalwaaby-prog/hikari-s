@@ -5362,6 +5362,7 @@ class ContentRepository(private val manager: ProviderManager) {
             t == ProviderType.ANIYOMI -> 3
             t == ProviderType.VEGA -> 3
             t == ProviderType.ZANGETSU -> 3
+            t == ProviderType.FORK_VIDEO -> 3
             else -> 4
         }
         // `all` is the pass's snapshot of the enabled provider list, NOT a fresh
@@ -5461,6 +5462,9 @@ class ContentRepository(private val manager: ProviderManager) {
                     // Zangetsu sources export their own search too, so they
                     // are asked exactly like the other site-scraper families.
                     ProviderType.ZANGETSU -> true
+                    // Fork-video sources export their own search too, so they
+                    // are asked exactly like the other site-scraper families.
+                    ProviderType.FORK_VIDEO -> true
                     // Sora sources export their own search too
                     // (`searchResults`), so they are asked exactly like the
                     // other site-scraper families.
@@ -5949,6 +5953,7 @@ class ContentRepository(private val manager: ProviderManager) {
         // LNReader novel sources share the MANGA type under an `lnreader|`
         // prefix but keep their own outcome map.
         ProviderType.MANGA -> if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(p.config.id)) com.hikari.app.lnreader.LnReaderProvider.lastOutcome[p.config.id] else com.hikari.app.manga.MangaProvider.lastOutcome[p.config.id]
+        ProviderType.FORK_VIDEO -> com.hikari.app.kotatsu.fork.ForkVideoProvider.lastOutcome[p.config.id]
     }
 
     /** Minimal head start for the repos of the origin's own family — extended
@@ -6360,6 +6365,7 @@ class ContentRepository(private val manager: ProviderManager) {
             ProviderType.ANYMEX -> com.hikari.app.anymex.AnymexProvider.streamErrors
             ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider.lastOutcome
             ProviderType.MANGA -> if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(origin.config.id)) com.hikari.app.lnreader.LnReaderProvider.lastOutcome else com.hikari.app.manga.MangaProvider.lastOutcome
+            ProviderType.FORK_VIDEO -> com.hikari.app.kotatsu.fork.ForkVideoProvider.lastOutcome
             ProviderType.IPTV -> IptvProvider.iptvErrors
         }
         if (message == null) map.remove(id) else map[id] = message
@@ -6775,7 +6781,8 @@ class ContentRepository(private val manager: ProviderManager) {
         when (manager.byId(item.providerId)?.config?.type) {
             ProviderType.CS3, ProviderType.HIKARI, ProviderType.UNIVERSAL,
             ProviderType.SKYSTREAM, ProviderType.ANIYOMI, ProviderType.VEGA,
-            ProviderType.SORA, ProviderType.ANYMEX, ProviderType.ZANGETSU -> true
+            ProviderType.SORA, ProviderType.ANYMEX, ProviderType.ZANGETSU,
+            ProviderType.FORK_VIDEO -> true
             else -> false
         }
 
@@ -7217,6 +7224,7 @@ class ContentRepository(private val manager: ProviderManager) {
                         ProviderType.ANYMEX,
                         ProviderType.ANYMEX_MANGA,
                         ProviderType.ZANGETSU,
+                        ProviderType.FORK_VIDEO,
                         ProviderType.IPTV -> true
                         else -> false
                     }

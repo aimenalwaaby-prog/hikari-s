@@ -127,13 +127,34 @@ object ExtensionRecovery {
                     runCatching {
                         // Bundled Kotatsu parsers cache their instance + bridge
                         // in the registry (no .ext file), so a wedged one is
-                        // evicted there; file extensions evict their APK copy.
+                        // evicted there; fork parsers likewise; file extensions
+                        // evict their APK copy.
                         if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id)) {
                             com.hikari.app.kotatsu.KotatsuRegistry.evict(
                                 com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id)
                             )
+                        } else if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaId(config.id)) {
+                            com.hikari.app.kotatsu.KotatsuRegistry.evictFork(config.id)
                         } else {
                             com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                        }
+                    }
+                }
+                ProviderType.FORK_VIDEO -> {
+                    runCatching {
+                        com.hikari.app.kotatsu.fork.ForkVideoProvider.lastOutcome.remove(config.id)
+                        com.hikari.app.kotatsu.fork.ForkVideoProvider.streamErrors.remove(config.id)
+                        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkId(config.id) ||
+                            com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerOf(config.id) ==
+                            com.hikari.app.kotatsu.fork.ForkVideoProvider.OWNER_SKEPSUN
+                        ) {
+                            com.hikari.app.kotatsu.fork.SkepsunBridge.evict(
+                                com.hikari.app.kotatsu.fork.ForkVideoProvider.enumNameOf(config.id),
+                            )
+                        } else {
+                            com.hikari.app.kotatsu.fork.Hany18hBridge.evict(
+                                com.hikari.app.kotatsu.fork.ForkVideoProvider.enumNameOf(config.id),
+                            )
                         }
                     }
                 }
@@ -189,8 +210,27 @@ object ExtensionRecovery {
                             com.hikari.app.kotatsu.KotatsuRegistry.evict(
                                 com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id)
                             )
+                        } else if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaId(config.id)) {
+                            com.hikari.app.kotatsu.KotatsuRegistry.evictFork(config.id)
                         } else {
                             com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                        }
+                    }
+                }
+                ProviderType.FORK_VIDEO -> {
+                    runCatching {
+                        com.hikari.app.kotatsu.fork.ForkVideoProvider.lastOutcome.remove(config.id)
+                        com.hikari.app.kotatsu.fork.ForkVideoProvider.streamErrors.remove(config.id)
+                        if (com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerOf(config.id) ==
+                            com.hikari.app.kotatsu.fork.ForkVideoProvider.OWNER_SKEPSUN
+                        ) {
+                            com.hikari.app.kotatsu.fork.SkepsunBridge.evict(
+                                com.hikari.app.kotatsu.fork.ForkVideoProvider.enumNameOf(config.id),
+                            )
+                        } else {
+                            com.hikari.app.kotatsu.fork.Hany18hBridge.evict(
+                                com.hikari.app.kotatsu.fork.ForkVideoProvider.enumNameOf(config.id),
+                            )
                         }
                     }
                 }

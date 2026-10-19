@@ -251,6 +251,7 @@ object MangaExtensionManager {
     fun fileMissing(config: ProviderConfig): Boolean =
         config.type == ProviderType.MANGA &&
             !com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id) &&
+            !com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaId(config.id) &&
             (config.url.isBlank() || !File(config.url).exists())
 
     private fun load(context: Context, file: File): Extension? {
@@ -475,6 +476,26 @@ object MangaExtensionManager {
                     com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id),
                 ) ?: return@runCatching null
                 siteUrlForHost(hostOf(bridge.parserDomain()))
+            }.getOrNull() ?: return null
+            siteCache[config.id] = url
+            return url
+        }
+        // Fork parsers (skepsun / vendored hany18h) likewise ship inside the
+        // app — their site root is the fork parser's own live domain.
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaId(config.id)) {
+            val url = runCatching {
+                val domain = com.hikari.app.kotatsu.fork.ForkRegistry.domainOfForkManga(config.id)
+                siteUrlForHost(hostOf(domain))
+            }.getOrNull() ?: return null
+            siteCache[config.id] = url
+            return url
+        }
+        // Fork video rows (skepsun anime / vendored hany18h anime) likewise
+        // ship inside the app — same live-domain site root.
+        if (com.hikari.app.kotatsu.fork.ForkVideoProvider.isForkVideoId(config.id)) {
+            val url = runCatching {
+                val domain = com.hikari.app.kotatsu.fork.ForkRegistry.domainOfForkVideo(config.id)
+                siteUrlForHost(hostOf(domain))
             }.getOrNull() ?: return null
             siteCache[config.id] = url
             return url

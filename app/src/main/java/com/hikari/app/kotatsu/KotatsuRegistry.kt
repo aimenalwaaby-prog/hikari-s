@@ -204,9 +204,11 @@ object KotatsuRegistry {
      * A third-party repo's own listing: one entry per site IT publishes, in
      * its order — never the bundled index. Entries matching a bundled parser
      * install exactly like official ones (`kotatsu://…`, same row, same
-     * installed state); the rest list under [UNBUNDLED_PREFIX] with their
-     * icon and description, and only their Install refuses (their parser
-     * code lives in the publishing fork, not in this app).
+     * installed state); entries matching a fork parser (skepsun/kototoro or
+     * vendored hany18h) install as runnable fork rows (manga/novel under
+     * `manga|fork…|`, video/anime as fork-video rows); only sources no
+     * parser in the app can run list under [UNBUNDLED_PREFIX] with an honest
+     * refusal on Install.
      */
     fun pluginsForRepo(indexText: String): List<Cs3RepoPlugin> {
         val sites = parseSiteIndex(indexText) ?: return emptyList()
@@ -214,12 +216,11 @@ object KotatsuRegistry {
             val src = matchBundled(e.name, e.lang)
             val ct = e.contentType.trim()
             val hentai = ct.startsWith("HENTAI", ignoreCase = true)
-            val desc = listOfNotNull(
-                e.lang.trim().uppercase().ifBlank { null },
-                ct.lowercase().ifBlank { null },
-            ).joinToString(" · ").ifBlank { "Kotatsu source" } +
-                if (src == null) " · not bundled" else ""
             if (src != null) {
+                val desc = listOfNotNull(
+                    e.lang.trim().uppercase().ifBlank { null },
+                    ct.lowercase().ifBlank { null },
+                ).joinToString(" · ").ifBlank { "Kotatsu source" }
                 Cs3RepoPlugin(
                     name = e.name,
                     description = desc,
@@ -231,16 +232,28 @@ object KotatsuRegistry {
                     nsfw = hentai || src.contentType == ContentType.HENTAI,
                 )
             } else {
-                Cs3RepoPlugin(
-                    name = e.name,
-                    description = desc,
-                    url = UNBUNDLED_PREFIX + siteSlug(e),
-                    iconUrl = e.iconUrl,
-                    version = 1,
-                    contentKind = "manga",
-                    pkg = "kotatsu.site." + siteSlug(e),
-                    nsfw = hentai,
-                )
+                com.hikari.app.kotatsu.fork.ForkRegistry.pluginForEntry(
+                    entryName = e.name,
+                    entryLang = e.lang,
+                    entryIcon = e.iconUrl,
+                    entryContentType = ct,
+                    entryNsfw = hentai,
+                ) ?: run {
+                    val desc = listOfNotNull(
+                        e.lang.trim().uppercase().ifBlank { null },
+                        ct.lowercase().ifBlank { null },
+                    ).joinToString(" · ").ifBlank { "Kotatsu source" } + " · not bundled"
+                    Cs3RepoPlugin(
+                        name = e.name,
+                        description = desc,
+                        url = UNBUNDLED_PREFIX + siteSlug(e),
+                        iconUrl = e.iconUrl,
+                        version = 1,
+                        contentKind = "manga",
+                        pkg = "kotatsu.site." + siteSlug(e),
+                        nsfw = hentai,
+                    )
+                }
             }
         }
     }
@@ -251,6 +264,12 @@ object KotatsuRegistry {
     fun evict(enumName: String) {
         parserCache.remove(enumName)
         KotatsuBridge.evict(enumName)
+    }
+
+    /** Drops a wedged fork parser/bridge (see [evict]): fork manga rows cache
+     *  in [com.hikari.app.kotatsu.fork.ForkRegistry]. */
+    fun evictFork(id: String) {
+        com.hikari.app.kotatsu.fork.ForkRegistry.evictForkManga(id)
     }
 
     /** Registers the official repo once (seed path: a user who deletes it

@@ -227,6 +227,7 @@ class CatalogViewModel(
             ProviderType.ANYMEX_MANGA -> com.hikari.app.anymex.AnymexMangaProvider.lastOutcome[p.config.id]
             ProviderType.SORA -> com.hikari.app.sora.SoraProvider.catalogErrors[p.config.id]
                 ?: com.hikari.app.sora.SoraProvider.lastOutcome[p.config.id]
+            ProviderType.FORK_VIDEO -> com.hikari.app.kotatsu.fork.ForkVideoProvider.lastOutcome[p.config.id]
             else -> null
         }
         return raw?.takeIf { it.isNotBlank() && !it.startsWith("✓") && !it.startsWith("✔") }

@@ -1539,8 +1539,18 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
      *  store write + one provider-list rebuild, never the 1200-row flood
      *  0.11.69 did. Entries whose parser code is NOT bundled (see
      *  [com.hikari.app.kotatsu.KotatsuRegistry.UNBUNDLED_PREFIX]) fail
-     *  honestly instead of creating a row that could never run. */
+     *  honestly instead of creating a row that could never run. Fork entries
+     *  (`kotatsu://forksk/…`, `kotatsu://forkhany/…`, `forkvideo://…`) install
+     *  as runnable fork rows. */
     suspend fun installKotatsuPlugin(plugin: Cs3RepoPlugin): Result<Int> {
+        com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerEnumOfPluginUrl(plugin.url)?.let { (owner, enum) ->
+            return installForkVideoSource(owner, enum, plugin.nsfw, plugin.iconUrl)
+        }
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaPluginUrl(plugin.url)) {
+            val enum = com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkPluginUrl(plugin.url)
+                ?: return Result.failure(IllegalStateException("Unknown fork source"))
+            return installForkMangaSource(plugin.url, enum, plugin.nsfw, plugin.iconUrl)
+        }
         val enumName =
             com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(plugin.url)
                 ?: return Result.failure(IllegalStateException("Unknown Kotatsu source"))
@@ -1554,6 +1564,55 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         return installKotatsuSource(enumName, plugin.nsfw)
+    }
+
+    /** Installs one fork manga/novel row (no download — skepsun via JitPack,
+     *  hany18h vendored inside the app). */
+    suspend fun installForkMangaSource(pluginUrl: String, enumName: String, entryNsfw: Boolean = false, iconUrl: String? = null): Result<Int> {
+        val row = when {
+            com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkPluginUrl(pluginUrl) -> {
+                val src = runCatching {
+                    org.skepsun.kototoro.parsers.model.ContentParserSource.valueOf(enumName)
+                }.getOrNull() ?: return Result.failure(IllegalStateException("Unknown fork source"))
+                if (src.isBroken) return Result.failure(IllegalStateException("${src.title} is marked broken upstream"))
+                com.hikari.app.kotatsu.fork.ForkRegistry.configForSkepsun(src, iconUrl)
+            }
+            else -> {
+                val src = runCatching {
+                    org.hany18h.parsers.model.MangaParserSource.valueOf(enumName)
+                }.getOrNull() ?: return Result.failure(IllegalStateException("Unknown fork source"))
+                if (src.isBroken) return Result.failure(IllegalStateException("${src.title} is marked broken upstream"))
+                com.hikari.app.kotatsu.fork.ForkRegistry.configForHany18h(src, iconUrl)
+            }
+        }
+        val final = if (entryNsfw && row.nsfw != true) row.copy(nsfw = true) else row
+        store.addProvider(final)
+        requestRefresh()
+        return Result.success(1)
+    }
+
+    /** Installs one fork video/anime row (no download — same bundled runtimes). */
+    suspend fun installForkVideoSource(owner: String, enumName: String, entryNsfw: Boolean = false, iconUrl: String? = null): Result<Int> {
+        val (title, nsfw) = when (owner) {
+            com.hikari.app.kotatsu.fork.ForkVideoProvider.OWNER_SKEPSUN -> {
+                val src = runCatching {
+                    org.skepsun.kototoro.parsers.model.ContentParserSource.valueOf(enumName)
+                }.getOrNull() ?: return Result.failure(IllegalStateException("Unknown fork source"))
+                if (src.isBroken) return Result.failure(IllegalStateException("${src.title} is marked broken upstream"))
+                src.title to src.contentType.name.startsWith("HENTAI", ignoreCase = true)
+            }
+            else -> {
+                val src = runCatching {
+                    org.hany18h.parsers.model.MangaParserSource.valueOf(enumName)
+                }.getOrNull() ?: return Result.failure(IllegalStateException("Unknown fork source"))
+                if (src.isBroken) return Result.failure(IllegalStateException("${src.title} is marked broken upstream"))
+                src.title to src.contentType.name.equals("HENTAI", ignoreCase = true)
+            }
+        }
+        val row = com.hikari.app.kotatsu.fork.ForkRegistry.configForVideo(owner, enumName, title, nsfw || entryNsfw, iconUrl)
+        store.addProvider(row)
+        requestRefresh()
+        return Result.success(1)
     }
 
     /** Installs one bundled Kotatsu source (no download — the official
@@ -1581,8 +1640,25 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Removes the installed row behind one Kotatsu repo entry. Returns how
-     *  many rows were actually removed. */
+     *  many rows were actually removed. Fork entries match their own rows. */
     suspend fun uninstallKotatsuPlugin(pluginUrl: String): Int {
+        com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerEnumOfPluginUrl(pluginUrl)?.let { (owner, enum) ->
+            val id = com.hikari.app.kotatsu.fork.ForkVideoProvider.idOf(owner, enum)
+            if (!store.providers().any { it.id == id }) return 0
+            store.removeProvider(id)
+            requestRefresh()
+            return 1
+        }
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaPluginUrl(pluginUrl)) {
+            val enum = com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkPluginUrl(pluginUrl) ?: return 0
+            val id = (if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkPluginUrl(pluginUrl))
+                com.hikari.app.kotatsu.fork.ForkRegistry.PREFIX_SK + enum
+            else com.hikari.app.kotatsu.fork.ForkRegistry.PREFIX_HANY + enum)
+            if (!store.providers().any { it.id == id }) return 0
+            store.removeProvider(id)
+            requestRefresh()
+            return 1
+        }
         val enumName =
             com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(pluginUrl)
                 ?: return 0
@@ -4113,14 +4189,16 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 }
             ProviderType.ANIYOMI, ProviderType.MANGA ->
                 // LNReader rows carry no extension preferences screen in
-                // their format — and Kotatsu parsers ship inside the app with
-                // no settings screen of their own — so the gear gets the
-                // honest info dialog for both.
+                // their format — and Kotatsu/fork parsers ship inside the app
+                // with no settings screen of their own — so the gear gets the
+                // honest info dialog for all three.
                 if (p is com.hikari.app.lnreader.LnReaderProvider ||
                     (p is com.hikari.app.manga.MangaProvider &&
-                        com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(p.config.id))
+                        (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(p.config.id) ||
+                            com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaId(p.config.id)))
                 ) infoProvider = p
                 else schemaProvider = p
+            ProviderType.FORK_VIDEO -> infoProvider = p
             ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA, ProviderType.SORA -> schemaProvider = p
             // A SkyStream plugin with mirror domains gets the mirror picker;
             // without domains there is nothing to configure (see the info
@@ -7806,9 +7884,31 @@ private fun PluginRow(
  * state is (URL spellings, not literals) — the Test button's target.
  */
 private fun installedProviderFor(plugin: Cs3RepoPlugin, providers: List<ContentProvider>): ContentProvider? {
+    // Fork-video rows carry no source file: match by their `forkvideo://` URL
+    // or provider id.
+    if (com.hikari.app.kotatsu.fork.ForkVideoProvider.isForkVideoPluginUrl(plugin.url)) {
+        val oe = com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerEnumOfPluginUrl(plugin.url)
+        return providers.firstOrNull { p ->
+            p.config.url == plugin.url ||
+                (oe != null && p.config.id ==
+                    com.hikari.app.kotatsu.fork.ForkVideoProvider.idOf(oe.first, oe.second))
+        }
+    }
     // Bundled Kotatsu rows carry no source file (their parser ships in the
     // app): match the installed row by its `kotatsu://` URL or provider id.
+    // Fork manga rows ride the same scheme (`kotatsu://forksk/…`) with their
+    // own id prefixes.
     if (plugin.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME)) {
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaPluginUrl(plugin.url)) {
+            val enum = com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkPluginUrl(plugin.url)
+            return providers.firstOrNull { p ->
+                p.config.url == plugin.url ||
+                    (enum != null && p.config.id ==
+                        (if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkPluginUrl(plugin.url))
+                            com.hikari.app.kotatsu.fork.ForkRegistry.PREFIX_SK + enum
+                        else com.hikari.app.kotatsu.fork.ForkRegistry.PREFIX_HANY + enum))
+            }
+        }
         return providers.firstOrNull { p ->
             p.config.url == plugin.url ||
                 p.config.id == com.hikari.app.kotatsu.KotatsuRegistry.PREFIX +
@@ -7855,6 +7955,7 @@ private fun hasSettingsScreen(
     ProviderType.NUVIO -> true
     ProviderType.VEGA -> com.hikari.app.providers.vega.VegaPluginManager.hasSettings(p.config)
     ProviderType.ANIYOMI, ProviderType.MANGA -> true
+    ProviderType.FORK_VIDEO -> true
     ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA, ProviderType.SORA -> true
     // Optimistic: until the manifest has been read for this addon, whether it
     // has a config page is unknown, and offering the gear is what lets the user
@@ -7868,9 +7969,28 @@ private fun repoPluginSettingsTarget(
     providers: List<ContentProvider>,
     cs3SettingsIds: Set<String>,
 ): ContentProvider? {
-    // Same bundled-row rule as [installedProviderFor]: a `kotatsu://` entry
-    // matches its installed row directly, never through file-URL keys.
+    // Same bundled-row rule as [installedProviderFor]: fork-video and
+    // `kotatsu://` entries match their installed rows directly, never through
+    // file-URL keys.
+    if (com.hikari.app.kotatsu.fork.ForkVideoProvider.isForkVideoPluginUrl(plugin.url)) {
+        val oe = com.hikari.app.kotatsu.fork.ForkVideoProvider.ownerEnumOfPluginUrl(plugin.url)
+        return providers.firstOrNull { p ->
+            p.config.url == plugin.url ||
+                (oe != null && p.config.id ==
+                    com.hikari.app.kotatsu.fork.ForkVideoProvider.idOf(oe.first, oe.second))
+        }?.takeIf { hasSettingsScreen(it, cs3SettingsIds) }
+    }
     if (plugin.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME)) {
+        if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaPluginUrl(plugin.url)) {
+            val enum = com.hikari.app.kotatsu.fork.ForkRegistry.enumNameOfForkPluginUrl(plugin.url)
+            return providers.firstOrNull { p ->
+                p.config.url == plugin.url ||
+                    (enum != null && p.config.id ==
+                        (if (com.hikari.app.kotatsu.fork.ForkRegistry.isForkSkPluginUrl(plugin.url))
+                            com.hikari.app.kotatsu.fork.ForkRegistry.PREFIX_SK + enum
+                        else com.hikari.app.kotatsu.fork.ForkRegistry.PREFIX_HANY + enum))
+            }?.takeIf { hasSettingsScreen(it, cs3SettingsIds) }
+        }
         return providers.firstOrNull { p ->
             p.config.url == plugin.url ||
                 p.config.id == com.hikari.app.kotatsu.KotatsuRegistry.PREFIX +
@@ -7944,6 +8064,13 @@ private fun pluginStatus(p: ContentProvider, iptvTick: Int = 0): String? {
         // successes in the same map ("✓ 24 chapter(s)") so the UI can show what
         // a call produced, and those must not read as problems here.
         return err?.takeIf { !it.startsWith("✓") }?.take(200)
+    }
+    if (p.config.type == ProviderType.FORK_VIDEO) {
+        val err = com.hikari.app.kotatsu.fork.ForkVideoProvider.lastOutcome[p.config.id]
+        if (err != null &&
+            com.hikari.app.net.CloudflareVerifier.isVerificationMessage(err)
+        ) return null
+        return err?.takeIf { !it.startsWith("✓") && !it.startsWith("○") }?.take(200)
     }
     if (p.config.type != ProviderType.CS3) return null
     val err = com.hikari.app.cs3.Cs3MainApiProvider.catalogErrors[p.config.id]

@@ -83,7 +83,8 @@ object ExtensionNsfw {
      * [com.hikari.app.providers.ProviderManager.learnAdultFlags] does.
      */
     fun decidableFromMetadata(config: ProviderConfig): Boolean =
-        config.type == ProviderType.MANGA || config.type == ProviderType.ANIYOMI
+        config.type == ProviderType.MANGA || config.type == ProviderType.ANIYOMI ||
+            config.type == ProviderType.FORK_VIDEO
 
     /** Records an answer a loaded extension gave about itself (its `.ext` file). */
     fun remember(path: String, adult: Boolean) {

@@ -37,7 +37,7 @@ object RepoProvenance {
             ProviderType.CS3, ProviderType.NUVIO, ProviderType.SKYSTREAM,
             ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.VEGA,
             ProviderType.SORA, ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA,
-            ProviderType.ZANGETSU -> c.extra?.substringBefore('|')
+            ProviderType.ZANGETSU, ProviderType.FORK_VIDEO -> c.extra?.substringBefore('|')
             else -> null
         }?.trim()
         return raw?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
