@@ -103,6 +103,9 @@ android {
             // freely (their own build opts in); they compile here under the
             // same opt-in rather than annotating hundreds of call sites.
             optIn.add("org.hany18h.parsers.InternalParsersApi")
+            // Same story for kotlin.contracts (their validation helpers use
+            // contracts, opted in at their own build).
+            optIn.add("kotlin.contracts.ExperimentalContracts")
         }
     }
 

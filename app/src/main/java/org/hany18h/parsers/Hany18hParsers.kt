@@ -34,6 +34,7 @@ import org.hany18h.parsers.site.madara.en.Manhuaus
 import org.hany18h.parsers.site.madara.en.ManhwaClan
 import org.hany18h.parsers.site.mangareader.ar.DespairManga
 import org.hany18h.parsers.site.mangareader.ar.Hijalacom
+import org.hany18h.parsers.site.mangareader.ar.Lavatoons
 import org.hany18h.parsers.site.mangareader.ar.UmiManga
 import org.hany18h.parsers.site.mmrcms.ar.Onma
 import org.hany18h.parsers.site.zeistmanga.ar.MangaAiLand
@@ -79,6 +80,7 @@ public fun MangaParserSource.newParser(context: MangaLoaderContext): MangaParser
 	MangaParserSource.MANHWACLAN -> ManhwaClan(context)
 	MangaParserSource.DESPAIRMANGA -> DespairManga(context)
 	MangaParserSource.HIJALACOM -> Hijalacom(context)
+	MangaParserSource.LAVATOONS -> Lavatoons(context)
 	MangaParserSource.UMIMANGA -> UmiManga(context)
 	MangaParserSource.ONMA -> Onma(context)
 	MangaParserSource.MANGAAILAND -> MangaAiLand(context)

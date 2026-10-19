@@ -6,7 +6,7 @@ package org.hany18h.parsers.model
  *
  * The fork's site classes carry `@MangaSourceParser(name, title, locale, type)` and
  * KSP turns those into this enum + a `newParser` factory. This app does not run KSP,
- * so the 38 entries below are generated from those annotations (see
+ * so the 39 entries below are generated from those annotations (see
  * `scratch/hany18h-sites-pkg.json`, private build record) — same names, titles,
  * locales and content types the fork publishes.
  */
@@ -49,6 +49,7 @@ public enum class MangaParserSource(
 	MANHWACLAN("ManhwaClan", "en", ContentType.MANGA, false),
 	DESPAIRMANGA("Despair Manga", "ar", ContentType.MANGA, false),
 	HIJALACOM("Hijalacom", "ar", ContentType.MANGA, false),
+	LAVATOONS("Lavatoons", "ar", ContentType.MANGA, false),
 	UMIMANGA("UmiManga", "ar", ContentType.MANGA, false),
 	ONMA("Onma", "ar", ContentType.MANGA, false),
 	MANGAAILAND("MangaAiLand", "ar", ContentType.MANGA, false),

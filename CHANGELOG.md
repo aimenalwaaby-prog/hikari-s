@@ -1,7 +1,7 @@
 ## 0.11.73 (continuous build only)
 
 ### Added
-- Kotatsu third-party repo entries now install and run instead of refusing as "not bundled": kototoro (skepsun) manga/novel sources install as `manga|forksk|` rows and its VIDEO/HENTAI_VIDEO sources as `forkvideo|skepsun|` rows (their playback pages are the video urls), while hany18h manga/novel sources install as `manga|forkhany|` rows and its ANIME sources as `forkvideo|hany18h|` rows (chapters resolve via `getVideoStreams`). Novel rows read chapter text; installed rows keep the repo entry's own icon with a site-favicon fallback; uninstall/status/gear/stall-recovery cover all three row shapes. One entry (Lavatoons) has no parser source in the vendored snapshot, so that single entry still says not bundled
+- Kotatsu third-party repo entries now install and run instead of refusing as "not bundled": kototoro (skepsun) manga/novel sources install as `manga|forksk|` rows and its VIDEO/HENTAI_VIDEO sources as `forkvideo|skepsun|` rows (their playback pages are the video urls), while hany18h manga/novel sources install as `manga|forkhany|` rows and its ANIME sources as `forkvideo|hany18h|` rows (chapters resolve via `getVideoStreams`). Novel rows read chapter text; installed rows keep the repo entry's own icon with a site-favicon fallback; uninstall/status/gear/stall-recovery cover all three row shapes. all 39 hany18h repo entries resolve (Lavatoons ships inside a file upstream misnamed ThunderScans)
 
 ## 0.11.72 (continuous build only)
 
