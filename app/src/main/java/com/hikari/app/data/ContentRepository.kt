@@ -1240,6 +1240,11 @@ class ContentRepository(private val manager: ProviderManager) {
          *  answered an empty page while the user was looking at it. */
         private const val CATALOG_RETRY_MS = 900L
 
+        /** Ceiling on one catalogue page read inside [loadCatalogPage] — a
+         *  hung host must end in the last good answer, never a forever
+         *  spinner (see it). */
+        private const val CATALOG_PAGE_TIMEOUT_MS = 20_000L
+
         /** The last NON-EMPTY page a provider answered for a catalogue — see
          *  [loadCatalogPage]. Process-wide on purpose: the reads it reconciles
          *  come from different repository instances (Home's row and the
@@ -1311,10 +1316,28 @@ class ContentRepository(private val manager: ProviderManager) {
             if (onCached != null) {
                 MetaCache.cachedCatalog(diskKey)?.let(onCached)
             }
-            var items = catalogCatching { p.getCatalog(ref, page) }.getOrDefault(emptyList())
-            if (items.isEmpty() && retryEmpty) {
+            // A ceiling on ONE page read, for every engine at once. Several
+            // engines answer getCatalog with no timeout of their own (a hung
+            // manga site, a stalled parser), so without this the catalogue
+            // screen spins forever on exactly the reported "takes forever to
+            // load" extensions. On a timeout the last-good / disk answer
+            // below still paints — and the re-ask is skipped, because
+            // re-asking a host that just hung only doubles the wait.
+            var firstHung = false
+            var items = withTimeoutOrNull(CATALOG_PAGE_TIMEOUT_MS) {
+                catalogCatching { p.getCatalog(ref, page) }.getOrDefault(emptyList())
+            } ?: run { firstHung = true; emptyList() }
+            if (firstHung) {
+                com.hikari.app.data.Logs.log(
+                    "Catalog",
+                    "${p.config.name}: page $page gave up after ${CATALOG_PAGE_TIMEOUT_MS / 1000}s — showing last answer",
+                )
+            }
+            if (items.isEmpty() && retryEmpty && !firstHung) {
                 delay(CATALOG_RETRY_MS)
-                items = catalogCatching { p.getCatalog(ref, page) }.getOrDefault(emptyList())
+                items = withTimeoutOrNull(CATALOG_PAGE_TIMEOUT_MS) {
+                    catalogCatching { p.getCatalog(ref, page) }.getOrDefault(emptyList())
+                } ?: emptyList()
             }
             if (items.isNotEmpty()) {
                 synchronized(lastGoodCatalogPage) { lastGoodCatalogPage[key] = items }

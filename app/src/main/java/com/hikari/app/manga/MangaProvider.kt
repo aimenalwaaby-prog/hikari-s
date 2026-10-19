@@ -24,6 +24,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +55,18 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
     companion object {
         const val CATALOG_POPULAR = "popular"
         const val CATALOG_LATEST = "latest"
+        /**
+         * Ceilings on the extension's own calls. Several sites hang instead
+         * of failing — a catalogue read that never returns is the reported
+         * "takes forever to load" extension. Past these the call is
+         * abandoned and the honest reason ("the site took too long") is
+         * recorded for the empty state; the funnel in
+         * [com.hikari.app.data.ContentRepository.loadCatalogPage] carries
+         * its own ceiling too, so the screen can never spin longer than the
+         * shorter of the two.
+         */
+        const val EXT_CALL_TIMEOUT_MS = 30_000L
+        const val WARM_SITE_TIMEOUT_MS = 15_000L
         val lastOutcome = ConcurrentHashMap<String, String>()
         /** True when the engine's last recorded outcome for [providerId] looks
          *  like a bot wall (HTTP 403/429/503/Cloudflare) rather than a dead
@@ -172,9 +185,14 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
      * This loads the site once in the offscreen WebView ([CloudflareSolver.warm],
      * spaced per host) and says whether that earned something worth retrying.
      * NOTHING opens on the user's screen.
+     *
+     * With a ceiling: the offscreen load hangs indefinitely on some hosts,
+     * and without it a catalogue that was merely slow became one that never
+     * answers (the reported "takes forever to load" extensions).
      */
-    private fun warmSite(): Boolean {
-        val site = siteUrl() ?: return false
+    private suspend fun warmSite(): Boolean =
+        withTimeoutOrNull(WARM_SITE_TIMEOUT_MS) {
+            val site = siteUrl() ?: return@withTimeoutOrNull false
         val ua = runCatching { HikariApp.instance.effectiveWebViewUa() }.getOrNull().orEmpty()
         val ok = runCatching {
             com.hikari.app.net.CloudflareSolver.warm(
@@ -183,8 +201,8 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             )
         }.getOrDefault(false)
         if (ok) Logs.log("Manga", "${config.name}: warmed $site after a refused request")
-        return ok
-    }
+        ok
+    } ?: false
 
     /**
      * Records a site as needing the user's own verification when a failure is a
@@ -313,18 +331,26 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
                 else -> src.getPopularManga(page)
             }.mangas
         }
-        val first = runCatching { ask() }
+        val first = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }
         var mangas = first.getOrNull()
         var failure = first.exceptionOrNull()?.takeIf { it !is kotlinx.coroutines.CancellationException }
             ?.let { reason(it) }
+        if (mangas == null && failure == null) {
+            // The bounded ask gave up on a hung site (null verdict, no
+            // exception): name it so the catalogue screen can say the site
+            // timed out instead of spinning or crying wolf about a block.
+            failure = "the site took too long to answer (over ${EXT_CALL_TIMEOUT_MS / 1000}s)"
+        }
+        val catalogHung = mangas == null && first.exceptionOrNull() == null
         first.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
         // A REFUSED catalogue: either an exception, or (the case that used to be
         // invisible) a page the site served with nothing in it because the request
         // never got past its browser check. Be the browser once and ask again —
         // see [warmSite]; page 1 only, since an empty page 2+ is just the end of
-        // the list.
-        if (page == 1 && (mangas == null || mangas.isEmpty()) && warmSite()) {
-            val second = runCatching { ask() }
+        // the list. A hung first ask skips the warm-up retry: re-asking a host
+        // that just hung only doubles the wait.
+        if (page == 1 && (mangas == null || mangas.isEmpty()) && !catalogHung && warmSite()) {
+            val second = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }
             second.exceptionOrNull()?.let {
                 if (it is kotlinx.coroutines.CancellationException) throw it
                 // The RETRY's reason is the one worth reporting: the first
@@ -391,17 +417,22 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             val filters = runCatching { src.getFilterList() }.getOrDefault(FilterList())
             src.getSearchManga(page, query, filters).mangas
         }
-        val first = runCatching { ask() }
+        val first = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }
         var found = first.getOrNull()
         var failure = first.exceptionOrNull()?.takeIf { it !is kotlinx.coroutines.CancellationException }
             ?.let { reason(it) }
         first.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
+        // A hung site abandons the ask with NO exception (null verdict): name
+        // it, and skip the warm-up retry — warming a host that just hung only
+        // doubles the wait.
+        val searchHung = found == null && failure == null
+        if (searchHung) failure = "the site took too long to answer (over ${EXT_CALL_TIMEOUT_MS / 1000}s)"
         // Only a FAILED search is retried: an empty result list is a perfectly
         // ordinary answer ("this engine has no such title"), and warming the
         // site for every miss would be a WebView load per search. A 403 from a
         // browser check is not an answer.
-        if (found == null && warmSite()) {
-            val second = runCatching { ask() }
+        if (found == null && !searchHung && warmSite()) {
+            val second = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }
             second.exceptionOrNull()?.let {
                 if (it is kotlinx.coroutines.CancellationException) throw it
                 failure = reason(it)
@@ -601,17 +632,23 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         val ask: suspend () -> List<SChapter> = {
             updateOf(src, item, details = false, chapters = true).chapters
         }
-        val first = runCatching { ask() }
+        val first = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }
         first.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
         var raw = first.getOrNull()
         var failure = first.exceptionOrNull()?.let { reason(it) }
+        if (raw == null && failure == null) {
+            failure = "the site took too long to answer (over ${EXT_CALL_TIMEOUT_MS / 1000}s)"
+        }
+        // A hung first ask skips the warm-up retry (see the catalogue): the
+        // site already burned the whole ceiling once.
+        val episodesHung = raw == null && first.exceptionOrNull() == null
         // The same refused-site case as the catalogue: an empty (or failed)
         // chapter list on a site behind a browser check is what made the globe
         // button the only way to make a title's chapters appear. Warm the site
         // once and ask again.
-        if (raw == null || raw.isEmpty()) {
+        if (!episodesHung && (raw == null || raw.isEmpty())) {
             if (warmSite()) {
-                val second = runCatching { ask() }
+                val second = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }
                 second.exceptionOrNull()?.let {
                     if (it is kotlinx.coroutines.CancellationException) throw it
                     failure = reason(it)
@@ -632,14 +669,14 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         // prime the session before the list exists. Prime once before calling
         // it empty, so a first-open "0 chapters" can still recover.
         if (raw.isEmpty()) {
-            runCatching { updateOf(src, item, details = true, chapters = true) }
-            val retry = runCatching { ask() }.getOrNull()
+            runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { updateOf(src, item, details = true, chapters = true) } }
+            val retry = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { ask() } }.getOrNull()
             if (!retry.isNullOrEmpty()) raw = retry
         }
         // Legacy-source bridge: some extensions answer getChapterList but leave
         // the combined update call empty — ask it directly before giving up.
         if (raw.isEmpty()) {
-            val direct = runCatching { src.getChapterList(sm(item)) }.getOrNull()
+            val direct = runCatching { withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) { src.getChapterList(sm(item)) } }.getOrNull()
             if (!direct.isNullOrEmpty()) raw = direct
         }
         if (raw.isEmpty()) return@gate failEpisodes("no chapters in this answer")

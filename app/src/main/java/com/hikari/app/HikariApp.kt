@@ -755,6 +755,10 @@ class HikariApp : Application() {
                 // tab into crashes — pruned once here; sources now install
                 // one-by-one from Extensions → Kotatsu repos.
                 com.hikari.app.kotatsu.KotatsuRegistry.pruneSeeded(store)
+                // The Kotatsu folder reads like every other engine's: a repo
+                // card whose entries install one-by-one (seed path — a user
+                // who deletes it keeps it deleted).
+                com.hikari.app.kotatsu.KotatsuRegistry.seedDefaults(store)
             }
             // First run only: add the bundled Hikari (.hiki) and CloudStream
             // extension repos, so the Extensions screen ("Sources, repos &

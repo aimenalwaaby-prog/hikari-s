@@ -1380,6 +1380,14 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun reloadInstalled() {
         val next = buildSet {
             store.providers().forEach { p ->
+                // Bundled Kotatsu rows carry no downloadable file (their
+                // parser ships inside the app), so the http-only rule below
+                // would skip them and every installed source would keep
+                // offering Install. Their `kotatsu://` URL is the identity.
+                if (p.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME)) {
+                    add(p.url)
+                    return@forEach
+                }
                 val extra = p.extra ?: return@forEach
                 val source = when (p.type) {
                     ProviderType.CS3, ProviderType.NUVIO, ProviderType.SKYSTREAM,
@@ -1483,11 +1491,11 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
      *  [com.hikari.app.zangetsu.ZangetsuPluginManager.repoPlugins]). */
     suspend fun addZangetsuRepo(rawUrl: String): Result<Cs3Repo> = addRepo(rawUrl, RepoKind.ZANGETSU)
 
-    /** Kotatsu parsers ship inside the app — there is no repo URL to add.
-     *  Exists only so exhaustive `when (kind)` branches have somewhere to go;
-     *  the UI never routes here (the Kotatsu folder installs per source). */
-    suspend fun addKotatsuRepo(@Suppress("UNUSED_PARAMETER") rawUrl: String): Result<Cs3Repo> =
-        Result.failure(IllegalStateException("Kotatsu parsers are bundled — install them from the Kotatsu repos folder"))
+    /** Registers a Kotatsu repo — a card whose entries are the bundled
+     *  parsers (the extraction code ships inside the app, so there is no
+     *  index file to fetch: adding the link files the repo, opening it
+     *  lists every source, exactly like the LNReader folder). */
+    suspend fun addKotatsuRepo(rawUrl: String): Result<Cs3Repo> = addRepo(rawUrl, RepoKind.KOTATSU)
 
     /** Installs one Zangetsu source: its `.js` is downloaded and validated in
      *  the QuickJS runtime ([com.hikari.app.zangetsu.ZangetsuPluginManager.install]). */
@@ -1526,6 +1534,17 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         return removed
     }
 
+    /** Installs one repo entry from a Kotatsu repo card (no download — the
+     *  official kotatsu-parsers extraction code ships inside the app). One
+     *  store write + one provider-list rebuild, never the 1200-row flood
+     *  0.11.69 did. */
+    suspend fun installKotatsuPlugin(plugin: Cs3RepoPlugin): Result<Int> {
+        val enumName =
+            com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(plugin.url)
+                ?: return Result.failure(IllegalStateException("Unknown Kotatsu source"))
+        return installKotatsuSource(enumName)
+    }
+
     /** Installs one bundled Kotatsu source (no download — the official
      *  kotatsu-parsers extraction code ships inside the app). One store write
      *  + one provider-list rebuild, never the 1200-row flood 0.11.69 did. */
@@ -1543,6 +1562,20 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
     /** Removes one installed Kotatsu source row. */
     suspend fun uninstallKotatsuSource(providerId: String): Int {
         store.removeProvider(providerId)
+        requestRefresh()
+        return 1
+    }
+
+    /** Removes the installed row behind one Kotatsu repo entry. Returns how
+     *  many rows were actually removed. */
+    suspend fun uninstallKotatsuPlugin(pluginUrl: String): Int {
+        val enumName =
+            com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(pluginUrl)
+                ?: return 0
+        val id = com.hikari.app.kotatsu.KotatsuRegistry.PREFIX + enumName
+        val present = store.providers().any { it.id == id }
+        if (!present) return 0
+        store.removeProvider(id)
         requestRefresh()
         return 1
     }
@@ -2185,6 +2218,15 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         put("lnreaderplugins", listOf(lnreaderOfficial))
         put("lnreaderrepo", listOf(lnreaderOfficial))
         put("novels", listOf(lnreaderOfficial))
+        // The official Kotatsu parser index (bundled — adding it files the
+        // repo whose entries are the in-app parsers, like LNReader's index).
+        fun kotatsu(url: String) = RepoAlias(url, RepoKind.KOTATSU)
+        val kotatsuOfficial = kotatsu(
+            com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_URL
+        )
+        put("kotatsu", listOf(kotatsuOfficial))
+        put("kotatsuparsers", listOf(kotatsuOfficial))
+        put("kotatsuapp", listOf(kotatsuOfficial))
     }
 
     /** A pasted short name (case-insensitive) resolved to its repo(s), or null
@@ -2501,6 +2543,49 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         val file = if (kind == RepoKind.NUVIO || kind == RepoKind.VEGA) "manifest.json" else "repo.json"
         return withContext(Dispatchers.IO) {
             runCatching {
+                if (kind == RepoKind.KOTATSU) {
+                    // A Kotatsu repo's entries are the BUNDLED parsers (the
+                    // official kotatsu-parsers code ships inside the app), so
+                    // there is no index file to fetch at all: any link files
+                    // the repo, and opening it lists every source. Runs BEFORE
+                    // the repo.json fetch below, which would reject the
+                    // upstream GitHub page (HTML) before this branch ran.
+                    // The official shorthand lands on the upstream repository.
+                    val kt = url.trim()
+                    val official =
+                        com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_URL
+                    val use = when {
+                        kt.equals("kotatsu", ignoreCase = true) -> official
+                        kt.trimEnd('/').equals(official, ignoreCase = true) -> official
+                        else -> url
+                    }
+                    val entries =
+                        com.hikari.app.kotatsu.KotatsuRegistry.repoPlugins()
+                    if (entries.isEmpty()) {
+                        throw Exception("The bundled Kotatsu index is empty — update the app")
+                    }
+                    val repo = Cs3Repo(
+                        url = use,
+                        name = niceRepoName(
+                            use,
+                            if (use == official) com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_NAME else "",
+                        ),
+                        description = com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_DESC,
+                        kind = kind,
+                    )
+                    lastGoodRepoUrl = use
+                    duplicateRepoAdd = store.repos().any {
+                        com.hikari.app.data.SourceUrls.repoKey(it.url) ==
+                            com.hikari.app.data.SourceUrls.repoKey(use)
+                    }
+                    store.addCs3Repo(repo)
+                    val saved = store.repos().firstOrNull {
+                        com.hikari.app.data.SourceUrls.repoKey(it.url) ==
+                            com.hikari.app.data.SourceUrls.repoKey(repo.url)
+                    }
+                    repos.value = store.repos()
+                    return@withContext Result.success(saved ?: repo)
+                }
                 val text = fetchRepoRaw(url, file, ua = if (kind == RepoKind.NUVIO) Http.NUVIO_UA else null)
                     .getOrElse { throw it }
                 val name: String
@@ -2902,6 +2987,12 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             val loaded = com.hikari.app.lnreader.LnReaderPluginManager
                 .loadRepoPlugins(repo.url).getOrElse { throw it }
             return loaded.first to null
+        }
+        if (repo.kind == RepoKind.KOTATSU) {
+            // Bundled parsers — no fetch, the index is in the app already
+            // (see KotatsuRegistry.repoPlugins), so a Kotatsu repo opens
+            // instantly instead of timing out on a file that was never there.
+            return com.hikari.app.kotatsu.KotatsuRegistry.repoPlugins() to null
         }
         if (repo.kind == RepoKind.ANYMEX) {
             val candidatesAx = listOfNotNull(repo.url, jsDelivrMirror(repo.url))
@@ -3404,6 +3495,13 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
      *  the report says where it got to. */
     fun installAllPlugins(plugins: List<Cs3RepoPlugin>, kind: RepoKind, installedUrls: Set<String>) {
         installJob?.cancel()
+        if (kind == RepoKind.KOTATSU) {
+            // A Kotatsu repo holds the whole ~1200-entry parser index:
+            // installing it all at once is the exact flood 0.11.69 did (and
+            // 0.11.70 pruned for lagging the app into crashes). One by one.
+            setError("Install Kotatsu sources one by one — installing all ${plugins.size} at once is what lagged the app")
+            return
+        }
         val unit = when (kind) {
             RepoKind.HIKARI -> "extension"
             RepoKind.NUVIO -> "provider"
@@ -3455,7 +3553,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                                 RepoKind.LNREADER -> installLnReaderPlugin(p)
                                 RepoKind.SORA -> installScriptPlugin(p, RepoKind.SORA)
                                 RepoKind.ANYMEX -> installScriptPlugin(p, RepoKind.ANYMEX)
-                                RepoKind.KOTATSU -> Result.failure(IllegalStateException("Kotatsu sources install from the Kotatsu repos folder"))
+                                RepoKind.KOTATSU -> installKotatsuPlugin(p)
                             }
                         }
                     }.getOrNull()
@@ -3615,7 +3713,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                                 RepoKind.LNREADER -> installLnReaderPlugin(p)
                                 RepoKind.SORA -> installScriptPlugin(p, RepoKind.SORA)
                                 RepoKind.ANYMEX -> installScriptPlugin(p, RepoKind.ANYMEX)
-                                RepoKind.KOTATSU -> Result.failure(IllegalStateException("Kotatsu sources install from the Kotatsu repos folder"))
+                                RepoKind.KOTATSU -> installKotatsuPlugin(p)
                             }
                         }
                     }.getOrNull()
@@ -4032,7 +4130,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 RepoKind.LNREADER -> vm.installLnReaderPlugin(p)
                 RepoKind.SORA -> vm.installScriptPlugin(p, RepoKind.SORA)
                 RepoKind.ANYMEX -> vm.installScriptPlugin(p, RepoKind.ANYMEX)
-                RepoKind.KOTATSU -> Result.failure(IllegalStateException("Kotatsu sources install from the Kotatsu repos folder"))
+                RepoKind.KOTATSU -> vm.installKotatsuPlugin(p)
             }
             // The listing's own 18+ tag goes onto the rows that were just
             // created, so with the adult-content switch off an adult extension
@@ -4058,7 +4156,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 RepoKind.LNREADER -> vm.uninstallLnReaderPlugin(p.url)
                 RepoKind.SORA -> vm.uninstallSoraPlugin(p.url)
                  RepoKind.ANYMEX -> vm.uninstallAnymexPlugin(p.url)
-                RepoKind.KOTATSU -> 0
+                RepoKind.KOTATSU -> vm.uninstallKotatsuPlugin(p.url)
             }
         }
     }
@@ -4181,25 +4279,6 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             onTestDownload = { vm.testDownload(it) },
             onTestAll = { vm.testRepoInstalled(pluginsByRepo[openRepo.url] ?: emptyList()) },
         )
-        folder == SourceFolder.KOTATSU -> KotatsuFolderView(
-            providers = providers,
-            busy = busy,
-            busyMsg = busyMsg,
-            successMsg = successMsg,
-            errorMsg = errorMsg,
-            onBack = { backSourceFolder() },
-            onToggleProvider = { id, enabled -> scope.launch { vm.toggle(id, enabled) } },
-            onDeleteProvider = { id -> scope.launch { vm.remove(id) } },
-            onOpenSettings = { openProviderSettings(it) },
-            onInstall = { enumName ->
-                vm.runInstall("Installing Kotatsu source…") { vm.installKotatsuSource(enumName) }
-            },
-            onUninstall = { id ->
-                vm.runUninstallCounted("Removing Kotatsu source…", { "Removed Kotatsu source" }) {
-                    vm.uninstallKotatsuSource(id)
-                }
-            },
-        )
         folder != null -> SourceFolderView(
             folder = folder,
             repos = repos,
@@ -4231,6 +4310,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                     SourceFolder.ZANGETSU -> RepoKind.ZANGETSU
                     SourceFolder.LNREADER -> RepoKind.LNREADER
                     SourceFolder.SORA -> RepoKind.SORA
+                    SourceFolder.KOTATSU -> RepoKind.KOTATSU
                     SourceFolder.ANYMEX -> RepoKind.ANYMEX
                     SourceFolder.MANGAYOMI -> RepoKind.ANYMEX
                     SourceFolder.ANYMEX_HOME -> RepoKind.ANYMEX
@@ -4448,6 +4528,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
         val isLnReader = repoDialogKind == RepoKind.LNREADER
         val isSora = repoDialogKind == RepoKind.SORA
         val isAnymex = repoDialogKind == RepoKind.ANYMEX
+        val isKotatsu = repoDialogKind == RepoKind.KOTATSU
         AlertDialog(
             onDismissRequest = { showRepoDialog = false },
             title = {
@@ -4507,6 +4588,11 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     "(manga), anime_index.json (anime) or novel_index.json. " +
                                     "For example:\n" +
                                     "https://MiraiEnoki.github.io/anymex_extensions/anime_index.json"
+                            isKotatsu ->
+                                "Kotatsu sources ship inside the app — adding the " +
+                                    "repo files it so you can open it and install " +
+                                    "sources one by one. For example:\n" +
+                                    "https://github.com/KotatsuApp/kotatsu-parsers"
                             else ->
                                 "Paste a CloudStream-style repo URL (a repo.json). For example:\n" +
                                     "https://raw.githubusercontent.com/codegeasse1/codegeasse-cloudstream-repos/builds/repo.json"
@@ -4526,7 +4612,8 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 "akash, skyourge, rougegz. Aniyomi repos: aniyomiext " +
                                 "(the official Aniyomi extensions repo). Vega repos: vega " +
                                 "(Zenda-Cross's official Vega providers). Zangetsu repos: zangetsu (Spyou's official Zangetsu sources). LNReader repos: " +
-                                "lnreader (the official plugin index)."
+                                "lnreader (the official plugin index). Kotatsu repos: " +
+                                "kotatsu (the official parser index)."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -4546,6 +4633,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                         isLnReader -> "https://…/plugins.min.json"
                                         isSora -> "https://…/streamex.json"
                                         isAnymex -> "https://…/anime_index.json"
+                                        isKotatsu -> "kotatsu"
                                         else -> "https://…/repo.json"
                                     }
                                 )
@@ -5651,7 +5739,7 @@ private fun RepoBrowserView(
                         srcCard(AnymexA, tr("Anymex"), tr("Sora sources · Anymex extensions"), { onOpenFolder(SourceFolder.ANYMEX_HOME) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.MenuBook, tr("Kotatsu repos"), tr("Bundled parsers · install what you want"), { onOpenFolder(SourceFolder.KOTATSU) })
+                        srcCard(Icons.Filled.MenuBook, tr("Kotatsu repos"), tr("kotatsu-parsers · Kotatsu manga sources"), { onOpenFolder(SourceFolder.KOTATSU) })
                         srcCard(StremioDiamond, tr("Stremio addons"), tr("manifest.json · Stremio addons"), { onOpenFolder(SourceFolder.STREMIO) })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5747,7 +5835,7 @@ private fun RepoBrowserView(
                     SourceActionRow(
                         icon = Icons.Filled.MenuBook,
                         title = tr("Kotatsu repos"),
-                        subtitle = tr("Bundled parsers · install what you want"),
+                        subtitle = tr("kotatsu-parsers · Kotatsu manga sources"),
                         onClick = { onOpenFolder(SourceFolder.KOTATSU) }
                     )
                     SourceDivider()
@@ -7266,6 +7354,7 @@ private fun RepoCard(
                                     RepoKind.ZANGETSU -> "source"
                                     RepoKind.LNREADER -> "source"
                                     RepoKind.SORA -> "source"
+                                    RepoKind.KOTATSU -> "source"
                                     RepoKind.ANYMEX -> "extension"
                                     else -> "plugin"
                                 }
@@ -7623,6 +7712,15 @@ private fun PluginRow(
  * state is (URL spellings, not literals) — the Test button's target.
  */
 private fun installedProviderFor(plugin: Cs3RepoPlugin, providers: List<ContentProvider>): ContentProvider? {
+    // Bundled Kotatsu rows carry no source file (their parser ships in the
+    // app): match the installed row by its `kotatsu://` URL or provider id.
+    if (plugin.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME)) {
+        return providers.firstOrNull { p ->
+            p.config.url == plugin.url ||
+                p.config.id == com.hikari.app.kotatsu.KotatsuRegistry.PREFIX +
+                com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(plugin.url)
+        }
+    }
     val wanted = SourceUrls.matchKeys(plugin.url)
     return providers.firstOrNull { p ->
         val extra = p.config.extra ?: return@firstOrNull false
@@ -7676,6 +7774,15 @@ private fun repoPluginSettingsTarget(
     providers: List<ContentProvider>,
     cs3SettingsIds: Set<String>,
 ): ContentProvider? {
+    // Same bundled-row rule as [installedProviderFor]: a `kotatsu://` entry
+    // matches its installed row directly, never through file-URL keys.
+    if (plugin.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME)) {
+        return providers.firstOrNull { p ->
+            p.config.url == plugin.url ||
+                p.config.id == com.hikari.app.kotatsu.KotatsuRegistry.PREFIX +
+                com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(plugin.url)
+        }?.takeIf { hasSettingsScreen(it, cs3SettingsIds) }
+    }
     val wanted = SourceUrls.matchKeys(plugin.url)
     return providers.firstOrNull { p ->
         val extra = p.config.extra ?: return@firstOrNull false
@@ -7964,7 +8071,7 @@ private fun SourceFolderView(
         SourceFolder.ANYMEX_HOME -> "Anymex" to "Sora · Anymex"
         SourceFolder.STREMIO -> "Stremio addons" to "manifest.json · Stremio addons"
         SourceFolder.IPTV -> "IPTV playlists" to "M3U / M3U8 links and files · your channels"
-        SourceFolder.KOTATSU -> "Kotatsu repos" to "Bundled parsers · install what you want"
+        SourceFolder.KOTATSU -> "Kotatsu repos" to "kotatsu-parsers · Kotatsu manga sources"
     }
     val kindLabel = when (folder) {
         SourceFolder.CLOUDSTREAM -> "CloudStream"
@@ -8340,6 +8447,7 @@ private fun SourceFolderView(
                 SourceFolder.IPTV -> "Add IPTV playlist"
                 SourceFolder.SORA -> "Add Sora repo"
                 SourceFolder.LNREADER -> "Add LNReader repo"
+                SourceFolder.KOTATSU -> "Add Kotatsu repo"
                 SourceFolder.ANYMEX -> "Add Anymex repo"
                 SourceFolder.MANGAYOMI -> "Add Anymex repo"
                 SourceFolder.ANYMEX_HOME -> "Add Anymex / Sora repo"
@@ -8355,174 +8463,6 @@ private fun SourceFolderView(
         )
     }
 }
-
-/**
- * The Kotatsu repos folder: every bundled parser (the official kotatsu-parsers
- * library — the exact extraction code the Kotatsu app runs) with an Install /
- * Uninstall button, so sources are installed one-by-one instead of the 1200-row
- * auto-seed 0.11.69 did (which lagged the manga tab into crashes). Installed
- * rows ride the normal manga pipeline (catalogue, search, detail, chapters,
- * reader) through [com.hikari.app.manga.MangaProvider].
- */
-@Composable
-private fun KotatsuFolderView(
-    providers: List<ContentProvider>,
-    busy: Boolean,
-    busyMsg: String,
-    successMsg: String?,
-    errorMsg: String?,
-    onBack: () -> Unit,
-    onToggleProvider: (String, Boolean) -> Unit,
-    onDeleteProvider: (String) -> Unit,
-    onOpenSettings: (ContentProvider) -> Unit,
-    onInstall: (String) -> Unit,
-    onUninstall: (String) -> Unit,
-) {
-    val backFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        if (!com.hikari.app.tv.TvMode.isTv) return@LaunchedEffect
-        runCatching { kotlinx.coroutines.delay(120) }
-        runCatching { backFocus.requestFocus() }
-    }
-    var query by remember { mutableStateOf("") }
-    val installedIds = remember(providers) {
-        providers.map { it.config.id }.toSet()
-    }
-    val installedById = remember(providers) {
-        providers.associateBy { it.config.id }
-    }
-    val sources = remember {
-        com.hikari.app.kotatsu.KotatsuRegistry.allSources()
-            .filter { !it.isBroken }
-            .sortedBy { it.title.lowercase() }
-    }
-    val shown = remember(sources, query, installedIds) {
-        val q = query.trim().lowercase()
-        val list = if (q.isBlank()) sources
-        else sources.filter {
-            it.title.lowercase().contains(q) || it.name.lowercase().contains(q)
-        }
-        list.sortedBy { if (installedIds.contains(com.hikari.app.kotatsu.KotatsuRegistry.PREFIX + it.name)) 0 else 1 }
-    }
-    Column(Modifier.fillMaxSize()) {
-        if (com.hikari.app.tv.TvMode.current()) {
-            com.hikari.app.tv.TvScreenHeader(
-                title = tr("Kotatsu repos"),
-                subtitle = tr("Bundled parsers · install what you want"),
-            )
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .focusRequester(backFocus)
-                    .size(if (com.hikari.app.tv.TvMode.current()) 48.dp else 40.dp),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"))
-            }
-            Text(
-                I18n.t(if (installedIds.count { it.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PREFIX) } == 1) "%s source" else "%s sources")
-                    .replace("%s", installedIds.count { it.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PREFIX) }.toString()),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        HorizontalDivider()
-        if (busy) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(
-                busyMsg,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            )
-        }
-        successMsg?.let { msg ->
-            Text(
-                msg,
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-        errorMsg?.let { msg ->
-            Text(
-                msg,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-        GlassSearchField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = I18n.t("Search Kotatsu sources…"),
-            height = 46.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 8.dp),
-        )
-        LazyColumn(
-            state = com.hikari.app.ui.components.keptListState("extRepoAdd:KOTATSU"),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentPadding = PaddingValues(bottom = LocalTaskbarInset.current + 8.dp),
-        ) {
-            items(shown, key = { "kotatsu-" + it.name }) { src ->
-                val pid = com.hikari.app.kotatsu.KotatsuRegistry.PREFIX + src.name
-                val installed = installedById[pid]
-                GlassCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                ) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                src.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                src.name + " · " + src.contentType.name.lowercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (installed == null) {
-                            Button(onClick = { onInstall(src.name) }) {
-                                Text(tr("Install"))
-                            }
-                        } else {
-                            TextButton(onClick = { onUninstall(pid) }) {
-                                Text(tr("Uninstall"))
-                            }
-                            Switch(
-                                checked = installed.config.enabled,
-                                onCheckedChange = { onToggleProvider(pid, it) },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun SourcesOverviewView(
     repos: List<Cs3Repo>,

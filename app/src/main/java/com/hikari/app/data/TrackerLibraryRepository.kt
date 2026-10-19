@@ -3,6 +3,8 @@ package com.hikari.app.data
 import com.hikari.app.HikariApp
 import com.hikari.app.net.Http
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -67,13 +69,20 @@ object TrackerLibraryRepository {
         val who = listOf(user.takeIf { it.isNotBlank() }.orEmpty(), "me").distinct().filter { it.isNotBlank() }
         if (who.isEmpty()) return Result.failure(IllegalStateException("Trakt username is unavailable; reconnect Trakt."))
         val out = ArrayList<Shelf>()
-        val diag = ArrayList<String>()
 
-        var traktUnauthorized = false
-        // Every endpoint always reports (HTTP + raw + kept), even at zero —
-        // the old code only logged when raw > 0, so a fully-empty account and
-        // six failed requests looked identical in the log ("trakt shelves=0"
-        // with no reason). Failures answer null; empties answer an empty array.
+        // One wave now asks all endpoints at once (see below), so the shared
+        // state here is thread-safe: an atomic 401 flag and a synchronized
+        // diagnosis list. Every endpoint always reports (HTTP + raw + kept),
+        // even at zero — the old code only logged when raw > 0, so a
+        // fully-empty account and six failed requests looked identical in the
+        // log ("trakt shelves=0" with no reason). Failures answer null;
+        // empties answer an empty array.
+        //
+        // `extended=full,images` (not bare `full`): Trakt strips the `images`
+        // object without the images flag, which is exactly how a shelf of
+        // real rows ended up with blank clapperboard posters.
+        val traktUnauthorized = java.util.concurrent.atomic.AtomicBoolean(false)
+        val diag = java.util.Collections.synchronizedList(ArrayList<String>())
         suspend fun get(path: String, type: MediaType): List<MediaItem> {
             for (u in who) {
                 val r = runCatching {
@@ -83,7 +92,7 @@ object TrackerLibraryRepository {
                 }
                 r.use { res ->
                     if (res.code == 401) {
-                        traktUnauthorized = true
+                        traktUnauthorized.set(true)
                         diag += "$path: HTTP 401"
                         return@use
                     }
@@ -105,26 +114,57 @@ object TrackerLibraryRepository {
             return emptyList()
         }
 
-        val movies = get("/watchlist/movies?extended=full&page=1&limit=250", MediaType.MOVIE)
-        val shows = get("/watchlist/shows?extended=full&page=1&limit=250", MediaType.SERIES)
+        // Ten endpoints, one wave: the old code walked them one after
+        // another on a single worker (~6s in the log before the first shelf
+        // could draw). Same requests, same parsing — just concurrently.
+        val movies: List<MediaItem>
+        val shows: List<MediaItem>
+        val watchedMovies: List<MediaItem>
+        val historyMovies: List<MediaItem>
+        val watchedShows: List<MediaItem>
+        val historyShows: List<MediaItem>
+        val collectionMovies: List<MediaItem>
+        val collectionShows: List<MediaItem>
+        val favoriteMovies: List<MediaItem>
+        val favoriteShows: List<MediaItem>
+        kotlinx.coroutines.coroutineScope {
+            val wm = async { get("/watchlist/movies?extended=full,images&page=1&limit=250", MediaType.MOVIE) }
+            val ws = async { get("/watchlist/shows?extended=full,images&page=1&limit=250", MediaType.SERIES) }
+            val wmed = async { get("/watched/movies?extended=full,images&page=1&limit=250", MediaType.MOVIE) }
+            val hmed = async { get("/history/movies?extended=full,images&page=1&limit=250", MediaType.MOVIE) }
+            val wsh = async { get("/watched/shows?extended=full,images&page=1&limit=250", MediaType.SERIES) }
+            val hsh = async { get("/history/shows?extended=full,images&page=1&limit=250", MediaType.SERIES) }
+            val cm = async { get("/collection/movies?extended=full,images&page=1&limit=250", MediaType.MOVIE) }
+            val cs = async { get("/collection/shows?extended=full,images&page=1&limit=250", MediaType.SERIES) }
+            val fm = async { get("/favorites/movies?extended=full,images&page=1&limit=250", MediaType.MOVIE) }
+            val fs = async { get("/favorites/shows?extended=full,images&page=1&limit=250", MediaType.SERIES) }
+            movies = wm.await()
+            shows = ws.await()
+            watchedMovies = wmed.await()
+            historyMovies = hmed.await()
+            watchedShows = wsh.await()
+            historyShows = hsh.await()
+            collectionMovies = cm.await()
+            collectionShows = cs.await()
+            favoriteMovies = fm.await()
+            favoriteShows = fs.await()
+        }
         if (movies.isNotEmpty()) out += Shelf("trakt.watchlist.movies", "Trakt Watchlist · Movies", movies)
         if (shows.isNotEmpty()) out += Shelf("trakt.watchlist.shows", "Trakt Watchlist · Shows", shows)
         // Watched (all-time) AND history (recent plays): sync pushes to
         // history, so an account whose history lives there must show it even
         // when the watched roll-up is empty.
-        val hm = (get("/watched/movies?extended=full&page=1&limit=250", MediaType.MOVIE) +
-            get("/history/movies?extended=full&page=1&limit=250", MediaType.MOVIE)).distinctBy { it.uniqueId }
+        val hm = (watchedMovies + historyMovies).distinctBy { it.uniqueId }
         if (hm.isNotEmpty()) out += Shelf("trakt.history.movies", "Trakt History · Movies", hm)
-        val hs = (get("/watched/shows?extended=full&page=1&limit=250", MediaType.SERIES) +
-            get("/history/shows?extended=full&page=1&limit=250", MediaType.SERIES)).distinctBy { it.uniqueId }
+        val hs = (watchedShows + historyShows).distinctBy { it.uniqueId }
         if (hs.isNotEmpty()) out += Shelf("trakt.history.shows", "Trakt History · Shows", hs)
-        val cm = get("/collection/movies?extended=full&page=1&limit=250", MediaType.MOVIE).distinctBy { it.uniqueId }
+        val cm = collectionMovies.distinctBy { it.uniqueId }
         if (cm.isNotEmpty()) out += Shelf("trakt.collection.movies", "Trakt Collection · Movies", cm)
-        val cs = get("/collection/shows?extended=full&page=1&limit=250", MediaType.SERIES).distinctBy { it.uniqueId }
+        val cs = collectionShows.distinctBy { it.uniqueId }
         if (cs.isNotEmpty()) out += Shelf("trakt.collection.shows", "Trakt Collection · Shows", cs)
-        val fm = get("/favorites/movies?extended=full&page=1&limit=250", MediaType.MOVIE).distinctBy { it.uniqueId }
+        val fm = favoriteMovies.distinctBy { it.uniqueId }
         if (fm.isNotEmpty()) out += Shelf("trakt.favorites.movies", "Trakt Favorites · Movies", fm)
-        val fs = get("/favorites/shows?extended=full&page=1&limit=250", MediaType.SERIES).distinctBy { it.uniqueId }
+        val fs = favoriteShows.distinctBy { it.uniqueId }
         if (fs.isNotEmpty()) out += Shelf("trakt.favorites.shows", "Trakt Favorites · Shows", fs)
 
         val lists = runCatching {
@@ -141,7 +181,7 @@ object TrackerLibraryRepository {
             }
             if (slug.isBlank()) continue
             val response = runCatching {
-                Http.get("https://api.trakt.tv/users/${enc(who.first())}/lists/${enc(slug)}/items?extended=full&page=1&limit=1000", headers)
+                Http.get("https://api.trakt.tv/users/${enc(who.first())}/lists/${enc(slug)}/items?extended=full,images&page=1&limit=1000", headers)
             }.getOrNull() ?: continue
             if (!response.isSuccessful) continue
             val array = runCatching { response.use { JSONArray(it.body?.string().orEmpty()) } }.getOrNull() ?: continue
@@ -161,7 +201,8 @@ object TrackerLibraryRepository {
             }.distinctBy { it.uniqueId }
             if (items.isNotEmpty()) out += Shelf("trakt.list.$slug", list.optString("name", slug), items)
         }
-        if (out.isEmpty() && traktUnauthorized) return Result.failure(IllegalStateException("Trakt login expired (HTTP 401) — reconnect Trakt in Settings → Trackers."))
+        if (out.isNotEmpty()) enrichTraktPosters(out)
+        if (out.isEmpty() && traktUnauthorized.get()) return Result.failure(IllegalStateException("Trakt login expired (HTTP 401) — reconnect Trakt in Settings → Trackers."))
         if (out.isEmpty()) {
             // Not silent: the log + empty-state now say whether the account
             // is truly empty or every endpoint failed.
@@ -403,7 +444,16 @@ object TrackerLibraryRepository {
     private fun traktMedia(o: JSONObject, type: MediaType): MediaItem? {
         val title = o.optString("title").ifBlank { "Untitled" }
         val year = o.optInt("year", 0).takeIf { it > 0 }
-        val image = o.optJSONObject("images")?.optJSONObject("poster")?.optString("full")
+        // Trakt serves several sizes; take the sharpest one it sent. Anything
+        // here beats the blank clapperboard tile — and rows that still have
+        // nothing get a TMDB poster by id afterwards (see enrichTraktPosters).
+        val images = o.optJSONObject("images")
+        val poster = images?.optJSONObject("poster")
+        val image = listOf(
+            poster?.optString("full"),
+            poster?.optString("medium"),
+            poster?.optString("thumb"),
+        ).firstOrNull { !it.isNullOrBlank() && it != "null" }
         val ids = o.optJSONObject("ids")
         val tmdb = ids?.optInt("tmdb", 0) ?: 0
         val imdb = ids?.optString("imdb")?.takeIf { it.startsWith("tt") }
@@ -458,6 +508,65 @@ object TrackerLibraryRepository {
         if (p.isBlank() || p == "null") return null
         if (p.startsWith("http")) return p
         return "https://wsrv.nl/?url=https://simkl.in/posters/" + p + "_m.webp&q=90"
+    }
+
+    /** TMDB id → poster URL for rows Trakt left imageless. Process-wide: a
+     *  library reload must not re-ask for the same posters. Null values are
+     *  never stored (a miss this load may hit next load); [traktTmdbBare] tracks
+     *  ids TMDB has no poster for so they are not re-asked every load. */
+    private val traktTmdbPosters = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    private val traktTmdbBare = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+    )
+
+    /**
+     * Fills the posters Trakt itself did not send. Only rows WITH a TMDB id
+     * qualify — an exact id lookup, never a title search, so a wrong show's
+     * artwork can never land on a row. Bounded (80 lookups per load, all at
+     * once) and best-effort: a slow TMDB delays shelves, never fails them.
+     */
+    private suspend fun enrichTraktPosters(shelves: MutableList<Shelf>) {
+        val missing = shelves.flatMap { it.items }
+            .filter { it.posterUrl.isNullOrBlank() && it.providerId == "tmdb" }
+            .mapNotNull { item ->
+                val id = item.id.toIntOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+                if (traktTmdbPosters.containsKey(id) || traktTmdbBare.contains(id)) return@mapNotNull null
+                Triple(item, id, item.type == MediaType.MOVIE)
+            }
+            .distinctBy { it.second }
+            .take(80)
+        if (missing.isNotEmpty()) {
+            coroutineScope {
+                missing.map { (_, id, isMovie) ->
+                    async {
+                        val poster = runCatching { traktTmdbPoster(id, isMovie) }.getOrNull()
+                        if (poster != null) traktTmdbPosters[id] = poster
+                        else traktTmdbBare.add(id)
+                    }
+                }.forEach { runCatching { it.await() } }
+            }
+        }
+        if (traktTmdbPosters.isEmpty()) return
+        for (i in shelves.indices) {
+            val shelf = shelves[i]
+            var changed = false
+            val items = shelf.items.map { item ->
+                if (!item.posterUrl.isNullOrBlank() || item.providerId != "tmdb") return@map item
+                val poster = item.id.toIntOrNull()?.let { traktTmdbPosters[it] } ?: return@map item
+                changed = true
+                item.copy(posterUrl = poster)
+            }
+            if (changed) shelves[i] = shelf.copy(items = items)
+        }
+    }
+
+    private suspend fun traktTmdbPoster(tmdbId: Int, isMovie: Boolean): String? {
+        val obj = com.hikari.app.nuvio.TmdbResolver
+            .apiGet(if (isMovie) "/movie/$tmdbId" else "/tv/$tmdbId", emptyMap())
+            ?: return null
+        return obj.optString("poster_path").trim()
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?.let { "https://image.tmdb.org/t/p/w342$it" }
     }
 
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")

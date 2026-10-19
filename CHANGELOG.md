@@ -1,3 +1,13 @@
+## 0.11.71 (continuous build only)
+
+### Added
+- Kotatsu folder reads like every other engine's now (Extensions → Kotatsu repos): a repo card for the official parser index (seeded once, deletable) plus an "Add Kotatsu repo" button — paste a link (or the "kotatsu" short name) and it files as a repo, opening it lists every bundled source with search and per-source Install/Uninstall. "Install all" is refused on Kotatsu repos (installing ~1200 rows at once is the flood 0.11.69 did and 0.11.70 pruned)
+
+### Fixed
+- Trakt shelves showing titles with blank clapperboard posters: the library asked Trakt with bare extended=full, which strips the images object — all endpoints now ask extended=full,images, the sharpest served poster size wins (full → medium → thumb), and rows Trakt still leaves imageless get their poster from TMDB by exact id (never a title search)
+- Trakt library taking ~6s to draw (log-proven: eight endpoints walked one-by-one on a single worker): the same requests now run in one concurrent wave
+- Some extensions taking forever to load a catalogue: a hung site never failed, so the catalogue screen spun with it — every catalogue page read now has a 20s ceiling (timed-out hosts fall back to the last good/disk answer with a log line, no pointless re-ask), and the manga engine's own catalogue/search/chapter calls are bounded at 30s (WebView warm-up at 15s) with the honest "the site took too long" reason in the empty state instead of a block warning
+
 ## 0.11.70 (continuous build only)
 
 ### Added

@@ -1,9 +1,12 @@
 package com.hikari.app.kotatsu
 
 import com.hikari.app.data.AppStore
+import com.hikari.app.data.Cs3Repo
+import com.hikari.app.data.Cs3RepoPlugin
 import com.hikari.app.data.Logs
 import com.hikari.app.data.ProviderConfig
 import com.hikari.app.data.ProviderType
+import com.hikari.app.data.RepoKind
 import org.koitharu.kotatsu.parsers.MangaParser
 import org.koitharu.kotatsu.parsers.model.ContentType
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
@@ -27,6 +30,22 @@ object KotatsuRegistry {
 
     const val PREFIX = "manga|kotatsu|"
 
+    /** The upstream repository the bundled parsers are built from. Stored as
+     *  the default Kotatsu repo so the folder reads exactly like every other
+     *  engine's: a repo card (tap = its sources), an Add button for more. */
+    const val OFFICIAL_REPO_URL = "https://github.com/KotatsuApp/kotatsu-parsers"
+    const val OFFICIAL_REPO_NAME = "Kotatsu Parsers"
+    const val OFFICIAL_REPO_DESC = "Official Kotatsu manga sources (bundled parsers)"
+
+    /** Scheme every repo entry installs from — no download, the parser ships
+     *  inside the app (`kotatsu://MANGADEX`, …). */
+    const val PLUGIN_SCHEME = "kotatsu://"
+
+    fun pluginUrlOf(enumName: String): String = PLUGIN_SCHEME + enumName
+
+    fun enumNameOfPluginUrl(url: String): String? =
+        url.removePrefix(PLUGIN_SCHEME).trim().takeIf { it.isNotBlank() && url.startsWith(PLUGIN_SCHEME) }
+
     fun isKotatsuId(id: String): Boolean = id.startsWith(PREFIX)
 
     fun enumNameOf(id: String): String = id.removePrefix(PREFIX)
@@ -48,11 +67,47 @@ object KotatsuRegistry {
             id = PREFIX + src.name,
             name = src.title + " (Kotatsu)",
             type = ProviderType.MANGA,
-            url = "kotatsu://" + src.name,
+            url = pluginUrlOf(src.name),
             enabled = true,
             extra = "kotatsu",
             nsfw = (src.contentType == ContentType.HENTAI).takeIf { it },
         )
+    }
+
+    /**
+     * The repo listing: every usable bundled parser as one installable entry,
+     * so a Kotatsu repo opens exactly like an LNReader one — a card per
+     * source with Install/Uninstall. `contentKind = "manga"` keeps the whole
+     * list under the one heading instead of "Extensions".
+     */
+    fun repoPlugins(): List<Cs3RepoPlugin> =
+        allSources().filter { !it.isBroken }.map { src ->
+            Cs3RepoPlugin(
+                name = src.title,
+                description = src.locale.trim().uppercase().ifBlank { "??" } +
+                    " · " + src.contentType.name.lowercase(),
+                url = pluginUrlOf(src.name),
+                iconUrl = null,
+                version = 1,
+                contentKind = "manga",
+                pkg = "kotatsu." + src.name.lowercase(),
+                nsfw = src.contentType == ContentType.HENTAI,
+            )
+        }.sortedBy { it.name.lowercase() }
+
+    /** Registers the official repo once (seed path: a user who deletes it
+     *  keeps it deleted — see [AppStore.seedCs3Repo]). */
+    suspend fun seedDefaults(store: AppStore) {
+        runCatching {
+            store.seedCs3Repo(
+                Cs3Repo(
+                    OFFICIAL_REPO_URL,
+                    OFFICIAL_REPO_NAME,
+                    OFFICIAL_REPO_DESC,
+                    RepoKind.KOTATSU,
+                )
+            )
+        }
     }
 
     /**
@@ -75,10 +130,5 @@ object KotatsuRegistry {
             Logs.log("Kotatsu", "pruned ${seeded.size} auto-seeded sources (install what you want from Kotatsu repos)")
         }
         runCatching { store.markKotatsuPruned() }
-    }
-
-    @Deprecated("Auto-seed removed in 0.11.70 — sources install from the Kotatsu repos folder.")
-    suspend fun seedDefaults(store: AppStore) {
-        pruneSeeded(store)
     }
 }
