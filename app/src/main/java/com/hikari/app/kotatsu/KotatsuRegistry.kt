@@ -44,47 +44,41 @@ object KotatsuRegistry {
     }
 
     fun configFor(src: MangaParserSource): ProviderConfig {
-        val enabledDefault = src.name in ENABLED_BY_DEFAULT
         return ProviderConfig(
             id = PREFIX + src.name,
             name = src.title + " (Kotatsu)",
             type = ProviderType.MANGA,
             url = "kotatsu://" + src.name,
-            enabled = enabledDefault,
+            enabled = true,
             extra = "kotatsu",
             nsfw = (src.contentType == ContentType.HENTAI).takeIf { it },
         )
     }
 
     /**
-     * Sources enabled on a fresh seed: the big reliable English libraries.
-     * Everything else seeds installed-but-off, so the manga folder lists the
-     * full catalogue and any source is one toggle away.
+     * The auto-seed from 0.11.69 installed 1200+ provider rows at once, which
+     * lagged the manga tab into crashes (log-proven: 1502 installed providers,
+     * megabyte scroll keys). It is gone: Kotatsu sources are now installed
+     * one-by-one from the Extensions → Kotatsu repos folder, like every other
+     * engine. This one-time sweep removes the seeded rows; sources the user
+     * installed themselves from the folder afterwards are untouched (marked by
+     * [AppStore.kotatsuPruned]).
      */
-    private val ENABLED_BY_DEFAULT = setOf(
-        "MANGADEX", "MANGAPLUS", "COMICKFUN", "BATOTO", "MANGAFIRE", "MANGAPARK",
-        "ASURASCANS", "FLAMESCANS", "REAPERSCANS", "LEVIATANSCANS", "MANHWATOP",
-        "NINEMANGA", "MANGAREADERTO", "WEBTOONS", "MANGAFORESTIA", "TOONCLASH",
-    )
-
-    /**
-     * One-time seed: every working parser as its own provider row (broken ones
-     * skipped). A single store write — a thousand individual writes would
-     * churn DataStore and the provider observers a thousand times.
-     */
-    suspend fun seedDefaults(store: AppStore) {
+    suspend fun pruneSeeded(store: AppStore) {
+        if (runCatching { store.kotatsuPruned() }.getOrDefault(false)) return
         val have = runCatching { store.providers() }.getOrDefault(emptyList())
-        if (have.any { it.id.startsWith(PREFIX) }) return
-        val sources = allSources().filter { !it.isBroken }
-        if (sources.isEmpty()) {
-            Logs.log("Kotatsu", "seed skipped: parser list empty")
-            return
+        val seeded = have.filter { it.id.startsWith(PREFIX) }
+        if (seeded.isNotEmpty()) {
+            runCatching {
+                store.updateProviders { before -> before.filterNot { it.id.startsWith(PREFIX) } }
+            }
+            Logs.log("Kotatsu", "pruned ${seeded.size} auto-seeded sources (install what you want from Kotatsu repos)")
         }
-        val rows = sources.map(::configFor)
-        runCatching {
-            store.updateProviders { before -> before + rows.filter { r -> before.none { it.id == r.id } } }
-        }
-        val on = rows.count { it.enabled }
-        Logs.log("Kotatsu", "seeded ${rows.size} sources ($on on)")
+        runCatching { store.markKotatsuPruned() }
+    }
+
+    @Deprecated("Auto-seed removed in 0.11.70 — sources install from the Kotatsu repos folder.")
+    suspend fun seedDefaults(store: AppStore) {
+        pruneSeeded(store)
     }
 }

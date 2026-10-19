@@ -55,6 +55,24 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         const val CATALOG_POPULAR = "popular"
         const val CATALOG_LATEST = "latest"
         val lastOutcome = ConcurrentHashMap<String, String>()
+        /** True when the engine's last recorded outcome for [providerId] looks
+         *  like a bot wall (HTTP 403/429/503/Cloudflare) rather than a dead
+         *  site or a broken extension — the ONLY case where opening the site
+         *  in the WebView can help. Catalogue screens gate their "Verify site"
+         *  nudge/button on this, so a site that is simply down (521/404/500)
+         *  says so instead of sending the reader to pass a check that was
+         *  never the issue. No outcome yet (never tried) counts as true — the
+         *  button is a tool until a failure says otherwise. */
+        fun isWallOutcome(providerId: String): Boolean {
+            val s = lastOutcome[providerId] ?: return true
+            if (s.startsWith("✓") || s.startsWith("✔") || s.startsWith("○")) return false
+            return WALL_RE.containsMatchIn(s)
+        }
+        private val WALL_RE = Regex(
+            "\\b(403|429|503)\\b|cloudflare|just a moment|one moment, please|wsidchk" +
+                "|verify you are human|ddos",
+            RegexOption.IGNORE_CASE,
+        )
         // Same universal preview-set guard as the Anymex engine (see there):
         // a page set repeating verbatim for another chapter is previews.
         private val previewSets = ConcurrentHashMap<String, String>()
@@ -356,8 +374,7 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
             }
             lastOutcome[config.id] =
                 "✗ the site answered, but ${ref.name.lowercase()} came back with no titles " +
-                    "(page $page) — its markup may have changed, or the site wants a " +
-                    "browser first"
+                    "(page $page) — its markup may have changed"
         } else {
             lastOutcome[config.id] = "✓ ${mangas.size} title(s)"
         }

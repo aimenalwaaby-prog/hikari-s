@@ -57,12 +57,34 @@ object ZangetsuRuntime {
 
     private val fetchExecutor: ExecutorService = Executors.newFixedThreadPool(FETCH_THREADS)
 
+    /** In-memory cookie jar: LinkPress gates (thenaukriadda ?sid=) and the
+     *  multi-step landing forms behind them only work when the _lp_http POST
+     *  and every follow-up POST ride the same session — the same way the
+     *  Zangetsu reference app keeps cookies. Without this every POST looked
+     *  like a fresh visitor and the gate re-issued forever (log-proven: 12
+     *  harvested links re-asked packed, zero resolved). */
+    private val jar: okhttp3.CookieJar = object : okhttp3.CookieJar {
+        private val store = java.util.concurrent.ConcurrentHashMap<String, MutableList<okhttp3.Cookie>>()
+        override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
+            val now = System.currentTimeMillis()
+            return store[url.host].orEmpty().filter { it.expiresAt > now }
+        }
+        override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {
+            if (cookies.isEmpty()) return
+            val kept = (store[url.host].orEmpty() + cookies)
+                .groupBy { it.name }
+                .map { (_, v) -> v.maxByOrNull { it.expiresAt }!! }
+            store[url.host] = kept.toMutableList()
+        }
+    }
+
     private val client by lazy {
         OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .cookieJar(jar)
             .addInterceptor { chain -> CloudflareVerifier.intercept(chain) }
             .dns(DohDns)
             .build()

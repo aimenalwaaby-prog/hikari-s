@@ -183,6 +183,10 @@ class AppStore(private val ctx: Context) {
          *  run has been removed from this install. See
          *  [com.hikari.app.HikariApp] — the file that used to register it. */
         val YTS_CLEANED = booleanPreferencesKey("ytsCleaned")
+        /** True once the 0.11.69 Kotatsu auto-seed (1200+ rows) has been pruned
+         *  from this install. One-way, like [YTS_CLEANED]: sources installed
+         *  afterwards from the Kotatsu repos folder are never swept. */
+        val KOTATSU_PRUNED = booleanPreferencesKey("kotatsuPruned")
         val DOWNLOAD_CONCURRENCY = intPreferencesKey("downloadConcurrency")
         val SLOW_CONNECTION = booleanPreferencesKey("slowConnection")
 
@@ -4531,6 +4535,15 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun markYtsCleaned() {
         write("YTS_CLEANED") { it[K.YTS_CLEANED] = true }
+    }
+
+    /** True once the 0.11.69 Kotatsu auto-seed has been pruned (see
+     *  [com.hikari.app.kotatsu.KotatsuRegistry.pruneSeeded]). One-way. */
+    suspend fun kotatsuPruned(): Boolean =
+        store.data.map { it[K.KOTATSU_PRUNED] ?: false }.distinctUntilChanged().flowOn(Dispatchers.Default).first()
+
+    suspend fun markKotatsuPruned() {
+        write("KOTATSU_PRUNED") { it[K.KOTATSU_PRUNED] = true }
     }
 
     fun favoritesFlow(): Flow<List<MediaItem>> =

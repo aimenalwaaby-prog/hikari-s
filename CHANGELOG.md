@@ -1,3 +1,14 @@
+## 0.11.70 (continuous build only)
+
+### Added
+- Kotatsu repos folder (Extensions → Add a source → Kotatsu repos): every bundled Kotatsu parser (the official kotatsu-parsers extraction code) listed with search and per-source Install/Uninstall, riding the normal manga pipeline (catalogue, search, detail, chapters, reader) once installed
+
+### Fixed
+- Trakt catalogue still empty while sync history lands (log-proven: six endpoints all silent, shelves=0 with no reason): the library now also reads the recent-history and favorites endpoints, falls back to Trakt's own "me" alias when the stored username is stale, resolves season/episode list rows to their show, keeps id-less rows as virtual tracker rows even when Trakt sent no ids object at all, and always logs every endpoint's HTTP code plus raw-vs-kept counts — an empty account now says which endpoints were empty vs failed instead of silence
+- Zangetsu titles still answering "no playable links resolved" (log-proven on Evil Dead Burn: 12 harvested links re-asked packed, zero resolved): the runtime never kept cookies, so every LinkPress gate POST looked like a fresh visitor and the gate re-issued forever — the Zangetsu client now keeps a session cookie jar exactly like the reference app, and the UHD Movies bypass walks every landing form behind the gate in turn until a ticket or driveseed page appears (v1-patched installs upgrade to v2 in place)
+- Manga tab lagging/crashing under 1200+ auto-seeded Kotatsu rows (log-proven: 1502 installed providers, megabyte scroll keys): the auto-seed is gone — existing installs get the seeded rows pruned once (sources installed afterwards from the folder are never swept), and nothing auto-installs again
+- Catalogue pages crying "verify in the WebView" when the site is simply down (log-proven: MangaRead.co HTTP 521 → Verify prompt): the Verify button, header globe and Cloudflare wording now appear only when the failure actually looks like a bot wall (403/429/503/Cloudflare) — dead sites say they are down with the engine's real reason underneath, and empty lists no longer suggest a browser pass
+
 ## 0.11.69 (continuous build only)
 
 ### Added

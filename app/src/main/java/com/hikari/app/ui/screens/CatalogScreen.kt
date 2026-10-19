@@ -105,6 +105,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** A wall's own words (see verifyWanted): only these offer the WebView. */
+private val WALL_HINT = Regex(
+    "\\b(403|429|503)\\b|cloudflare|just a moment|one moment, please|wsidchk" +
+        "|verify you are human|ddos",
+    RegexOption.IGNORE_CASE,
+)
+
 class CatalogViewModel(
     app: Application,
     private val providerId: String,
@@ -554,6 +561,21 @@ fun CatalogScreen(
     val hikari = app as HikariApp
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // "Verify site" is only offered when the failure looks like a bot wall
+    // (403/429/503/Cloudflare) — the only case where passing a check in the
+    // WebView can help. A site that is simply down (521/404/500) or an
+    // extension that is broken says so in the empty state instead of sending
+    // the reader to a check that was never the issue. No outcome yet (still
+    // trying) keeps the button — it is a tool until a failure says otherwise.
+    val verifyWanted = remember(providerId, catalogReason) {
+        val prov = hikari.providers.byId(providerId)
+        if (prov?.config?.type == ProviderType.MANGA) {
+            com.hikari.app.manga.MangaProvider.isWallOutcome(providerId)
+        } else {
+            val r = catalogReason
+            r == null || WALL_HINT.containsMatchIn(r)
+        }
+    }
     // A verification WebView earns a cf_clearance cookie for the site. Coming
     // back from it the grid MUST re-ask the source: the page that answered
     // "nothing here" a moment ago answers properly now, and leaving the old
@@ -685,7 +707,9 @@ fun CatalogScreen(
             // challenge until a browser has passed it, and no extension can open
             // a browser for itself. Without this button the ONLY way through was
             // Home's globe, which does not exist for a manga engine's own page.
-            if (searchable) {
+            // Offered only when the failure looks like a wall (see verifyWanted):
+            // a dead site must say it is down, not point at a check.
+            if (searchable && verifyWanted) {
                 IconButton(onClick = openVerify) {
                     Icon(
                         Icons.Filled.Public,
@@ -775,19 +799,21 @@ fun CatalogScreen(
         } else if (items.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 // A search that matched nothing and a site that answered nothing
-                // are two different problems, and the second one has a fix the
-                // user can apply (the verification WebView) — so the empty state
-                // says which one it is and offers that button.
+                // are two different problems, and only one of them has a fix
+                // the user can apply (the verification WebView) — so the empty
+                // state says which one it is and offers that button only for a
+                // wall (see verifyWanted). A dead site names itself instead.
                 EmptyState(
                     title = if (appliedQuery.isNotBlank()) tr("No matches")
                     else tr("Nothing here right now"),
                     subtitle = if (appliedQuery.isNotBlank())
                         if (iptvShelfSearch) tr("No channels here match that search.")
                         else I18n.t("This engine has no \"%s\" — it may also be blocking Hikari.").replace("%s", appliedQuery)
-                    else tr("The site may be blocking or down.") +
-                        if (searchable) " " + tr("If the site shows a Cloudflare check, open it and pass it once.") else "",
-                    actionLabel = if (searchable) tr("Verify site") else null,
-                    action = if (searchable) openVerify else null,
+                    else if (searchable && verifyWanted) tr("The site may be blocking or down.") +
+                        " " + tr("If the site shows a Cloudflare check, open it and pass it once.")
+                    else tr("The site answered with an error — see below."),
+                    actionLabel = if (searchable && verifyWanted) tr("Verify site") else null,
+                    action = if (searchable && verifyWanted) openVerify else null,
                     // What the engine actually said, when it said anything —
                     // see CatalogViewModel.reason. Without it a source that
                     // fails to LINK (an OkHttp class it needs missing from the

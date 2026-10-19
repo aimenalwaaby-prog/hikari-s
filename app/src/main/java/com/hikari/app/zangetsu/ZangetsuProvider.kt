@@ -338,17 +338,21 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
     // ---- helpers ----
 
     /** Marker the uhdmovies auto-patch leaves in provider.js (idempotent). */
-    private val uhdNaukriMarker = "thenaukriadda-bypass-v1"
+    private val uhdNaukriMarker = "thenaukriadda-bypass-v2"
 
     /**
      * uhdmovies moved its maxbutton targets to `en.thenaukriadda.in/?sid=…`
-     * (LinkPress `_lp_http` gate) while the shipped 1.0.3 script still only
-     * resolves hrefli/unblockedgames gates: it GETs the new gate, finds no
-     * driveseed buttons, and every title ends as "no playable links resolved"
-     * (log-proven on Bad Apples / Spider-Man). The upstream repo is still on
-     * 1.0.3, so the installed file is patched in place on first use — POST the
-     * gate once, then run the stock landing-form flow on the returned stage.
-     * Skipped (with a log line) when the file already moved on.
+     * (LinkPress `_lp_http` gate) while the shipped 1.0.3 script only resolves
+     * hrefli/unblockedgames gates: the new gate was GET-only through the stock
+     * chain, so every title ended as "no playable links resolved" (log-proven
+     * on Bad Apples / Spider-Man / Evil Dead Burn — 12 harvested links
+     * re-asked packed, zero resolved). The upstream repo is still on 1.0.3, so
+     * the installed file is patched in place on first use: the gate is POSTed
+     * once, then every landing form behind it is POSTed in turn (the runtime
+     * now keeps cookies like the reference app, so the session survives the
+     * walk) until a ?go= ticket or driveseed page appears for _resolveOne to
+     * finish. Skipped (with a log line) when the file already moved on;
+     * v1-patched files are upgraded to v2 in place.
      */
     private fun ensureUhdNaukriPatch() {
         if (sourceId != "uhdmovies") return
@@ -357,6 +361,12 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
             if (!f.isFile) return
             var js = f.readText()
             if (js.contains(uhdNaukriMarker)) return
+            if (js.contains("thenaukriadda-bypass-v1")) {
+                val v1start = js.indexOf("// thenaukriadda-bypass-v1:")
+                val v1end = js.indexOf("function _resolveOne(link) {")
+                if (v1start >= 0 && v1end > v1start) js = js.removeRange(v1start, v1end)
+                js = js.replace("thenaukriadda-bypass-v1", uhdNaukriMarker)
+            }
             val oldIsLink =
                 "/unblockedgames|hrefli|href\\.li|driveseed|driveleech|drive\\.|video-seed|video-leech|gdflix|gdtot|filepress|\\?go=|\\/go\\b|maxbutton/i"
             val newIsLink =
@@ -365,8 +375,7 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
                 "var p = /unblockedgames|hrefli|href\\.li|\\?go=|\\/go\\b/.test(l) ? _bypassHrefli(link) : Promise.resolve(link);"
             val newRoute =
                 "var p = /thenaukriadda|\\?sid=|&sid=/.test(l) ? _bypassNaukri(link) : (/unblockedgames|hrefli|href\\.li|\\?go=|\\/go\\b/.test(l) ? _bypassHrefli(link) : Promise.resolve(link));"
-            if (!js.contains(oldIsLink) || !js.contains(oldRoute) ||
-                !js.contains("function _resolveOne(link) {")
+            if (!js.contains("function _resolveOne(link) {")
             ) {
                 com.hikari.app.data.Logs.log(
                     "Zangetsu",
@@ -374,8 +383,14 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
                 )
                 return
             }
-            js = js.replace(oldIsLink, newIsLink)
-            js = js.replace(oldRoute, newRoute)
+            if (js.contains(oldIsLink)) js = js.replace(oldIsLink, newIsLink)
+            if (js.contains(oldRoute)) js = js.replace(oldRoute, newRoute)
+            if (js.contains("function _bypassNaukri(")) {
+                val v1s = js.indexOf("function _naukriSid(")
+                    .takeIf { it >= 0 } ?: js.indexOf("function _bypassNaukri(")
+                val v1e = js.indexOf("function _resolveOne(link) {")
+                if (v1s >= 0 && v1e > v1s) js = js.removeRange(v1s, v1e)
+            }
             js = js.replace("function _resolveOne(link) {", uhdNaukriJs + "\nfunction _resolveOne(link) {")
             if (!js.contains(uhdNaukriMarker)) return
             f.writeText(js)
@@ -389,54 +404,80 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     private val uhdNaukriJs = """
-// thenaukriadda-bypass-v1: uhdmovies moved its maxbutton targets to
-// en.thenaukriadda.in/?sid=... (LinkPress _lp_http gate). The stock 1.0.3 chain
-// GETs the gate and finds no driveseed buttons, so every title ends as
-// "no playable links resolved". POST the gate once, then run the stock
-// landing-form flow on the returned stage and hand a driveseed-style URL back
-// for _resolveOne to finish.
+// thenaukriadda-bypass-v2: uhdmovies moved its maxbutton targets to
+// en.thenaukriadda.in/?sid=... (LinkPress _lp_http gate). POST the gate once,
+// then walk every landing form behind it (cookies persist in the runtime like
+// the reference app) until a ?go= ticket or a driveseed/driveleech page shows
+// up for _resolveOne to finish.
+function _naukriSid(h) {
+  var m = h.match(/name=["']_lp_http["'][^>]*value=["']([^"']+)["']/i) ||
+    h.match(/value=["']([^"']+)["'][^>]*name=["']_lp_http["']/i);
+  return (m && m[1]) || '';
+}
+function _naukriAction(h, fallback) {
+  var m = h.match(/<form[^>]+id=["']lp-land["'][^>]*action=["']([^"']+)["']/i) ||
+    h.match(/<form[^>]+action=["']([^"']+)["'][^>]*id=["']lp-land["']/i) ||
+    h.match(/<form[^>]+action=["']([^"']+)["']/i);
+  var a = (m && m[1]) || '';
+  if (!a) return fallback;
+  if (/^https?:/i.test(a)) return a;
+  return absUrl(a, fallback);
+}
+function _naukriWalk(html, ref, left) {
+  if (!html) return Promise.resolve('');
+  var go = (html.match(/\?go=([^"'&\s]+)/) || [])[1] || '';
+  if (go) return Promise.resolve({ go: go, ref: ref });
+  var dl = (html.match(/https?:\/\/[^\s"'<>]*drive(?:seed|leech)[^\s"'<>]*/i) || [])[0] || '';
+  if (dl) return Promise.resolve({ drive: dl });
+  if (left <= 0) return Promise.resolve('');
+  var f = _form(html);
+  var has = (f.action && true) || (f.data && Object.keys(f.data).length > 0);
+  if (!has) {
+    var go0 = (html.match(/\?go=([^"'&\s]+)/) || [])[0] || '';
+    if (go0) return Promise.resolve({ rawGo: go0, ref: ref });
+    var dl0 = (html.match(/https?:\/\/[^\s"'<>]*drive(?:seed|leech)[^\s"'<>]*/i) || [])[0] || '';
+    if (dl0) return Promise.resolve({ drive: dl0 });
+    return Promise.resolve('');
+  }
+  var host = (ref.match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
+  var tgt = (f.action && absUrl(f.action, host)) || ref;
+  return _postForm(tgt, f.data, ref).then(function (h2) {
+    if (!h2) return '';
+    return _naukriWalk(h2, tgt, left - 1);
+  });
+}
 function _bypassNaukri(url) {
   var host = (String(url).match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
-  return _get(url).then(function(h1) {
-    var sid = ((h1.match(/name=["']_lp_http["'][^>]*value=["']([^"']+)["']/i) ||
-      h1.match(/value=["']([^"']+)["'][^>]*name=["']_lp_http["']/i)) || [])[1] || '';
+  return _get(url).then(function (h1) {
+    var sid = _naukriSid(h1);
     if (!sid) return '';
-    var action = ((h1.match(/<form[^>]+id=["']lp-land["'][^>]*action=["']([^"']+)["']/i) ||
-      h1.match(/<form[^>]+action=["']([^"']+)["'][^>]*id=["']lp-land["']/i)) || [])[1] || url;
-    var target = /^https?:/i.test(action) ? action : absUrl(action, host);
-    return _postForm(target, { _lp_http: sid }, url).then(function(h2) {
+    var target = _naukriAction(h1, url);
+    return _postForm(target, { _lp_http: sid }, url).then(function (h2) {
       if (!h2) return '';
-      var f1 = _form(h2);
-      var hasF1 = (f1.action && true) || (f1.data && Object.keys(f1.data).length > 0);
-      if (!hasF1) {
-        var go0 = (h2.match(/\?go=([^"'&\s]+)/) || [])[0] || '';
-        if (go0) return absUrl(go0, host);
-        var dl0 = (h2.match(/https?:\/\/[^\s"'<>]*drive(?:seed|leech)[^\s"'<>]*/i) || [])[0] || '';
-        if (dl0) return dl0;
-        return '';
-      }
-      return _postForm(absUrl(f1.action, host) || target, f1.data, target).then(function(h3a) {
-        var f2 = _form(h3a);
-        return _postForm(absUrl(f2.action, host) || target, f2.data, target).then(function(h3) {
-          var sk = (h3.match(/\?go=([^"'&\s]+)/) || [])[1] || '';
-          if (!sk) return '';
-          var wp = f2.data['_wp_http2'] || f1.data['_wp_http2'] || '';
-          return fetch(host + '?go=' + sk, { headers: {
-            'User-Agent': UA, 'Referer': target, 'Cookie': sk + '=' + wp
-          } }).then(function(r) {
-            var meta = (r.body || '').match(/http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)["']/i);
-            var driveUrl = meta ? meta[1] : '';
-            if (!driveUrl) return '';
-            return _get(driveUrl).then(function(t) {
-              var path = (t.match(/replace\(["']([^"']+)["']\)/) || [])[1] || '';
-              if (!path || path === '/404') return '';
-              return absUrl(path, (driveUrl.match(/^(https?:\/\/[^/]+)/) || [])[1] || host);
-            });
+      return _naukriWalk(h2, target, 4).then(function (w) {
+        if (!w) return '';
+        if (typeof w === 'string') return w;
+        if (w.drive) return w.drive;
+        var sk = w.go || '';
+        var ref = w.ref || target;
+        if (!sk && w.rawGo) return absUrl(w.rawGo, host);
+        if (!sk) return '';
+        var host2 = (ref.match(/^(https?:\/\/[^/]+)/) || [])[1] || host;
+        return fetch(host2 + '?go=' + sk, { headers: {
+          'User-Agent': UA, 'Referer': ref
+        } }).then(function (r) {
+          var meta = (r.body || '').match(/http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)["']/i);
+          var driveUrl = meta ? meta[1] : '';
+          if (!driveUrl) return '';
+          return _get(driveUrl).then(function (t) {
+            var path = (t.match(/replace\(["']([^"']+)["']\)/) || [])[1] || '';
+            if (!path || path === '/404') return '';
+            return absUrl(path, (driveUrl.match(/^(https?:\/\/[^/]+)/) || [])[1] || host2);
           });
         });
       });
     });
-  }).catch(function() { return ''; });
+  }).catch(function () { return ''; });
 }
 """.trimIndent()
 
