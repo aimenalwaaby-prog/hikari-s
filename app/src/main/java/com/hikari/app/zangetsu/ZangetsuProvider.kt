@@ -196,6 +196,7 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
     override suspend fun getEpisodes(item: MediaItem): List<Episode>? =
         withContext(Dispatchers.IO) {
             if (item.id.isBlank()) return@withContext null
+            ensureUhdNaukriPatch()
             val payload = ZangetsuRuntime.call(dir, sourceId, "getEpisodes", "[${JSONObject.quote(item.id)}, {}]")
             val data = dataOf(payload) as? JSONArray
             val list = buildList {
@@ -246,24 +247,29 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
                 streamErrors[config.id] = "Nothing to play (empty link)."
                 return@withContext emptyList()
             }
+            ensureUhdNaukriPatch()
             var payload = ZangetsuRuntime.call(dir, sourceId, "getVideoSources", "[${JSONObject.quote(epUrl)}]")
             var data = dataOf(payload) as? JSONArray
-            if ((data == null || data.length() == 0) && !isPackedId(epUrl) &&
-                item.id.trim().startsWith("http")
-            ) {
+            if ((data == null || data.length() == 0) && item.id.trim().startsWith("http")) {
                 // The bare detail URL reached a JS unpacker (stale or missing
-                // episode): harvest the page's hub links and re-ask packed,
-                // then fall back to direct media files on the same page.
+                // episode) — or a PACKED id answered empty because the page's
+                // hub links drifted past the installed script's selectors
+                // (uhdmovies' thenaukriadda ?sid= move). Harvest the page's hub
+                // links and re-ask packed when the set is new, then fall back
+                // to direct media files on the same page.
                 val hrefs = harvestHubLinks(item.id.trim())
                 val scheme = PACK_SCHEMES[sourceId]
                 if (hrefs.isNotEmpty() && scheme != null) {
-                    epUrl = scheme + java.net.URLEncoder.encode(JSONArray(hrefs).toString(), "UTF-8")
-                    com.hikari.app.data.Logs.log(
-                        "Zangetsu",
-                        "$sourceId getVideoSources: re-asking packed with ${hrefs.size} harvested links",
-                    )
-                    payload = ZangetsuRuntime.call(dir, sourceId, "getVideoSources", "[${JSONObject.quote(epUrl)}]")
-                    data = dataOf(payload) as? JSONArray
+                    val repacked = scheme + java.net.URLEncoder.encode(JSONArray(hrefs).toString(), "UTF-8")
+                    if (repacked != epUrl) {
+                        epUrl = repacked
+                        com.hikari.app.data.Logs.log(
+                            "Zangetsu",
+                            "$sourceId getVideoSources: re-asking packed with ${hrefs.size} harvested links",
+                        )
+                        payload = ZangetsuRuntime.call(dir, sourceId, "getVideoSources", "[${JSONObject.quote(epUrl)}]")
+                        data = dataOf(payload) as? JSONArray
+                    }
                 }
                 if (data == null || data.length() == 0) {
                     val direct = harvestDirectMedia(item.id.trim())
@@ -330,6 +336,109 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
         }
 
     // ---- helpers ----
+
+    /** Marker the uhdmovies auto-patch leaves in provider.js (idempotent). */
+    private val uhdNaukriMarker = "thenaukriadda-bypass-v1"
+
+    /**
+     * uhdmovies moved its maxbutton targets to `en.thenaukriadda.in/?sid=…`
+     * (LinkPress `_lp_http` gate) while the shipped 1.0.3 script still only
+     * resolves hrefli/unblockedgames gates: it GETs the new gate, finds no
+     * driveseed buttons, and every title ends as "no playable links resolved"
+     * (log-proven on Bad Apples / Spider-Man). The upstream repo is still on
+     * 1.0.3, so the installed file is patched in place on first use — POST the
+     * gate once, then run the stock landing-form flow on the returned stage.
+     * Skipped (with a log line) when the file already moved on.
+     */
+    private fun ensureUhdNaukriPatch() {
+        if (sourceId != "uhdmovies") return
+        try {
+            val f = File(dir, "provider.js")
+            if (!f.isFile) return
+            var js = f.readText()
+            if (js.contains(uhdNaukriMarker)) return
+            val oldIsLink =
+                "/unblockedgames|hrefli|href\\.li|driveseed|driveleech|drive\\.|video-seed|video-leech|gdflix|gdtot|filepress|\\?go=|\\/go\\b|maxbutton/i"
+            val newIsLink =
+                "/unblockedgames|hrefli|href\\.li|driveseed|driveleech|drive\\.|video-seed|video-leech|gdflix|gdtot|filepress|\\?go=|\\/go\\b|maxbutton|thenaukriadda|\\?sid=|&sid=/i"
+            val oldRoute =
+                "var p = /unblockedgames|hrefli|href\\.li|\\?go=|\\/go\\b/.test(l) ? _bypassHrefli(link) : Promise.resolve(link);"
+            val newRoute =
+                "var p = /thenaukriadda|\\?sid=|&sid=/.test(l) ? _bypassNaukri(link) : (/unblockedgames|hrefli|href\\.li|\\?go=|\\/go\\b/.test(l) ? _bypassHrefli(link) : Promise.resolve(link));"
+            if (!js.contains(oldIsLink) || !js.contains(oldRoute) ||
+                !js.contains("function _resolveOne(link) {")
+            ) {
+                com.hikari.app.data.Logs.log(
+                    "Zangetsu",
+                    "uhdmovies patch skipped: selectors moved upstream",
+                )
+                return
+            }
+            js = js.replace(oldIsLink, newIsLink)
+            js = js.replace(oldRoute, newRoute)
+            js = js.replace("function _resolveOne(link) {", uhdNaukriJs + "\nfunction _resolveOne(link) {")
+            if (!js.contains(uhdNaukriMarker)) return
+            f.writeText(js)
+            com.hikari.app.data.Logs.log(
+                "Zangetsu",
+                "uhdmovies provider patched for thenaukriadda (?sid=) links",
+            )
+        } catch (t: Throwable) {
+            com.hikari.app.data.Logs.log("Zangetsu", "uhdmovies patch skipped: ${t.message}")
+        }
+    }
+
+    private val uhdNaukriJs = """
+// thenaukriadda-bypass-v1: uhdmovies moved its maxbutton targets to
+// en.thenaukriadda.in/?sid=... (LinkPress _lp_http gate). The stock 1.0.3 chain
+// GETs the gate and finds no driveseed buttons, so every title ends as
+// "no playable links resolved". POST the gate once, then run the stock
+// landing-form flow on the returned stage and hand a driveseed-style URL back
+// for _resolveOne to finish.
+function _bypassNaukri(url) {
+  var host = (String(url).match(/^(https?:\/\/[^/]+)/) || [])[1] || '';
+  return _get(url).then(function(h1) {
+    var sid = ((h1.match(/name=["']_lp_http["'][^>]*value=["']([^"']+)["']/i) ||
+      h1.match(/value=["']([^"']+)["'][^>]*name=["']_lp_http["']/i)) || [])[1] || '';
+    if (!sid) return '';
+    var action = ((h1.match(/<form[^>]+id=["']lp-land["'][^>]*action=["']([^"']+)["']/i) ||
+      h1.match(/<form[^>]+action=["']([^"']+)["'][^>]*id=["']lp-land["']/i)) || [])[1] || url;
+    var target = /^https?:/i.test(action) ? action : absUrl(action, host);
+    return _postForm(target, { _lp_http: sid }, url).then(function(h2) {
+      if (!h2) return '';
+      var f1 = _form(h2);
+      var hasF1 = (f1.action && true) || (f1.data && Object.keys(f1.data).length > 0);
+      if (!hasF1) {
+        var go0 = (h2.match(/\?go=([^"'&\s]+)/) || [])[0] || '';
+        if (go0) return absUrl(go0, host);
+        var dl0 = (h2.match(/https?:\/\/[^\s"'<>]*drive(?:seed|leech)[^\s"'<>]*/i) || [])[0] || '';
+        if (dl0) return dl0;
+        return '';
+      }
+      return _postForm(absUrl(f1.action, host) || target, f1.data, target).then(function(h3a) {
+        var f2 = _form(h3a);
+        return _postForm(absUrl(f2.action, host) || target, f2.data, target).then(function(h3) {
+          var sk = (h3.match(/\?go=([^"'&\s]+)/) || [])[1] || '';
+          if (!sk) return '';
+          var wp = f2.data['_wp_http2'] || f1.data['_wp_http2'] || '';
+          return fetch(host + '?go=' + sk, { headers: {
+            'User-Agent': UA, 'Referer': target, 'Cookie': sk + '=' + wp
+          } }).then(function(r) {
+            var meta = (r.body || '').match(/http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)["']/i);
+            var driveUrl = meta ? meta[1] : '';
+            if (!driveUrl) return '';
+            return _get(driveUrl).then(function(t) {
+              var path = (t.match(/replace\(["']([^"']+)["']\)/) || [])[1] || '';
+              if (!path || path === '/404') return '';
+              return absUrl(path, (driveUrl.match(/^(https?:\/\/[^/]+)/) || [])[1] || host);
+            });
+          });
+        });
+      });
+    });
+  }).catch(function() { return ''; });
+}
+""".trimIndent()
 
     /** True for a provider-packed episode id (`4khd://…`, `uhd://…`,
      *  `anikoto://…`) as opposed to a bare http(s) page URL. */
@@ -447,6 +556,7 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
         return h.contains("hubcloud") || h.contains("hubdrive") || h.contains("hblinks") ||
             h.contains("hubcdn") || h.contains("hubstream") || h.contains("hdstream") ||
             h.contains("greenmotors") || h.contains("pixeldra") || h.contains("gadgets") ||
+            h.contains("thenaukriadda") || h.contains("?sid=") || h.contains("&sid=") ||
             h.contains("?id=") || h.contains("&id=") || h.contains("/redirect") ||
             h.contains("/links") || h.contains("maxbutton") || h.contains("hrefli") ||
             h.contains("vcloud") || h.contains("gdflix") || h.contains("driveseed") ||

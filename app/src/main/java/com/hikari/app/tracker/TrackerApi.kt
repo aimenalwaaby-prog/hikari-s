@@ -973,11 +973,18 @@ object TrackerApi {
         if (out.size < 7) {
             for (a in runCatching { com.hikari.app.data.AnimeMetadataRepository.aliasesFor(t) }.getOrDefault(emptySet())) {
                 val form = a.trim()
-                if (form.isNotBlank() && out.none { it.equals(form, true) }) out.add(form)
+                if (form.isNotBlank() && !isNullWord(form) && out.none { it.equals(form, true) }) out.add(form)
                 if (out.size >= 7) break
             }
         }
-        return out
+        return out.filter { it.isNotBlank() && !isNullWord(it) }
+    }
+
+    /** org.json renders JSON null as the literal "null" (see
+     *  AnimeMetadataRepository): never send that word to a tracker. */
+    private fun isNullWord(s: String): Boolean {
+        val t = s.trim().lowercase()
+        return t == "null" || t == "undefined" || t == "none"
     }
 
     private suspend fun graphql(token: String?, query: String, variables: JSONObject? = null): Reply {
@@ -1709,7 +1716,7 @@ object TrackerApi {
                     // Same multi-spelling scoring as Simkl above: a Spanish
                     // title against the English entry must still match.
                     val traktAlt = buildList {
-                        node.optString("original_title").takeIf { it.isNotBlank() }?.let { add(it) }
+                        node.optString("original_title").takeIf { it.isNotBlank() && !isNullWord(it) }?.let { add(it) }
                         node.optJSONArray("aliases")?.let { arr ->
                             for (a in 0 until arr.length()) {
                                 val entry = arr.opt(a)
@@ -1718,7 +1725,7 @@ object TrackerApi {
                                     is JSONObject -> entry.optString("title")
                                     else -> ""
                                 }
-                                text.takeIf { it.isNotBlank() }?.let { add(it) }
+                                text.takeIf { it.isNotBlank() && !isNullWord(it) }?.let { add(it) }
                             }
                         }
                     }

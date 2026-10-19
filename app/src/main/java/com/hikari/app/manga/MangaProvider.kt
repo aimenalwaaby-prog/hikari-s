@@ -90,8 +90,18 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         return MangaExtensionManager.extensionFile(HikariApp.instance, pkgName)
     }
 
-    private fun source(): CatalogueSource? =
-        MangaExtensionManager.sourceOf(context, extFile, sourceIndex) as? CatalogueSource
+    private fun source(): CatalogueSource? {
+        // Bundled Kotatsu parsers (same extraction code the Kotatsu app runs)
+        // need no extension file — the bridge speaks CatalogueSource directly.
+        if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id)) {
+            return runCatching {
+                com.hikari.app.kotatsu.KotatsuBridge.forSource(
+                    com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id),
+                )
+            }.getOrNull()
+        }
+        return MangaExtensionManager.sourceOf(context, extFile, sourceIndex) as? CatalogueSource
+    }
 
     /** True when this row is a plain text-chapter (novel) source: no manga
      *  methods, no catalogue or search index — chapters + text only. */
@@ -102,6 +112,8 @@ class MangaProvider(override val config: ProviderConfig) : ContentProvider {
         MangaExtensionManager.novelSourceOf(context, extFile, MangaExtensionManager.novelIndexOf(config))
 
     private fun missingReason(): String = when {
+        com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id) ->
+            "The Kotatsu source could not be created"
         !extFile.exists() -> "The extension file is missing — reinstall it in Extensions"
         else -> MangaExtensionManager.lastError ?: "The extension could not be loaded"
     }

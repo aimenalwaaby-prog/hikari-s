@@ -1,3 +1,14 @@
+## 0.11.69 (continuous build only)
+
+### Added
+- Kotatsu manga sources, running the official kotatsu-parsers library (the exact extraction code the Kotatsu app runs): 1200+ manga/manhwa/manhua/comics/novel sources seed as their own providers (16 reliable English libraries on, the rest installed-but-off and one toggle away), with Popular/Latest catalogues, search, details, chapters and pages all flowing through the existing manga tab and reader. Kotatsu parsers are manga-family only, so anime and movies keep riding the anime/video engines that already cover them
+
+### Fixed
+- UHD Movies showing zero servers while 4K HDHub played (log-proven "no playable links resolved" on Bad Apples / Spider-Man): the site moved its download buttons to a new shortener gate the installed script predates — the installed file is patched in place on first use (gate bypass + selector update, skipped with a log line once upstream moves), and empty packed answers now re-harvest the page and re-ask before giving up
+- Trakt catalogue empty while sync history landed on the service: anime/donghua entries carrying neither a TMDB nor an IMDb id were dropped in parsing, and bare media objects were rejected — both are kept as virtual tracker rows now, with per-endpoint raw-vs-kept counts in the log so the next export proves it
+- Tracker sync searching the literal word "null" (junk candidates on every title): org.json renders JSON null as the string "null" and it slipped into alias/search queries — filtered everywhere
+- Simkl library 401s now say to reconnect instead of a bare HTTP code
+
 ## 0.11.68 (continuous build only)
 
 ### Fixed

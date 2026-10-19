@@ -88,6 +88,9 @@ object TrackerLibraryRepository {
         }
         if (movies.isNotEmpty()) out += Shelf("trakt.watchlist.movies", "Trakt Watchlist · Movies", movies)
         if (shows.isNotEmpty()) out += Shelf("trakt.watchlist.shows", "Trakt Watchlist · Shows", shows)
+        // Raw-vs-kept per endpoint: the next log proves whether an empty
+        // catalogue is a truly empty account or rows dropped in parsing.
+        if (movieArray.length() + showArray.length() > 0) Logs.log("Tracker", "trakt watchlist raw=" + movieArray.length() + "+" + showArray.length() + " kept=" + movies.size + "+" + shows.size)
         val histMovies = get("/users/${enc(user)}/watched/movies?extended=full&page=1&limit=250") ?: JSONArray()
         val hm = buildList {
             for (i in 0 until histMovies.length()) {
@@ -102,6 +105,7 @@ object TrackerLibraryRepository {
             }
         }.distinctBy { it.uniqueId }
         if (hs.isNotEmpty()) out += Shelf("trakt.history.shows", "Trakt History · Shows", hs)
+        if (histMovies.length() + histShows.length() > 0) Logs.log("Tracker", "trakt history raw=" + histMovies.length() + "+" + histShows.length() + " kept=" + hm.size + "+" + hs.size)
         val collMovies = get("/users/${enc(user)}/collection/movies?extended=full&page=1&limit=250") ?: JSONArray()
         val cm = buildList {
             for (i in 0 until collMovies.length()) {
@@ -116,6 +120,7 @@ object TrackerLibraryRepository {
             }
         }.distinctBy { it.uniqueId }
         if (cs.isNotEmpty()) out += Shelf("trakt.collection.shows", "Trakt Collection · Shows", cs)
+        if (collMovies.length() + collShows.length() > 0) Logs.log("Tracker", "trakt collection raw=" + collMovies.length() + "+" + collShows.length() + " kept=" + cm.size + "+" + cs.size)
 
         val lists = runCatching {
             val response = Http.get("https://api.trakt.tv/users/${enc(user)}/lists", headers)
@@ -146,6 +151,7 @@ object TrackerLibraryRepository {
             if (items.isNotEmpty()) out += Shelf("trakt.list.$slug", list.optString("name", slug), items)
         }
         if (out.isEmpty() && traktUnauthorized) return Result.failure(IllegalStateException("Trakt login expired (HTTP 401) — reconnect Trakt in Settings → Trackers."))
+        Logs.log("Tracker", "trakt shelves=" + out.size + out.joinToString("") { " · " + it.title + "=" + it.items.size })
         return Result.success(out)
     }
 
@@ -161,7 +167,7 @@ object TrackerLibraryRepository {
                 "simkl-api-key" to client.id,
             ))
         }.getOrElse { return Result.failure(it) }
-        if (!response.isSuccessful) return Result.failure(IllegalStateException("Simkl returned HTTP ${response.code}."))
+        if (!response.isSuccessful) return Result.failure(IllegalStateException("Simkl returned HTTP ${response.code}" + if (response.code == 401) " — reconnect Simkl in Settings → Trackers." else "."))
         val root = JSONObject(response.body?.string().orEmpty())
         val out = ArrayList<Shelf>()
 
@@ -363,15 +369,31 @@ object TrackerLibraryRepository {
         }
         return MediaItem("shikimori",id.toString(),o.optString("name").ifBlank{o.optString("russian").ifBlank{"Untitled"}},MediaType.SERIES,img,o.optString("aired_on").take(4).toIntOrNull(),rawType=if(manga)"manga" else "anime",metadataSource="Shikimori")
     }
-    private fun traktItem(row: JSONObject?, type: MediaType): MediaItem? =
-        row?.let { traktMedia(it.optJSONObject("movie") ?: it.optJSONObject("show") ?: return@let null, type) }
+    private fun traktItem(row: JSONObject?, type: MediaType): MediaItem? {
+        if (row == null) return null
+        // Watchlist/history/collection rows wrap the media ({movie/show} +
+        // metadata), but several Trakt endpoints also return the media object
+        // itself (title + ids at the top level) — accept both, else a whole
+        // library silently becomes zero rows.
+        val wrapped = row.optJSONObject("movie") ?: row.optJSONObject("show")
+        if (wrapped != null) return traktMedia(wrapped, type)
+        if (row.has("title") && row.has("ids")) return traktMedia(row, type)
+        return null
+    }
 
     private fun traktMedia(o: JSONObject, type: MediaType): MediaItem? {
         val ids = o.optJSONObject("ids") ?: return null
         val tmdb = ids.optInt("tmdb", 0)
         val imdb = ids.optString("imdb").takeIf { it.startsWith("tt") }
-        val id = if (tmdb > 0) tmdb.toString() else imdb ?: return null
-        val provider = if (tmdb > 0) "tmdb" else "stremio"
+        val traktId = ids.optInt("trakt", 0)
+        // Anime/donghua on Trakt frequently carry neither a TMDB nor an IMDb
+        // id — dropping those rows emptied whole libraries even though the
+        // sync history proves the account holds them. Keep them as virtual
+        // tracker rows (resolved by title at open, like every other tracker
+        // row) instead of deleting them from the shelf.
+        if (tmdb <= 0 && imdb == null && traktId <= 0) return null
+        val id = if (tmdb > 0) tmdb.toString() else imdb ?: traktId.toString()
+        val provider = if (tmdb > 0) "tmdb" else if (imdb != null) "stremio" else "trakt"
         val image = o.optJSONObject("images")?.optJSONObject("poster")?.optString("full")
         return MediaItem(providerId = provider, id = id, title = o.optString("title").ifBlank { "Untitled" },
             type = type, posterUrl = image, year = o.optInt("year", 0).takeIf { it > 0 },

@@ -246,9 +246,11 @@ object MangaExtensionManager {
         return novelSourceOf(context, file, novelIndexOf(config))
     }
 
-    /** Whether the provider's `.ext` file is still on disk. */
+    /** Whether the provider's `.ext` file is still on disk. Bundled Kotatsu
+     *  parsers ship inside the app, so they are never "missing". */
     fun fileMissing(config: ProviderConfig): Boolean =
         config.type == ProviderType.MANGA &&
+            !com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id) &&
             (config.url.isBlank() || !File(config.url).exists())
 
     private fun load(context: Context, file: File): Extension? {
@@ -465,6 +467,18 @@ object MangaExtensionManager {
     fun siteUrlOf(config: ProviderConfig): String? {
         siteCache[config.id]?.let { return it }
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return null
+        // Bundled Kotatsu parsers have no .ext file — their site root is the
+        // parser's own live domain.
+        if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id)) {
+            val url = runCatching {
+                val bridge = com.hikari.app.kotatsu.KotatsuBridge.forSource(
+                    com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id),
+                ) ?: return@runCatching null
+                siteUrlForHost(hostOf(bridge.parserDomain()))
+            }.getOrNull() ?: return null
+            siteCache[config.id] = url
+            return url
+        }
         // A novel source exposes no baseUrl — there is no site to warm.
         if (isNovelId(config.id)) return null
         val url = runCatching {

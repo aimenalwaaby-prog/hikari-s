@@ -751,6 +751,7 @@ class HikariApp : Application() {
             // which is why it can be added through the same add-repo flow.
             runCatching {
                 com.hikari.app.manga.MangaExtensionManager.seedDefaults(this@HikariApp, store)
+                com.hikari.app.kotatsu.KotatsuRegistry.seedDefaults(store)
             }
             // First run only: add the bundled Hikari (.hiki) and CloudStream
             // extension repos, so the Extensions screen ("Sources, repos &

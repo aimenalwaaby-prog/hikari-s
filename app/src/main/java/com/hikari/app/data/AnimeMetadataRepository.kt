@@ -10,6 +10,13 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
 object AnimeMetadataRepository {
+    /** org.json renders a JSON null as the literal string "null" — without
+     *  this guard an absent AniList title/synonym becomes a searchable query
+     *  for the word "null" (log-proven junk candidates on every sync). */
+    private fun isNullWord(s: String): Boolean {
+        val t = s.trim().lowercase()
+        return t == "null" || t == "undefined" || t == "none"
+    }
     data class Metadata(val title: String? = null, val rating: Double? = null, val nextEpisodeDate: String? = null, val source: String, val year: Int? = null, val overview: String? = null, val genres: List<String> = emptyList(), val posterUrl: String? = null, val backdropUrl: String? = null)
     data class SeasonLayout(val season: Int, val episodes: Int)
     private val seasonCache = ConcurrentHashMap<String, List<SeasonLayout>>()
@@ -138,18 +145,18 @@ object AnimeMetadataRepository {
             JSONObject(raw).optJSONObject("data")?.optJSONObject("Media")
         }.getOrNull() ?: return null
         val titles = media.optJSONObject("title")
-        val displayTitle = titles?.optString("userPreferred").takeIf { !it.isNullOrBlank() }
-            ?: titles?.optString("english").takeIf { !it.isNullOrBlank() }
+        val displayTitle = titles?.optString("userPreferred").takeIf { !it.isNullOrBlank() && !isNullWord(it) }
+            ?: titles?.optString("english").takeIf { !it.isNullOrBlank() && !isNullWord(it) }
         val aliases = buildSet {
             listOf(
                 titles?.optString("userPreferred"),
                 titles?.optString("english"),
                 titles?.optString("romaji"),
                 titles?.optString("native"),
-            ).forEach { t -> if (!t.isNullOrBlank()) add(t.trim()) }
+            ).forEach { t -> if (!t.isNullOrBlank() && !isNullWord(t)) add(t.trim()) }
             val syns = media.optJSONArray("synonyms")
             for (i in 0 until (syns?.length() ?: 0)) {
-                syns?.optString(i)?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                syns?.optString(i)?.trim()?.takeIf { it.isNotBlank() && !isNullWord(it) }?.let { add(it) }
             }
         }
         val score = media.optDouble("averageScore", 0.0).takeIf { it > 0 }?.div(10.0)

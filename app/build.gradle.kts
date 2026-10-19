@@ -20,8 +20,8 @@ android {
         applicationId = "com.hikari.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 339
-        versionName = "0.11.68"
+        versionCode = 340
+        versionName = "0.11.69"
         // CI injects the exact commit SHA the APK was built from, so the
         // in-app update checker can compare it against main's HEAD.
         val gitSha = System.getenv("GIT_SHA") ?: "unknown"
@@ -465,6 +465,13 @@ dependencies {
     // ran on pages every other engine had already failed on. See CHANGELOG.)
     implementation(libs.cryptography.core)
     implementation(libs.cryptography.provider.optimal)
+    // Kotatsu parsers — the official kotatsu-parsers library (the exact
+    // extraction code the Kotatsu manga app runs: 1200+ manga/manhwa/manhua /
+    // comics / novel sources). Pinned to the same commit Kotatsu itself ships
+    // (via JitPack, already a repo). org.json excluded: Android carries it.
+    implementation("com.github.KotatsuApp:kotatsu-parsers:4d1e521aef") {
+        exclude(group = "org.json", module = "json")
+    }
     // ---- Device pairing (Settings → Backup & Restore → Pair & sync) ----
     //
     // The feature itself is a few hundred lines: two `PairHost`/`PairClient`
