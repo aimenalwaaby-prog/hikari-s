@@ -99,6 +99,10 @@ android {
     kotlin {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
+            // The vendored hany18h parsers use their own internal API surface
+            // freely (their own build opts in); they compile here under the
+            // same opt-in rather than annotating hundreds of call sites.
+            optIn.add("org.hany18h.parsers.InternalParsersApi")
         }
     }
 
@@ -358,6 +362,10 @@ dependencies {
     implementation(libs.okhttp.zstd)
     implementation(libs.zstd.kmp.okio)
     implementation(libs.jsoup)
+    // jsoup's nullability annotations (jspecify) leak into inferred types —
+    // without the annotation classes on the classpath that inference is an
+    // error, so they ride along (tiny, stable, no code impact).
+    implementation("org.jspecify:jspecify:1.0.0")
     implementation(libs.coil.compose)
     // SVG decoding for extension logos: plenty of plugin/addon icons are
     // `.svg` (e.g. SkyStream's dramayo → dramayo.stream/static/dramayo.svg),
