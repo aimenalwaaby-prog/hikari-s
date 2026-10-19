@@ -1,3 +1,9 @@
+## 0.11.74 (continuous build only)
+
+### Fixed
+- Kotatsu repo rows keeping the Install button after installing (screenshot-proven on fork-video rows): the installed set only knew `kotatsu://` URLs, so `forkvideo://` rows never matched — all three fork URL shapes are identities now, and the button flips to Uninstall
+- Fork video rows answering "no playable sources" (log-proven on 91Pinse: details/chapters failing with "no scheme was found"): parser domains are bare hosts, and the bridge built schemeless URLs from them — every fork URL is now rooted on `https://` (or the domain's own scheme), manga page images are absolutized too, and video streams carry each page's own request headers (Referer/cookies/UA, the same headers Kotatsu's reader sends per image) over the parser-level fallback
+
 ## 0.11.73 (continuous build only)
 
 ### Added

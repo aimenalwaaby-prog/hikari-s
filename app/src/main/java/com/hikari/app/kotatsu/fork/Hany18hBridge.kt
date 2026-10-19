@@ -103,7 +103,7 @@ class Hany18hBridge(
 		return pages.mapIndexed { i, kp ->
 			val img = runCatching { parser.getPageUrl(kp) }.getOrNull()?.takeIf { it.isNotBlank() }
 				?: kp.url
-			Page(index = i, url = kp.url, imageUrl = img)
+			Page(index = i, url = kp.url, imageUrl = absoluteUrl(img))
 		}
 	}
 
@@ -177,8 +177,12 @@ class Hany18hBridge(
 	private fun absoluteUrl(url: String): String {
 		val u = url.trim()
 		if (u.startsWith("http://") || u.startsWith("https://")) return u
+		// Parser domains are bare hosts (no scheme) — without one the request
+		// layer rejects the URL ("no scheme was found") and details/chapters
+		// pages all fail. A scheme-carrying domain is used verbatim.
 		val d = parser.domain.trim().trimEnd('/')
-		return d + "/" + u.trimStart('/')
+		val base = if (d.startsWith("http://") || d.startsWith("https://")) d else "https://$d"
+		return base + "/" + u.trimStart('/')
 	}
 
 	private fun stableId(url: String): Long = url.hashCode().toLong()

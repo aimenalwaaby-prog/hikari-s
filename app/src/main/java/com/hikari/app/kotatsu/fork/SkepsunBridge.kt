@@ -114,7 +114,7 @@ class SkepsunBridge(
 		return pages.mapIndexed { i, kp ->
 			val img = runCatching { parser.getPageUrl(kp) }.getOrNull()?.takeIf { it.isNotBlank() }
 				?: kp.url
-			Page(index = i, url = kp.url, imageUrl = img)
+			Page(index = i, url = kp.url, imageUrl = absoluteUrl(img))
 		}
 	}
 
@@ -205,8 +205,44 @@ class SkepsunBridge(
 	private fun absoluteUrl(url: String): String {
 		val u = url.trim()
 		if (u.startsWith("http://") || u.startsWith("https://")) return u
+		// Parser domains are bare hosts (`91pinse.com`, no scheme) — without
+		// one the request layer rejects the URL ("no scheme was found") and
+		// details/chapters/pages all fail. A scheme-carrying domain (mirror
+		// overrides) is used verbatim.
 		val d = parser.domain.trim().trimEnd('/')
-		return d + "/" + u.trimStart('/')
+		val base = if (d.startsWith("http://") || d.startsWith("https://")) d else "https://$d"
+		return base + "/" + u.trimStart('/')
+	}
+
+	/** Direct media urls + per-page request headers for a VIDEO chapter: the
+	 *  parser's playback API answers with the file per page, and each page
+	 *  carries the headers (Referer, cookies, UA) its host demands — the same
+	 *  headers Kotatsu's own reader sends per image. [getPageList] cannot
+	 *  carry them (Tachiyomi pages hold no headers), so video rows read this
+	 *  instead. Urls are absolutized (see [absoluteUrl]). */
+	suspend fun videoPages(chapterUrl: String, chapterName: String?): List<Pair<String, Map<String, String>>> {
+		val src = enumSrc ?: return emptyList()
+		val kc = ContentChapter(
+			id = stableId(chapterUrl),
+			title = chapterName?.ifBlank { null },
+			number = 0f,
+			volume = 0,
+			url = chapterUrl,
+			scanlator = null,
+			uploadDate = 0L,
+			branch = null,
+			source = src,
+		)
+		val pages = runCatching { parser.getPages(kc) }.getOrElse {
+			Logs.log("Fork", "${kSource} video pages failed: ${it.message}")
+			throw it
+		}
+		return pages.mapNotNull { kp ->
+			val url = runCatching { parser.getPageUrl(kp) }.getOrNull()?.takeIf { it.isNotBlank() }
+				?: kp.url.takeIf { it.isNotBlank() }
+				?: return@mapNotNull null
+			absoluteUrl(url) to kp.headers.orEmpty()
+		}
 	}
 
 	private fun stableId(url: String): Long = url.hashCode().toLong()

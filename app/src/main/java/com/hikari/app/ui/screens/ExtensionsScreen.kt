@@ -1383,8 +1383,13 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 // Bundled Kotatsu rows carry no downloadable file (their
                 // parser ships inside the app), so the http-only rule below
                 // would skip them and every installed source would keep
-                // offering Install. Their `kotatsu://` URL is the identity.
-                if (p.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME)) {
+                // offering Install. Their `kotatsu://` URL is the identity —
+                // and fork rows' `kotatsu://fork…/` + `forkvideo://` URLs too
+                // (same bundled shape, different scheme for video rows).
+                if (p.url.startsWith(com.hikari.app.kotatsu.KotatsuRegistry.PLUGIN_SCHEME) ||
+                    com.hikari.app.kotatsu.fork.ForkRegistry.isForkMangaPluginUrl(p.url) ||
+                    com.hikari.app.kotatsu.fork.ForkVideoProvider.isForkVideoPluginUrl(p.url)
+                ) {
                     add(p.url)
                     return@forEach
                 }

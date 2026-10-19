@@ -9,7 +9,6 @@ import com.hikari.app.data.ProviderConfig
 import com.hikari.app.data.StreamSource
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.providers.ProviderGate
-import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -225,17 +224,16 @@ class ForkVideoProvider(override val config: ProviderConfig) : ContentProvider {
 				if (isSkepsun) {
 					val b = skepsunBridge() ?: return@gate fail("source missing — reinstall it", emptyList())
 					val pages = withTimeoutOrNull(EXT_CALL_TIMEOUT_MS) {
-						b.getPageList(ch(chapter.id).apply { name = chapter.name.orEmpty() })
+						b.videoPages(chapter.id, chapter.name)
 					} ?: return@gate fail("the site took too long to answer", emptyList())
-					val headers = videoHeadersSkepsun()
-					val out = pages.mapIndexedNotNull { i, p ->
-						val url = p.imageUrl?.takeIf { it.isNotBlank() } ?: p.url.takeIf { it.isNotBlank() }
-						?: return@mapIndexedNotNull null
+					// Parser-level headers fill what a page does not set (User-Agent); the page's own headers win per key.
+					val baseHeaders = videoHeadersSkepsun()
+					val out = pages.mapIndexedNotNull { i, (url, pageHeaders) ->
 						if (!looksPlayable(url)) return@mapIndexedNotNull null
 						StreamSource(
 							name = "Server ${i + 1}",
 							url = url,
-							headers = headers,
+							headers = baseHeaders + pageHeaders,
 							isM3u8 = url.contains(".m3u8", ignoreCase = true),
 							provider = "Fork",
 							providerId = config.id,
@@ -331,7 +329,6 @@ class ForkVideoProvider(override val config: ProviderConfig) : ContentProvider {
 		thumbnail_url = item.posterUrl
 	}
 
-	private fun ch(url: String): SChapter = SChapter.create().apply { this.url = url }
 
 	private fun reason(t: Throwable): String =
 		(t.message?.trim()?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName).take(160)
