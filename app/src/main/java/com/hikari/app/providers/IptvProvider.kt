@@ -4,6 +4,7 @@ import com.hikari.app.data.CatalogRef
 import com.hikari.app.data.Episode
 import com.hikari.app.data.IptvChannel
 import com.hikari.app.data.IptvPlaylist
+import com.hikari.app.data.JsonPlaylist
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderConfig
