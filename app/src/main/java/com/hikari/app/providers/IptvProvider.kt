@@ -130,13 +130,31 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
         }
 
         /** Channels of [url] without needing a provider instance — used by the
-         *  Add dialog to say how many channels a link holds before saving it. */
+         *  Add dialog to say how many channels a link holds before saving it.
+         *  M3U and JSON playlists (plain or `TERAPLAY_ENC:`-encrypted — see
+         *  [JsonPlaylist]) both count; a Stremio manifest is refused with the
+         *  address of the flow that takes it. */
         suspend fun preview(url: String): Result<Int> = withContext(Dispatchers.IO) {
             val cached = previewCache[url]
             if (cached != null) return@withContext Result.success(cached)
             val text = readSource(url) ?: return@withContext Result.failure(
                 Exception("Could not download that playlist — check the link."),
             )
+            if (isManifestText(text)) {
+                return@withContext Result.failure(
+                    Exception("That is a Stremio addon link — add it in Extensions → Add Stremio instead."),
+                )
+            }
+            val json = JsonPlaylist.parse(text)
+            if (json != null) {
+                if (json.tmdbKey != null && json.channels.isEmpty()) {
+                    return@withContext Result.failure(
+                        Exception("That file is a playlist config (its TMDB key was saved) — it holds no channels to list."),
+                    )
+                }
+                previewCache[url] = json.channels.size
+                return@withContext Result.success(json.channels.size)
+            }
             val list = IptvPlaylist.parse(text, base = url)
             val n = if (list.isEmpty() && url.startsWith("http")) 1 else list.size
             if (n == 0) return@withContext Result.failure(Exception("No channels found in that playlist."))
@@ -144,7 +162,26 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
             Result.success(n)
         }
 
+        /** A playlist CONFIG's TMDB key (`{"name","tmdb_api_key"}` — no
+         *  channels): key + label, else nulls. Used by the Add dialog to save
+         *  the key instead of listing nothing. */
+        suspend fun readPlaylistConfigKey(url: String): Pair<String?, String?> =
+            withContext(Dispatchers.IO) {
+                val text = readSource(url) ?: return@withContext null to null
+                val parsed = com.hikari.app.data.JsonPlaylist.parse(text)
+                    ?: return@withContext null to null
+                if (parsed.channels.isNotEmpty() || parsed.tmdbKey.isNullOrBlank()) {
+                    return@withContext null to null
+                }
+                parsed.tmdbKey to parsed.label
+            }
+
         private val previewCache = ConcurrentHashMap<String, Int>()
+
+        /** True when a downloaded body is a Stremio addon manifest, not a
+         *  playlist of any kind. */
+        private fun isManifestText(text: String): Boolean =
+            runCatching { com.hikari.app.data.JsonPlaylist.looksLikeStremioManifest(text) }.getOrDefault(false)
 
         /** Reads the playlist body from a URL or a file. Blocking — call from IO. */
         private fun readSource(url: String): String? {
@@ -223,8 +260,13 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
                     val text = readSource(selfCheckUrl)
                     // The playlist's own address is handed to the parser so a
                     // relative `tvg-logo` resolves to a real URL (see
-                    // IptvPlaylist.resolveLogo).
-                    if (text == null) null else IptvPlaylist.parse(text, base = selfCheckUrl)
+                    // IptvPlaylist.resolveLogo). JSON playlists (plain or
+                    // TERAPLAY_ENC:-encrypted) parse by their own reader — and
+                    // stay JSON: falling through to the M3U reader would list
+                    // a config object as channels.
+                    if (text == null) null
+                    else com.hikari.app.data.JsonPlaylist.parse(text)?.channels
+                        ?: IptvPlaylist.parse(text, base = selfCheckUrl)
                 }
             }
         }.getOrNull()
@@ -433,6 +475,47 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
             }
             return resolved
         }
+        // A Terabox-family share inside a playlist resolves the same way a
+        // pasted one does — the share page is fetched and its files listed at
+        // play time (see [com.hikari.app.data.NetworkStream]).
+        if (channel.kind == com.hikari.app.data.IptvChannel.KIND_TERABOX ||
+            com.hikari.app.data.NetworkStream.isBoxShare(url)
+        ) {
+            val resolved = com.hikari.app.data.NetworkStream.resolve(
+                rawUrl = url,
+                label = channel.name,
+                providerId = config.id,
+                providerName = displayName,
+            )
+            if (resolved.isEmpty()) {
+                iptvErrors[config.id] = "That share could not be opened — it may have expired or need a password."
+                return emptyList()
+            }
+            return resolved
+        }
+        // An embed page (sports embeds and the like): run the shared embed
+        // engine first so it plays directly; when nothing extracts, hand the
+        // page itself over as a link row, exactly like a Stremio externalUrl.
+        if (channel.kind == com.hikari.app.data.IptvChannel.KIND_EMBED) {
+            val extracted = withTimeoutOrNull(20_000L) {
+                com.hikari.app.cs3.FallbackResolver.resolveEmbedUrl(url, referer = null)
+            }.orEmpty()
+            if (extracted.isNotEmpty()) return extracted
+            return listOf(
+                StreamSource(
+                    name = channel.name,
+                    url = url,
+                    headers = channelHeaders(channel),
+                    externalUrl = true,
+                    provider = ProviderType.IPTV.groupLabel,
+                    providerId = config.id,
+                    providerName = displayName,
+                ),
+            )
+        }
+        val drm = if (!channel.drmKid.isNullOrBlank() && !channel.drmKey.isNullOrBlank()) {
+            com.hikari.app.data.DrmSpec(kid = channel.drmKid, key = channel.drmKey)
+        } else null
         return listOf(
             StreamSource(
                 name = channel.name,
@@ -440,6 +523,7 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
                 headers = channelHeaders(channel),
                 isM3u8 = isHlsUrl(url),
                 isMpd = url.substringBefore('?').contains(".mpd", ignoreCase = true),
+                drm = drm,
                 provider = ProviderType.IPTV.groupLabel,
                 providerId = config.id,
                 providerName = displayName,
@@ -464,6 +548,9 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
         val out = LinkedHashMap<String, String>()
         channel.headers.forEach { (k, v) ->
             if (k.isNotBlank() && v.isNotBlank()) out[k] = v
+        }
+        if (!channel.cookie.isNullOrBlank() && out.keys.none { it.equals("Cookie", true) }) {
+            out["Cookie"] = channel.cookie
         }
         if (out.keys.none { it.equals("Referer", true) || it.equals("Referrer", true) }) {
             runCatching {

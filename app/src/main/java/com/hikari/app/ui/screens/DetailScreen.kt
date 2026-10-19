@@ -8539,20 +8539,31 @@ private fun EpisodeRow(
                 )
             }
         }
-        Icon(
-            Icons.Filled.PlayArrow,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary
-        )
-        if (onDownload != null) {
-            Spacer(Modifier.width((4f * s).dp))
-            IconButton(onClick = onDownload, modifier = Modifier.size((44f * s).dp).tvPress(previewPass = true, onClick = onDownload)) {
+        // Play + download ride one centered row of equal buttons: a bare Icon
+        // against a 44dp IconButton sat the triangle visibly higher than the
+        // download glyph (screenshot-proven on Black Clover S2).
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = onClick,
+                modifier = Modifier.size((44f * s).dp).tvPress(previewPass = false, onClick = onClick),
+            ) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_download),
-                    contentDescription = tr("Download"),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size((20f * s).dp)
+                    Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size((24f * s).dp),
                 )
+            }
+            if (onDownload != null) {
+                Spacer(Modifier.width((4f * s).dp))
+                IconButton(onClick = onDownload, modifier = Modifier.size((44f * s).dp).tvPress(previewPass = true, onClick = onDownload)) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_download),
+                        contentDescription = tr("Download"),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size((20f * s).dp)
+                    )
+                }
             }
         }
     }

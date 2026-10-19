@@ -29,7 +29,18 @@ object TrackerLibraryRepository {
             else -> Result.success(emptyList())
         }
         r.onFailure { errors["tracker:$key"] = it.message ?: "couldn't load" }
-            .onSuccess { errors.remove("tracker:$key") }
+            .onSuccess { shelves ->
+                if (shelves.isEmpty()) {
+                    // Connected but nothing to show — the blank catalogue the
+                    // user reported. A note (not silence) so Home's empty
+                    // state and the next log both say it.
+                    errors["tracker:$key"] =
+                        "Connected, but its watchlist, history, collection and lists are all empty — add something on that service first."
+                } else {
+                    errors.remove("tracker:$key")
+                }
+                Logs.log("Tracker", "$key: ${shelves.size} shelves")
+            }
         r
     }
 

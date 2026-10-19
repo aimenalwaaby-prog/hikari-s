@@ -569,6 +569,10 @@ private class BReader(val b: ByteArray) {
      * pages), and the key is the whole of that segment — the download API is
      * given it verbatim.
      */
+    /** True when [url] is a Terabox-family share link (resolvable at play
+     *  time — see [terabox]). Public so playlist channels can route per-URL. */
+    fun isBoxShare(url: String): Boolean = boxShareKey(url) != null
+
     private fun boxShareKey(url: String): String? {
         val direct = Regex("""/s/([A-Za-z0-9_-]{5,})""").find(url)?.groupValues?.get(1)
             ?: Regex("""/sharing/([A-Za-z0-9_-]{5,})""").find(url)?.groupValues?.get(1)

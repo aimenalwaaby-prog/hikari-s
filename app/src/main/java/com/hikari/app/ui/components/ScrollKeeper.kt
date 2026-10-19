@@ -74,9 +74,15 @@ fun keptListState(
     onNeedMore: (() -> Unit)? = null,
 ): LazyListState {
     val saved = remember(key) { ScrollKeeper.load(key) }
+    // Never seed a high index while an anchor exists: the list is still short
+    // on first composition and Lazy clamps the seed to its end — the user sees
+    // the bottom before the restore effect can run. Start at the top and let
+    // the effect below land on the anchor once it is actually present.
+    val startIndex = if (saved?.anchor != null) 0 else (saved?.index ?: 0).coerceAtLeast(0)
+    val startOffset = if (saved?.anchor != null) 0 else (saved?.offset ?: 0).coerceAtLeast(0)
     val state = rememberLazyListState(
-        initialFirstVisibleItemIndex = (saved?.index ?: 0).coerceAtLeast(0),
-        initialFirstVisibleItemScrollOffset = (saved?.offset ?: 0).coerceAtLeast(0),
+        initialFirstVisibleItemIndex = startIndex,
+        initialFirstVisibleItemScrollOffset = startOffset,
     )
     val keysNow = rememberUpdatedState(itemKeys)
     val needMoreNow = rememberUpdatedState(onNeedMore)
@@ -88,12 +94,25 @@ fun keptListState(
         }
         if (s.index <= 0 && s.offset <= 0) return@LaunchedEffect
         scrollLog("load key=$key idx=${s.index} off=${s.offset} anchor=${s.anchor}")
+        val deadline = System.currentTimeMillis() + RESTORE_WAIT_MS
+        // The feed's keys are still incomplete on return (late shelves stream
+        // in after the page opens): restoring to the stale index now is the
+        // above/below landing. Wait for the anchor itself first.
+        if (s.anchor != null) {
+            while (System.currentTimeMillis() < deadline) {
+                if (state.isScrollInProgress) {
+                    scrollLog("stand-down key=$key (user grabbed list)")
+                    return@LaunchedEffect
+                }
+                if (keysNow.value.indexOf(s.anchor) >= 0) break
+                delay(50L)
+            }
+        }
         var target = s.index.coerceAtLeast(0)
         s.anchor?.let { a ->
             val ai = keysNow.value.indexOf(a)
             if (ai >= 0) target = ai
         }
-        val deadline = System.currentTimeMillis() + RESTORE_WAIT_MS
         var ticks = 0
         while (System.currentTimeMillis() < deadline) {
             if (state.isScrollInProgress) {
@@ -120,6 +139,7 @@ fun keptListState(
                 // from a stationary anchor.
                 if (s.anchor == null) return@LaunchedEffect
                 var lastTarget = target
+                var driftTicks = 0
                 val followUntil = System.currentTimeMillis() + FOLLOW_MS
                 while (System.currentTimeMillis() < followUntil) {
                     delay(250L)
@@ -132,11 +152,19 @@ fun keptListState(
                         if (state.firstVisibleItemIndex != lastTarget) { scrollLog("stand-down key=$key (anchor gone, user moved)"); return@LaunchedEffect }
                     } else if (state.firstVisibleItemIndex == ai) {
                         lastTarget = ai
+                        driftTicks = 0
                     } else if (ai == lastTarget) {
-                        // Anchor stationary, viewport moved: that was the user.
-                        scrollLog("stand-down key=$key (viewport left anchor)"); return@LaunchedEffect
+                        // Anchor stationary but viewport elsewhere: a transient
+                        // layout settle heals by re-anchoring (this was the
+                        // instant "viewport left anchor" stand-down that left
+                        // folder-backs parked above/below the folder). A real
+                        // user scroll persists past ~750ms and stands down.
+                        driftTicks++
+                        if (driftTicks >= 3) { scrollLog("stand-down key=$key (viewport left anchor)"); return@LaunchedEffect }
+                        runCatching { state.scrollToItem(ai, s.offset) }
                     } else {
                         // Anchor moved under a stationary viewport: feed update.
+                        driftTicks = 0
                         runCatching { state.scrollToItem(ai, s.offset) }
                         lastTarget = ai
                         scrollLog("followed key=$key target=$ai")
@@ -176,9 +204,13 @@ fun keptGridState(
     onNeedMore: (() -> Unit)? = null,
 ): LazyGridState {
     val saved = remember(key) { ScrollKeeper.load(key) }
+    // Same no-high-seed rule as the list version (see keptListState): with an
+    // anchor the grid starts at the top and the effect lands on the anchor.
+    val startIndex = if (saved?.anchor != null) 0 else (saved?.index ?: 0).coerceAtLeast(0)
+    val startOffset = if (saved?.anchor != null) 0 else (saved?.offset ?: 0).coerceAtLeast(0)
     val state = rememberLazyGridState(
-        initialFirstVisibleItemIndex = (saved?.index ?: 0).coerceAtLeast(0),
-        initialFirstVisibleItemScrollOffset = (saved?.offset ?: 0).coerceAtLeast(0),
+        initialFirstVisibleItemIndex = startIndex,
+        initialFirstVisibleItemScrollOffset = startOffset,
     )
     val keysNow = rememberUpdatedState(itemKeys)
     val needMoreNow = rememberUpdatedState(onNeedMore)
@@ -190,12 +222,22 @@ fun keptGridState(
         }
         if (s.index <= 0 && s.offset <= 0) return@LaunchedEffect
         scrollLog("load key=$key idx=${s.index} off=${s.offset} anchor=${s.anchor}")
+        val deadline = System.currentTimeMillis() + RESTORE_WAIT_MS
+        if (s.anchor != null) {
+            while (System.currentTimeMillis() < deadline) {
+                if (state.isScrollInProgress) {
+                    scrollLog("stand-down key=$key (user grabbed grid)")
+                    return@LaunchedEffect
+                }
+                if (keysNow.value.indexOf(s.anchor) >= 0) break
+                delay(50L)
+            }
+        }
         var target = s.index.coerceAtLeast(0)
         s.anchor?.let { a ->
             val ai = keysNow.value.indexOf(a)
             if (ai >= 0) target = ai
         }
-        val deadline = System.currentTimeMillis() + RESTORE_WAIT_MS
         var ticks = 0
         while (System.currentTimeMillis() < deadline) {
             if (state.isScrollInProgress) {
@@ -222,6 +264,7 @@ fun keptGridState(
                 // from a stationary anchor.
                 if (s.anchor == null) return@LaunchedEffect
                 var lastTarget = target
+                var driftTicks = 0
                 val followUntil = System.currentTimeMillis() + FOLLOW_MS
                 while (System.currentTimeMillis() < followUntil) {
                     delay(250L)
@@ -234,11 +277,17 @@ fun keptGridState(
                         if (state.firstVisibleItemIndex != lastTarget) { scrollLog("stand-down key=$key (anchor gone, user moved)"); return@LaunchedEffect }
                     } else if (state.firstVisibleItemIndex == ai) {
                         lastTarget = ai
+                        driftTicks = 0
                     } else if (ai == lastTarget) {
-                        // Anchor stationary, viewport moved: that was the user.
-                        scrollLog("stand-down key=$key (viewport left anchor)"); return@LaunchedEffect
+                        // Same transient-settle tolerance as above: re-anchor
+                        // short drifts, stand down only on a persisting
+                        // (~750ms) user move.
+                        driftTicks++
+                        if (driftTicks >= 3) { scrollLog("stand-down key=$key (viewport left anchor)"); return@LaunchedEffect }
+                        runCatching { state.scrollToItem(ai, s.offset) }
                     } else {
                         // Anchor moved under a stationary viewport: feed update.
+                        driftTicks = 0
                         runCatching { state.scrollToItem(ai, s.offset) }
                         lastTarget = ai
                         scrollLog("followed key=$key target=$ai")

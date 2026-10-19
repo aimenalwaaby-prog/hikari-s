@@ -22,7 +22,23 @@ data class IptvChannel(
      *  lines (Referer / User-Agent / Cookie). Empty for plain playlists —
      *  the provider falls back to the playlist origin + app UA. */
     val headers: Map<String, String> = emptyMap(),
-)
+    /** Hex/base64url ClearKey pair from a JSON playlist (`key_id`/`key`) —
+     *  null for M3U channels and unprotected JSON ones. */
+    val drmKid: String? = null,
+    val drmKey: String? = null,
+    /** Playlist-declared Cookie for this channel's stream. */
+    val cookie: String? = null,
+    /** Where the JSON-playlist entry plays: [KIND_DIRECT] (default), [KIND_EMBED]
+     *  (an embed page — resolved like any other embed, else opened as a link),
+     *  [KIND_TERABOX] (a Terabox-family share — resolved at play time). */
+    val kind: String = "",
+) {
+    companion object {
+        const val KIND_DIRECT = "direct"
+        const val KIND_EMBED = "embed"
+        const val KIND_TERABOX = "terabox"
+    }
+}
 
 /**
  * Reader for the playlist format every IPTV provider speaks.

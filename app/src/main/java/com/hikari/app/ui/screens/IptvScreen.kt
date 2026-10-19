@@ -470,10 +470,14 @@ fun IptvScreen(nav: NavHostController) {
                         } else {
                             tr(
                                 "Paste an M3U playlist link — an Xtream panel's " +
-                                    "get.php?username=…&password=…&type=m3u_plus link works. " +
+                                    "get.php?username=…&password=…&type=m3u_plus link works — " +
+                                    "or a JSON playlist link (a raw .json channel list, " +
+                                    "plain or encrypted). " +
                                     "Or pick a playlist file from storage. A single video " +
                                     "link (m3u8, mp4, and friends) is not a playlist — add it with " +
-                                    "Network stream instead so it plays directly."
+                                    "Network stream instead so it plays directly. A Stremio " +
+                                    "manifest.json link is not a playlist either — add that in " +
+                                    "Extensions → Add Stremio."
                             )
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -487,7 +491,7 @@ fun IptvScreen(nav: NavHostController) {
                         placeholder = {
                             Text(
                                 if (addStream) tr("https://…/m3u8, terabox, mdisk…")
-                                else tr("https://…/playlist.m3u")
+                                else tr("https://…/playlist.m3u or .json")
                             )
                         },
                         singleLine = false,
@@ -687,6 +691,20 @@ private suspend fun addIptvPlaylist(
         )
     }
     val count = IptvProvider.preview(url).getOrElse {
+        // A playlist CONFIG (TMDB key, no channels): save its key instead of
+        // listing an empty tile.
+        val (cfgKey, cfgLabel) = IptvProvider.readPlaylistConfigKey(url)
+        if (cfgKey != null) {
+            if (runCatching { app.store.tmdbApiKey() }.getOrDefault("").isBlank()) {
+                runCatching { app.store.setTmdbApiKey(cfgKey) }
+            }
+            return@withContext Result.failure(
+                Exception(
+                    "“${cfgLabel ?: "That file"}” is a playlist config, not channels — " +
+                        "its TMDB key was saved to Settings. It holds nothing to list."
+                ),
+            )
+        }
         return@withContext Result.failure(
             Exception(it.message ?: I18n.t("Could not read that playlist")),
         )

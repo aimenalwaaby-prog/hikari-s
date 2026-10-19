@@ -220,10 +220,44 @@ object ZangetsuRuntime {
         evaluate<Any?>("$js\n;void 0;\n", name, false)
     }
 
+    /** TMDB key the providers' enrichment calls ride on. The Zangetsu app
+     *  attaches its own key to every api.themoviedb.org request its scrapers
+     *  make; without the same treatment here those calls 401 (log-proven) and
+     *  every movie/series loses its episode names, stills and plot. Refreshed
+     *  on every provider call (see [run]): the user's own key when Settings
+     *  holds one, else the app's built-in rotation head. */
+    @Volatile
+    private var tmdbApiKey: String = ""
+
+    private suspend fun refreshTmdbKey() {
+        val personal = runCatching {
+            com.hikari.app.HikariApp.instance.store.tmdbApiKey()
+        }.getOrDefault("")
+        if (personal.isNotBlank()) {
+            tmdbApiKey = personal
+            return
+        }
+        tmdbApiKey = runCatching {
+            com.hikari.app.nuvio.TmdbResolver.builtinKey()
+        }.getOrDefault("")
+    }
+
+    /** api.themoviedb.org requests leave the providers keyless — attach the
+     *  key exactly the way the reference app does, so enrichment works. */
+    private fun withTmdbKey(url: String, method: String): String {
+        if (method.uppercase() != "GET") return url
+        val u = url.trim()
+        if (!u.contains("api.themoviedb.org", ignoreCase = true)) return url
+        if (u.contains("api_key=", ignoreCase = true)) return url
+        val key = tmdbApiKey.trim()
+        if (key.isBlank()) return url
+        return u + (if (u.contains("?")) "&" else "?") + "api_key=" + key
+    }
+
     private fun fetchOnce(url: String, method: String, headersJson: String, body: String): String {
         val out = JSONObject()
         try {
-            val builder = Request.Builder().url(url)
+            val builder = Request.Builder().url(withTmdbKey(url, method))
             val headers = runCatching { JSONObject(headersJson) }.getOrNull() ?: JSONObject()
             val names = mutableListOf<String>()
             headers.keys().forEach { k -> names.add(k) }
@@ -347,6 +381,7 @@ object ZangetsuRuntime {
         val scriptFile = File(providerDir, "provider.js")
         val source = runCatching { scriptFile.readText() }.getOrNull()
         if (source.isNullOrBlank()) return failure("provider file missing — reinstall this extension")
+        runCatching { refreshTmdbKey() }
         val settingsJson = runCatching {
             File(providerDir, "settings.json").takeIf { it.isFile }?.readText() ?: "{}"
         }.getOrDefault("{}")

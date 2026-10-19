@@ -634,9 +634,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
                 // another).
                 _rows.value = homeCache[key].orEmpty()
                 _loading.value = false
+                // A tracker pick that yields nothing names WHY (dead login,
+                // empty lists — see TrackerLibraryRepository.errors) instead
+                // of the bare line the last log showed ten times unexplained.
+                val why = if (key.startsWith(TRACKER_PREFIX)) {
+                    TrackerLibraryRepository.errors[key]
+                } else null
                 com.hikari.app.data.Logs.log(
                     "Home",
-                    "pick=" + (if (key == "all") "all" else key) + " produced no rows",
+                    "pick=" + (if (key == "all") "all" else key) + " produced no rows" +
+                        (why?.let { " — $it" } ?: ""),
                 )
             }
         }
@@ -3012,15 +3019,8 @@ private fun HomeHeader(
  * is already on. Every access happens on the main thread (the loader's own
  * dispatcher), so it needs no locking.
  */
-/** Home feed scroll position across folder visits: entering a personal-catalog
- *  folder pushes a new screen and this composable is disposed, so its Lazy
- *  state would be lost and Back landed at the bottom instead of the folder
- *  that was entered. The position is saved on dispose and restored once the
- *  rows are back (see HomeScreen). */
-private object HomeFeedScroll {
-    var index = 0
-    var offset = 0
-}
+/** First-run seed rows live in the repository (see HomeFeedCache below) —
+ *  scroll position itself is held by ScrollKeeper ("home" key). */
 
 private object HomeFeedCache {
     val rows = object : LinkedHashMap<String, List<CatalogRow>>() {

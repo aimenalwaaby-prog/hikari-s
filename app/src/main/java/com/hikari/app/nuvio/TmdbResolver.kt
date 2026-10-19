@@ -39,6 +39,10 @@ object TmdbResolver {
         "68e094699525b18a70bab2f86b1fa706",
         "439c478a771f35c05022f9feabcca01c",
     )
+
+    /** The rotation head for non-TMDB callers that need ONE key without the
+     *  retry loop (see [apiGet]) — the Zangetsu runtime's enrichment calls. */
+    fun builtinKey(): String = API_KEYS.firstOrNull().orEmpty()
     private const val API_BASE = "https://api.themoviedb.org/3"
 
     /**

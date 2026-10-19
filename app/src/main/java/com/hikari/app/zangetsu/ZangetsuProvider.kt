@@ -33,6 +33,14 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
         /** Why a stream call produced nothing, for the sources sheet. */
         val streamErrors = ConcurrentHashMap<String, String>()
         private const val MAX_ITEMS = 500
+        /** Pack scheme per movie provider whose `getVideoSources` unpacks a
+         *  JSON href list (`4khd://…`, `uhd://…` …) instead of a page URL. */
+        private val PACK_SCHEMES = mapOf(
+            "fourkhdhub" to "4khd://",
+            "uhdmovies" to "uhd://",
+            "hdhub4u" to "hdh://",
+            "vegamovies" to "vega://",
+        )
     }
 
     private val sourceId: String get() = config.id.removePrefix("zangetsu|")
@@ -189,9 +197,9 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
         withContext(Dispatchers.IO) {
             if (item.id.isBlank()) return@withContext null
             val payload = ZangetsuRuntime.call(dir, sourceId, "getEpisodes", "[${JSONObject.quote(item.id)}, {}]")
-            val data = dataOf(payload) as? JSONArray ?: return@withContext null
-            buildList {
-                for (i in 0 until data.length()) {
+            val data = dataOf(payload) as? JSONArray
+            val list = buildList {
+                if (data != null) for (i in 0 until data.length()) {
                     val e = data.optJSONObject(i) ?: continue
                     val url = e.optString("url").trim()
                     if (url.isBlank()) continue
@@ -206,20 +214,69 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
                         )
                     )
                 }
-            }.ifEmpty { null }
+            }
+            if (list.isNotEmpty()) return@withContext list
+            // A movie page whose download blocks the provider's own selectors
+            // no longer match (site markup drifted): build its single packed
+            // episode from the page itself, so Detail still offers Play and
+            // the tap below carries a packed id the JS can unpack.
+            harvestedEpisode(item)?.let { return@withContext listOf(it) }
+            null
         }
 
     // ---- streams ----
 
     override suspend fun getStreams(item: MediaItem, episode: Episode?): List<StreamSource> =
         withContext(Dispatchers.IO) {
-            val epUrl = episode?.id?.trim().orEmpty().ifBlank { item.id.trim() }
+            var ep = episode
+            if (ep == null) {
+                // A movie tap carries no episode — but the pack-scheme
+                // providers cannot unpack the bare detail URL (their instant
+                // "no download links" reject). The packed single-episode id
+                // from the provider's own list is the playback credential.
+                val eps = runCatching { getEpisodes(item) }.getOrNull()
+                ep = when {
+                    eps.isNullOrEmpty() -> null
+                    eps.size == 1 -> eps[0]
+                    else -> eps.firstOrNull { isPackedId(it.id) }
+                }
+            }
+            var epUrl = ep?.id?.trim().orEmpty().ifBlank { item.id.trim() }
             if (epUrl.isBlank()) {
                 streamErrors[config.id] = "Nothing to play (empty link)."
                 return@withContext emptyList()
             }
-            val payload = ZangetsuRuntime.call(dir, sourceId, "getVideoSources", "[${JSONObject.quote(epUrl)}]")
-            val data = dataOf(payload) as? JSONArray
+            var payload = ZangetsuRuntime.call(dir, sourceId, "getVideoSources", "[${JSONObject.quote(epUrl)}]")
+            var data = dataOf(payload) as? JSONArray
+            if ((data == null || data.length() == 0) && !isPackedId(epUrl) &&
+                item.id.trim().startsWith("http")
+            ) {
+                // The bare detail URL reached a JS unpacker (stale or missing
+                // episode): harvest the page's hub links and re-ask packed,
+                // then fall back to direct media files on the same page.
+                val hrefs = harvestHubLinks(item.id.trim())
+                val scheme = PACK_SCHEMES[sourceId]
+                if (hrefs.isNotEmpty() && scheme != null) {
+                    epUrl = scheme + java.net.URLEncoder.encode(JSONArray(hrefs).toString(), "UTF-8")
+                    com.hikari.app.data.Logs.log(
+                        "Zangetsu",
+                        "$sourceId getVideoSources: re-asking packed with ${hrefs.size} harvested links",
+                    )
+                    payload = ZangetsuRuntime.call(dir, sourceId, "getVideoSources", "[${JSONObject.quote(epUrl)}]")
+                    data = dataOf(payload) as? JSONArray
+                }
+                if (data == null || data.length() == 0) {
+                    val direct = harvestDirectMedia(item.id.trim())
+                    if (direct.isNotEmpty()) {
+                        com.hikari.app.data.Logs.log(
+                            "Zangetsu",
+                            "$sourceId getVideoSources: playing ${direct.size} direct file(s) from the page",
+                        )
+                        streamErrors.remove(config.id)
+                        return@withContext direct.map { toDirectSource(it, item.id.trim()) }
+                    }
+                }
+            }
             if (data == null || data.length() == 0) {
                 val err = runCatching { JSONObject(payload).optString("error") }.getOrNull()
                 streamErrors[config.id] = if (err.isNullOrBlank()) "No playable sources." else err.take(200)
@@ -273,6 +330,143 @@ class ZangetsuProvider(override val config: ProviderConfig) : ContentProvider {
         }
 
     // ---- helpers ----
+
+    /** True for a provider-packed episode id (`4khd://…`, `uhd://…`,
+     *  `anikoto://…`) as opposed to a bare http(s) page URL. */
+    private fun isPackedId(id: String): Boolean {
+        val u = id.trim()
+        return u.contains("://") && !u.startsWith("http://") && !u.startsWith("https://")
+    }
+
+    /** One harvest per detail page per session: the page is fetched once and
+     *  both the packed-episode builder and the stream fallback share it. */
+    private val harvestCache = ConcurrentHashMap<String, List<String>>()
+
+    private fun harvestedEpisode(item: MediaItem): Episode? {
+        val scheme = PACK_SCHEMES[sourceId] ?: return null
+        val pageUrl = item.id.trim()
+        if (!pageUrl.startsWith("http")) return null
+        val hrefs = harvestHubLinks(pageUrl)
+        if (hrefs.isEmpty()) return null
+        val packed = scheme + runCatching {
+            java.net.URLEncoder.encode(JSONArray(hrefs).toString(), "UTF-8")
+        }.getOrDefault("[]")
+        return Episode(number = 1, id = packed, name = item.title.ifBlank { "Movie" })
+    }
+
+    /**
+     * Hub/intermediate links off a movie/series detail page, for pages whose
+     * own provider selectors no longer match (site markup drifted: hosts move
+     * to fresh link-shortener domains like `greenmotors.club/?id=…` while the
+     * installed `.js` still filters the old ones).
+     *
+     * Deliberately broader than any one provider's filter — hub pages,
+     * redirect gates and button links — but never page furniture (styles,
+     * scripts, images, anchors) and never video files (those are
+     * [harvestDirectMedia]'s job).
+     */
+    private fun harvestHubLinks(pageUrl: String): List<String> {
+        harvestCache[pageUrl]?.let { return it }
+        val html = fetchPageHtml(pageUrl)
+        val out = ArrayList<String>()
+        if (html.isNotBlank()) {
+            val origin = pageOrigin(pageUrl)
+            val re = Regex("""<a[^>]+href\s*=\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
+            for (m in re.findAll(html)) {
+                val href = absPageUrl(m.groupValues[1].trim(), origin) ?: continue
+                if (!isHubHref(href)) continue
+                if (out.none { it.equals(href, ignoreCase = true) }) out += href
+                if (out.size >= 12) break
+            }
+        }
+        harvestCache[pageUrl] = out
+        return out
+    }
+
+    private fun harvestDirectMedia(pageUrl: String): List<String> {
+        val html = fetchPageHtml(pageUrl)
+        if (html.isBlank()) return emptyList()
+        val origin = pageOrigin(pageUrl)
+        val out = ArrayList<String>()
+        val re = Regex("""(?:href|src|data-src|content)\s*=\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
+        for (m in re.findAll(html)) {
+            val href = absPageUrl(m.groupValues[1].trim(), origin) ?: continue
+            val path = href.substringBefore('?').substringBefore('#').lowercase()
+            if (!path.startsWith("http://") && !path.startsWith("https://")) continue
+            if (!(path.contains(".mp4") || path.contains(".mkv") ||
+                    path.contains(".m3u8") || path.contains(".mpd"))) continue
+            if (out.none { it.equals(href, ignoreCase = true) }) out += href
+            if (out.size >= 8) break
+        }
+        return out
+    }
+
+    private fun toDirectSource(url: String, referer: String): StreamSource {
+        val lower = url.substringBefore('?').lowercase()
+        return StreamSource(
+            name = config.name.ifBlank { sourceId } + " [direct]",
+            url = url,
+            headers = mapOf(
+                "User-Agent" to com.hikari.app.net.Http.UA,
+                "Referer" to referer,
+            ),
+            isM3u8 = ".m3u8" in lower,
+            isMpd = ".mpd" in lower,
+            provider = "Zangetsu",
+            providerId = config.id,
+            providerName = config.name,
+            details = "direct file",
+        )
+    }
+
+    private fun fetchPageHtml(pageUrl: String): String {
+        return runCatching {
+            com.hikari.app.net.Http.getString(
+                pageUrl,
+                mapOf("User-Agent" to com.hikari.app.net.Http.UA),
+            )
+        }.getOrNull().orEmpty()
+    }
+
+    private fun isHubHref(href: String): Boolean {
+        val h = href.lowercase()
+        if (!h.startsWith("http://") && !h.startsWith("https://")) return false
+        if (h.contains("youtube.com") || h.contains("youtu.be") || h.contains("facebook.com") ||
+            h.contains("twitter.com") || h.contains("instagram.com") || h.contains("telegram.me") ||
+            h.contains("t.me/")
+        ) return false
+        val path = h.substringBefore('?').substringBefore('#')
+        if (path.endsWith(".css") || path.endsWith(".js") || path.endsWith(".png") ||
+            path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".webp") ||
+            path.endsWith(".gif") || path.endsWith(".svg") || path.endsWith(".ico") ||
+            path.endsWith(".woff") || path.endsWith(".woff2")
+        ) return false
+        if (path.contains(".mp4") || path.contains(".mkv") || path.contains(".m3u8") || path.contains(".mpd")) {
+            return false
+        }
+        return h.contains("hubcloud") || h.contains("hubdrive") || h.contains("hblinks") ||
+            h.contains("hubcdn") || h.contains("hubstream") || h.contains("hdstream") ||
+            h.contains("greenmotors") || h.contains("pixeldra") || h.contains("gadgets") ||
+            h.contains("?id=") || h.contains("&id=") || h.contains("/redirect") ||
+            h.contains("/links") || h.contains("maxbutton") || h.contains("hrefli") ||
+            h.contains("vcloud") || h.contains("gdflix") || h.contains("driveseed") ||
+            h.contains("driveleech") || h.contains("filepress") || h.contains("?go=") ||
+            h.contains("/go/") || h.contains("unblockedgames")
+    }
+
+    private fun pageOrigin(pageUrl: String): String {
+        val m = Regex("^(https?://[^/]+)", RegexOption.IGNORE_CASE).find(pageUrl.trim())
+        return m?.groupValues?.get(1).orEmpty()
+    }
+
+    private fun absPageUrl(href: String, origin: String): String? {
+        val h = href.trim()
+        if (h.isBlank() || h.startsWith("#") || h.startsWith("javascript:", ignoreCase = true)) return null
+        if (h.startsWith("http://") || h.startsWith("https://")) return h
+        if (h.startsWith("//")) return "https:$h"
+        if (origin.isBlank()) return null
+        return if (h.startsWith("/")) origin + h else "$origin/$h"
+    }
 
     private fun dataObject(payload: String): JSONObject? {
         val root = runCatching { JSONObject(payload) }.getOrNull() ?: return null

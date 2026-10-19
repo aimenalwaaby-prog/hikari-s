@@ -1,4 +1,12 @@
-## 0.11.67 (continuous build only)
+## 0.11.68 (continuous build only)
+
+### Fixed
+- Zangetsu movies listing but never playing ("no download links" on 4K HDHub/UHD Movies/HDHub4u/VegaMovies): a movie tap carried no episode so the bare detail URL hit the provider's pack unpacker and died instantly — taps now resolve the packed single-episode id first, and when the page's hub links drifted past the installed script's selectors the app harvests them itself (fresh shortener domains included) and re-asks packed, then falls back to direct files before giving up
+- Zangetsu TMDB enrichment 401s (episode names/stills/plots missing on hub providers): the reference app attaches its TMDB key to every api.themoviedb.org call and the bridge didn't — the key (yours when Settings holds one, else built-in) is now attached
+- JSON playlist links (raw .json channel lists, encrypted TERAPLAY_ENC: Livetv/terabox lists, playlist configs): the IPTV tab now reads them like M3U — groups as catalogues, ClearKey DRM + cookies honored, Terabox shares resolved at play, embed pages played via the embed engine, Stremio manifest.json links routed to Extensions → Add Stremio with a message, TMDB-key configs saved to Settings
+- Episode rows with the play triangle floating above the download icon: both are one centered row of equal 44dp buttons now
+- Home back still parking above/below the folder tile: restores no longer seed a high index into a half-loaded list (the clamp-to-end jump), wait for the saved shelf row to actually exist before landing, and short layout settles re-anchor instead of standing the follow down
+- Tracker picks on Home still blank with no reason: connected-but-empty libraries now say so in the empty state and the log (shelf counts logged per load), and the no-rows line carries the reason
 
 ### Fixed
 - Zangetsu titles opening but never playing ("no playable server") and most providers listing nothing: the bridge missed three host globals the providers expect (htmlText, absUrl, base64ToBytes) so detail/episodes threw and play fell back to a bare slug the provider rejects — all three are now injected, and failing fetches plus provider errors are logged under Zangetsu/Tracker tags so the next log names any block
