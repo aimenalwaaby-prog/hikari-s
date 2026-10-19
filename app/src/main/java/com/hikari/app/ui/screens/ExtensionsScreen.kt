@@ -1491,10 +1491,10 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
      *  [com.hikari.app.zangetsu.ZangetsuPluginManager.repoPlugins]). */
     suspend fun addZangetsuRepo(rawUrl: String): Result<Cs3Repo> = addRepo(rawUrl, RepoKind.ZANGETSU)
 
-    /** Registers a Kotatsu repo — a card whose entries are the bundled
-     *  parsers (the extraction code ships inside the app, so there is no
-     *  index file to fetch: adding the link files the repo, opening it
-     *  lists every source, exactly like the LNReader folder). */
+    /** Registers a Kotatsu repo — the "kotatsu" shorthand files the official
+     *  bundled index; any other link must BE a Kotatsu `{"sites": [...]}`
+     *  parser list, which is fetched and stored, so opening the repo lists
+     *  THAT repo's sources (see [addRepoUrl]). */
     suspend fun addKotatsuRepo(rawUrl: String): Result<Cs3Repo> = addRepo(rawUrl, RepoKind.KOTATSU)
 
     /** Installs one Zangetsu source: its `.js` is downloaded and validated in
@@ -1537,23 +1537,37 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
     /** Installs one repo entry from a Kotatsu repo card (no download — the
      *  official kotatsu-parsers extraction code ships inside the app). One
      *  store write + one provider-list rebuild, never the 1200-row flood
-     *  0.11.69 did. */
+     *  0.11.69 did. Entries whose parser code is NOT bundled (see
+     *  [com.hikari.app.kotatsu.KotatsuRegistry.UNBUNDLED_PREFIX]) fail
+     *  honestly instead of creating a row that could never run. */
     suspend fun installKotatsuPlugin(plugin: Cs3RepoPlugin): Result<Int> {
         val enumName =
             com.hikari.app.kotatsu.KotatsuRegistry.enumNameOfPluginUrl(plugin.url)
                 ?: return Result.failure(IllegalStateException("Unknown Kotatsu source"))
-        return installKotatsuSource(enumName)
+        if (com.hikari.app.kotatsu.KotatsuRegistry.isUnbundledPluginUrl(plugin.url)) {
+            return Result.failure(
+                IllegalStateException(
+                    "\"${plugin.name}\" ships its own parser code, which is not " +
+                        "bundled in this app — only the entries matching the " +
+                        "bundled parser set can be installed"
+                )
+            )
+        }
+        return installKotatsuSource(enumName, plugin.nsfw)
     }
 
     /** Installs one bundled Kotatsu source (no download — the official
      *  kotatsu-parsers extraction code ships inside the app). One store write
      *  + one provider-list rebuild, never the 1200-row flood 0.11.69 did. */
-    suspend fun installKotatsuSource(enumName: String): Result<Int> {
+    suspend fun installKotatsuSource(enumName: String, entryNsfw: Boolean = false): Result<Int> {
         val src = runCatching {
             org.koitharu.kotatsu.parsers.model.MangaParserSource.valueOf(enumName)
         }.getOrNull() ?: return Result.failure(IllegalStateException("Unknown Kotatsu source"))
         if (src.isBroken) return Result.failure(IllegalStateException("${src.title} is marked broken upstream"))
-        val row = com.hikari.app.kotatsu.KotatsuRegistry.configFor(src)
+        val base = com.hikari.app.kotatsu.KotatsuRegistry.configFor(src)
+        // The repo entry's own 18+ tag wins when the bundled set does not
+        // already say so (a third-party list flags HENTAI_* itself).
+        val row = if (entryNsfw && base.nsfw != true) base.copy(nsfw = true) else base
         store.addProvider(row)
         requestRefresh()
         return Result.success(1)
@@ -2544,39 +2558,85 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
         return withContext(Dispatchers.IO) {
             runCatching {
                 if (kind == RepoKind.KOTATSU) {
-                    // A Kotatsu repo's entries are the BUNDLED parsers (the
-                    // official kotatsu-parsers code ships inside the app), so
-                    // there is no index file to fetch at all: any link files
-                    // the repo, and opening it lists every source. Runs BEFORE
-                    // the repo.json fetch below, which would reject the
-                    // upstream GitHub page (HTML) before this branch ran.
-                    // The official shorthand lands on the upstream repository.
+                    // The "kotatsu" shorthand (and the upstream page itself)
+                    // is the BUNDLED index — the official kotatsu-parsers code
+                    // ships inside the app, so there is no file to fetch for
+                    // it. ANY other link must BE a Kotatsu parser list (a
+                    // `{"sites": [...]}` file like the community kototoro /
+                    // hany18h lists): it is fetched like every other engine's
+                    // index, and opening the repo lists THAT repo's entries —
+                    // filing every link against the bundled set is exactly the
+                    // reported "different repo, same 882 sources" bug.
                     val kt = url.trim()
                     val official =
                         com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_URL
-                    val use = when {
-                        kt.equals("kotatsu", ignoreCase = true) -> official
-                        kt.trimEnd('/').equals(official, ignoreCase = true) -> official
-                        else -> url
+                    if (kt.equals("kotatsu", ignoreCase = true) ||
+                        kt.trimEnd('/').equals(official, ignoreCase = true)
+                    ) {
+                        val entries =
+                            com.hikari.app.kotatsu.KotatsuRegistry.repoPlugins()
+                        if (entries.isEmpty()) {
+                            throw Exception("The bundled Kotatsu index is empty — update the app")
+                        }
+                        val repo = Cs3Repo(
+                            url = official,
+                            name = niceRepoName(
+                                official,
+                                com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_NAME,
+                            ),
+                            description = com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_DESC,
+                            kind = kind,
+                        )
+                        lastGoodRepoUrl = official
+                        duplicateRepoAdd = store.repos().any {
+                            com.hikari.app.data.SourceUrls.repoKey(it.url) ==
+                                com.hikari.app.data.SourceUrls.repoKey(official)
+                        }
+                        store.addCs3Repo(repo)
+                        val saved = store.repos().firstOrNull {
+                            com.hikari.app.data.SourceUrls.repoKey(it.url) ==
+                                com.hikari.app.data.SourceUrls.repoKey(repo.url)
+                        }
+                        repos.value = store.repos()
+                        return@withContext Result.success(saved ?: repo)
                     }
-                    val entries =
-                        com.hikari.app.kotatsu.KotatsuRegistry.repoPlugins()
-                    if (entries.isEmpty()) {
-                        throw Exception("The bundled Kotatsu index is empty — update the app")
+                    var ktText: String? = null
+                    var ktGood = kt
+                    for (c in listOfNotNull(kt, jsDelivrMirror(kt))) {
+                        val body = Http.fetchStringRobust(c, emptyMap(), 30L).getOrNull()
+                        if (body != null && body.isNotBlank() && !looksLikeHtml(body)) {
+                            ktText = body
+                            ktGood = c
+                            break
+                        }
+                    }
+                    val ktBody = ktText
+                        ?: throw Exception("Could not fetch repo: $kt")
+                    val ktSites =
+                        com.hikari.app.kotatsu.KotatsuRegistry.parseSiteIndex(ktBody)
+                    if (ktSites == null) {
+                        val aniyomiCount = runCatching {
+                            com.hikari.app.aniyomi.AniyomiExtensionManager
+                                .indexEntries(ktBody)?.length() ?: 0
+                        }.getOrDefault(0)
+                        if (aniyomiCount > 0) {
+                            throw Exception("That file is an Aniyomi/Mihon index — add it as an Aniyomi repo instead")
+                        }
+                        throw Exception("That file lists no Kotatsu sources — a Kotatsu repo is a {\"sites\": [...]} parser list")
+                    }
+                    if (ktSites.isEmpty()) {
+                        throw Exception("That file lists no Kotatsu sources")
                     }
                     val repo = Cs3Repo(
-                        url = use,
-                        name = niceRepoName(
-                            use,
-                            if (use == official) com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_NAME else "",
-                        ),
-                        description = com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_DESC,
+                        url = ktGood,
+                        name = niceRepoName(kt, ""),
+                        description = "Kotatsu parser repository (${ktSites.size} sources)",
                         kind = kind,
                     )
-                    lastGoodRepoUrl = use
+                    lastGoodRepoUrl = ktGood
                     duplicateRepoAdd = store.repos().any {
                         com.hikari.app.data.SourceUrls.repoKey(it.url) ==
-                            com.hikari.app.data.SourceUrls.repoKey(use)
+                            com.hikari.app.data.SourceUrls.repoKey(ktGood)
                     }
                     store.addCs3Repo(repo)
                     val saved = store.repos().firstOrNull {
@@ -2989,10 +3049,39 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             return loaded.first to null
         }
         if (repo.kind == RepoKind.KOTATSU) {
-            // Bundled parsers — no fetch, the index is in the app already
-            // (see KotatsuRegistry.repoPlugins), so a Kotatsu repo opens
-            // instantly instead of timing out on a file that was never there.
-            return com.hikari.app.kotatsu.KotatsuRegistry.repoPlugins() to null
+            // The official repo is the BUNDLED index (no fetch — the parser
+            // code ships inside the app). Every other Kotatsu repo is its own
+            // fetched `{"sites": [...]}` parser list (see
+            // KotatsuRegistry.pluginsForRepo), re-read from its stored URL on
+            // every refresh like every other engine — so two different repo
+            // links can never show the same sources.
+            val officialUrl =
+                com.hikari.app.kotatsu.KotatsuRegistry.OFFICIAL_REPO_URL
+            if (repo.url.trim().equals("kotatsu", ignoreCase = true) ||
+                repo.url.trim().trimEnd('/').equals(officialUrl, ignoreCase = true)
+            ) {
+                return com.hikari.app.kotatsu.KotatsuRegistry.repoPlugins() to null
+            }
+            var lastErrKt: Throwable? = null
+            for (c in listOfNotNull(repo.url, jsDelivrMirror(repo.url))) {
+                val text = Http.fetchStringRobust(c, emptyMap(), 30L).getOrNull()
+                if (text == null || looksLikeHtml(text)) {
+                    lastErrKt = Exception("Could not fetch repo")
+                    continue
+                }
+                val sites =
+                    com.hikari.app.kotatsu.KotatsuRegistry.parseSiteIndex(text)
+                if (sites == null) {
+                    lastErrKt = Exception("That file is not a Kotatsu parser list")
+                    continue
+                }
+                if (sites.isEmpty()) {
+                    lastErrKt = Exception("That file lists no Kotatsu sources")
+                    continue
+                }
+                return com.hikari.app.kotatsu.KotatsuRegistry.pluginsForRepo(text) to null
+            }
+            throw lastErrKt ?: Exception("Could not fetch repo: ${repo.url}")
         }
         if (repo.kind == RepoKind.ANYMEX) {
             val candidatesAx = listOfNotNull(repo.url, jsDelivrMirror(repo.url))
@@ -4024,8 +4113,13 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 }
             ProviderType.ANIYOMI, ProviderType.MANGA ->
                 // LNReader rows carry no extension preferences screen in
-                // their format — the gear gets the honest info dialog.
-                if (p is com.hikari.app.lnreader.LnReaderProvider) infoProvider = p
+                // their format — and Kotatsu parsers ship inside the app with
+                // no settings screen of their own — so the gear gets the
+                // honest info dialog for both.
+                if (p is com.hikari.app.lnreader.LnReaderProvider ||
+                    (p is com.hikari.app.manga.MangaProvider &&
+                        com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(p.config.id))
+                ) infoProvider = p
                 else schemaProvider = p
             ProviderType.ANYMEX, ProviderType.ANYMEX_MANGA, ProviderType.SORA -> schemaProvider = p
             // A SkyStream plugin with mirror domains gets the mirror picker;
@@ -4613,7 +4707,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 "(the official Aniyomi extensions repo). Vega repos: vega " +
                                 "(Zenda-Cross's official Vega providers). Zangetsu repos: zangetsu (Spyou's official Zangetsu sources). LNReader repos: " +
                                 "lnreader (the official plugin index). Kotatsu repos: " +
-                                "kotatsu (the official parser index)."
+                                "kotatsu (the official parser index) or any Kotatsu {\"sites\"} parser list."
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -4633,7 +4727,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                         isLnReader -> "https://…/plugins.min.json"
                                         isSora -> "https://…/streamex.json"
                                         isAnymex -> "https://…/anime_index.json"
-                                        isKotatsu -> "kotatsu"
+                                        isKotatsu -> "kotatsu or https://…/kotatsu-parsers.json"
                                         else -> "https://…/repo.json"
                                     }
                                 )

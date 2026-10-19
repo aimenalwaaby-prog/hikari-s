@@ -125,7 +125,16 @@ object ExtensionRecovery {
                 }
                 ProviderType.MANGA -> {
                     runCatching {
-                        com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                        // Bundled Kotatsu parsers cache their instance + bridge
+                        // in the registry (no .ext file), so a wedged one is
+                        // evicted there; file extensions evict their APK copy.
+                        if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id)) {
+                            com.hikari.app.kotatsu.KotatsuRegistry.evict(
+                                com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id)
+                            )
+                        } else {
+                            com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                        }
                     }
                 }
                 else -> Unit
@@ -176,7 +185,13 @@ object ExtensionRecovery {
                 }
                 ProviderType.MANGA -> {
                     runCatching {
-                        com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                        if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(config.id)) {
+                            com.hikari.app.kotatsu.KotatsuRegistry.evict(
+                                com.hikari.app.kotatsu.KotatsuRegistry.enumNameOf(config.id)
+                            )
+                        } else {
+                            com.hikari.app.manga.MangaExtensionManager.evict(config.url)
+                        }
                     }
                 }
                 else -> Unit

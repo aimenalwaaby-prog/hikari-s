@@ -1,3 +1,9 @@
+## 0.11.72 (continuous build only)
+
+### Fixed
+- Kotatsu repos ignoring the pasted link (screenshot-proven: kototoro / hany18h links each showing the same 882 bundled sources): adding a repo now fetches the link — a Kotatsu `{"sites": [...]}` parser list (the shape those community repos publish) — and opening the repo lists THAT repo's own entries with their own icons, while only the "kotatsu" shorthand (and the upstream page) keeps the bundled index. Entries matching a bundled parser install exactly like official ones; entries shipping their own fork-only parser code are still listed but say "not bundled", and their Install refuses honestly instead of creating a row that could never run. An Aniyomi/Mihon index pasted into the Kotatsu box is redirected to the Aniyomi flow instead of misreading
+- Kotatsu wiring gaps vs the other engines: the gear on a Kotatsu row opens the honest "Kotatsu source" info dialog (was an empty settings screen), and stall recovery now evicts the wedged parser/bridge instance instead of a file that was never there
+
 ## 0.11.71 (continuous build only)
 
 ### Added

@@ -883,7 +883,9 @@ fun ProviderInfoDialog(provider: ContentProvider, onDismiss: () -> Unit) {
         ProviderType.SKYSTREAM -> tr("SkyStream extension")
         ProviderType.UNIVERSAL -> tr("Universal scraper")
         ProviderType.ANIYOMI -> tr("Aniyomi extension")
-        ProviderType.MANGA -> tr("Manga extension")
+        ProviderType.MANGA ->
+            if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(provider.config.id)) tr("Kotatsu source")
+            else tr("Manga extension")
         ProviderType.STREMIO -> tr("Stremio addon")
         ProviderType.IPTV -> tr("IPTV playlist")
         else -> tr("Extension")

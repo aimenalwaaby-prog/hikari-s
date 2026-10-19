@@ -181,6 +181,11 @@ class KotatsuBridge(
             return bridge
         }
 
+        /** Drops the cached bridge for [enumName] (see [KotatsuRegistry.evict]). */
+        fun evict(enumName: String) {
+            bridges.remove(enumName)
+        }
+
         @Suppress("unused")
         private fun tagsOf(tags: Set<MangaTag>): String = tags.joinToString(", ") { it.title }
     }
