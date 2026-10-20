@@ -3479,40 +3479,6 @@ fun DetailScreen(
             ?: servers.firstOrNull { it.providerId == srv.providerId }
             ?: servers.firstOrNull { it.name == srv.name }
             ?: servers[0]
-    // The second once-per-batch question (destination was the first): read
-    // the picked server's own qualities off the first episode — the same
-    // "Choose quality" the single download asks — and queue the whole batch
-    // at the answer. A single-variant source skips the question and goes
-    // straight in at Highest.
-    fun askBatchQuality(srv: StreamSource, kind: com.hikari.app.download.DownloadKind) {
-        showDlDest = false
-        val first = dlTargets.firstOrNull() ?: return
-        scope.launch {
-            val servers = runCatching { vm.serversForBatch(batchItem, first) }.getOrDefault(emptyList())
-            if (servers.isEmpty()) {
-                runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
-                return@launch
-            }
-            val src = matchDlServer(servers, srv)
-            val isHls = src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8")
-            if (!isHls) {
-                startBatchDownload(srv, kind, 0, 0L)
-                return@launch
-            }
-            val quals = runCatching {
-                com.hikari.app.download.DownloadEngine.hlsQualities(src.url, src.headers)
-            }.getOrDefault(emptyList())
-            if (quals.size <= 1) {
-                startBatchDownload(srv, kind, 0, 0L)
-                return@launch
-            }
-            dlPendingSrv = srv
-            dlPendingKind = kind
-            dlQualityOpts = quals
-            dlQualityClaimed = false
-            showDlQuality = true
-        }
-    }
     fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, preferredHeight: Int, preferredBandwidth: Long) {
         showDlDest = false
         val eps = dlTargets
@@ -3554,6 +3520,40 @@ fun DetailScreen(
             }.getOrDefault(0)
             dlBusy = false
             runCatching { android.widget.Toast.makeText(context, if (done > 0) "Queued " + done + " download" + (if (done == 1) "" else "s") + " from " + srv.name + " — see Downloads." else "No episodes could be queued.", android.widget.Toast.LENGTH_LONG).show() }
+        }
+    }
+    // The second once-per-batch question (destination was the first): read
+    // the picked server's own qualities off the first episode — the same
+    // "Choose quality" the single download asks — and queue the whole batch
+    // at the answer. A single-variant source skips the question and goes
+    // straight in at Highest.
+    fun askBatchQuality(srv: StreamSource, kind: com.hikari.app.download.DownloadKind) {
+        showDlDest = false
+        val first = dlTargets.firstOrNull() ?: return
+        scope.launch {
+            val servers = runCatching { vm.serversForBatch(batchItem, first) }.getOrDefault(emptyList())
+            if (servers.isEmpty()) {
+                runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
+                return@launch
+            }
+            val src = matchDlServer(servers, srv)
+            val isHls = src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8")
+            if (!isHls) {
+                startBatchDownload(srv, kind, 0, 0L)
+                return@launch
+            }
+            val quals = runCatching {
+                com.hikari.app.download.DownloadEngine.hlsQualities(src.url, src.headers)
+            }.getOrDefault(emptyList())
+            if (quals.size <= 1) {
+                startBatchDownload(srv, kind, 0, 0L)
+                return@launch
+            }
+            dlPendingSrv = srv
+            dlPendingKind = kind
+            dlQualityOpts = quals
+            dlQualityClaimed = false
+            showDlQuality = true
         }
     }
     val openDlChoice: () -> Unit = {
