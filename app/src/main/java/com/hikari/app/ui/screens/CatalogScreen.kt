@@ -1135,6 +1135,8 @@ private fun CatalogSkeletonGrid(columns: Int, modifier: Modifier = Modifier, cin
         ),
         label = "catalog-skeleton-pulse",
     )
+    // Television skeleton boxes read elevated-black (desktop language).
+    val tvSkel = com.hikari.app.tv.TvMode.current()
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
         modifier = modifier.fillMaxSize(),
@@ -1144,7 +1146,6 @@ private fun CatalogSkeletonGrid(columns: Int, modifier: Modifier = Modifier, cin
         userScrollEnabled = false,
     ) {
         // Television skeleton boxes read elevated-black (desktop language).
-        val tvSkel = com.hikari.app.tv.TvMode.current()
         items(columns * 3) {
             Column(Modifier.alpha(pulse)) {
                 Box(

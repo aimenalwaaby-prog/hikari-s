@@ -1690,8 +1690,8 @@ fun GlassDialog(
     // Television wears the desktop dialog language: a flat elevated-black
     // box with 12dp corners and a hairline edge (the reference's dialog
     // panels are flat, never glass). Phones keep the glass panel untouched.
-    val shape = if (tv) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerLarge) else GlassShape
     val tv = TvMode.current()
+    val shape = if (tv) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerLarge) else GlassShape
     // A short fade + scale so the panel appears rather than blinks.
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) { appear.animateTo(1f, tween(durationMillis = 170)) }

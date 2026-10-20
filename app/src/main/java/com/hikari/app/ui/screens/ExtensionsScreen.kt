@@ -7580,9 +7580,9 @@ private fun RepoCard(
                 Modifier
                     .size(if (com.hikari.app.tv.TvMode.current()) 52.dp else 40.dp)
                     .clip(repoTile)
-                    .background(
-                        if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.SurfaceElevated
-                        else Brush.verticalGradient(listOf(repoGlass.fillTop, repoGlass.fillBottom))
+                    .then(
+                        if (com.hikari.app.tv.TvMode.current()) Modifier.background(com.hikari.app.tv.TvDesktop.SurfaceElevated)
+                        else Modifier.background(Brush.verticalGradient(listOf(repoGlass.fillTop, repoGlass.fillBottom)))
                     )
                     .border(
                         1.dp,
