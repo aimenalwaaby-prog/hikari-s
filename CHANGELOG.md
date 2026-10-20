@@ -1,3 +1,9 @@
+## 0.11.78 (continuous build only)
+
+### Fixed
+- Episode watch pill hugging the download-icon side (screenshot-proven): it is centred under the play + download pair now, equal space on both sides
+- Repo-add URL field showing a collapsed "https://…/repo.json" stub with dot-dot-dot (screenshot-proven): the placeholder shows the full example URL for the kind being added, and the field wraps up to five lines so a long pasted URL shows in full instead of collapsing
+
 ## 0.11.77 (continuous build only)
 
 ### Added

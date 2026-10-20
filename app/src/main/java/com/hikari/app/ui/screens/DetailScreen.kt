@@ -8589,9 +8589,9 @@ private fun EpisodeRow(
         // Play + download ride one centered row of equal buttons: a bare Icon
         // against a 44dp IconButton sat the triangle visibly higher than the
         // download glyph (screenshot-proven on Black Clover S2). The episode's
-        // own watch state rides UNDER them as a small pill, right-aligned so
-        // it sits in the row's own corner instead of stretching anything.
-        Column(horizontalAlignment = Alignment.End) {
+        // own watch state rides UNDER them as a small pill, centred under the
+        // pair — equal space on both sides — instead of hugging one end.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = onClick,

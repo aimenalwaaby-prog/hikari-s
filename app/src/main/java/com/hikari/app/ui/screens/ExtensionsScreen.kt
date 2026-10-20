@@ -4863,20 +4863,29 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         placeholder = {
                             Text(
                                 tr(
+                                    // The full example URL per kind — never a
+                                    // collapsed "https://…/…" stub (the dot-dot-dot
+                                    // report): what the box shows is what it takes.
                                     when {
-                                        isAniyomi -> "https://…/index.min.json"
-                                        isVega -> "https://…/manifest.json"
-                                        isZangetsu -> "https://…/index.json"
-                                        isLnReader -> "https://…/plugins.min.json"
-                                        isSora -> "https://…/streamex.json"
-                                        isAnymex -> "https://…/anime_index.json"
-                                        isKotatsu -> "kotatsu or https://…/kotatsu-parsers.json"
-                                        else -> "https://…/repo.json"
+                                        isHikari -> "https://raw.githubusercontent.com/codegeasse1/hikari-extensions/builds/repo.json"
+                                        isNuvio -> "https://raw.githubusercontent.com/tapframe/nuvio-providers/main/manifest.json"
+                                        isSky -> "https://raw.githubusercontent.com/akashdh11/skystream-plugins/main/repo.json"
+                                        isAniyomi -> "https://raw.githubusercontent.com/aniyomiorg/aniyomi-extensions/repo/index.min.json"
+                                        isVega -> "https://raw.githubusercontent.com/Zenda-Cross/vega-providers/main/manifest.json"
+                                        isZangetsu -> "https://raw.githubusercontent.com/Spyou/zangetsu-providers/main/index.json"
+                                        isLnReader -> "https://github.com/lnreader/lnreader-plugins"
+                                        isSora -> "https://raw.githubusercontent.com/justbbcr/streamex/main/streamex.json"
+                                        isAnymex -> "https://MiraiEnoki.github.io/anymex_extensions/anime_index.json"
+                                        isKotatsu -> "kotatsu"
+                                        else -> "https://raw.githubusercontent.com/codegeasse1/codegeasse-cloudstream-repos/builds/repo.json"
                                     }
                                 )
                             )
                         },
-                        singleLine = true,
+                        // Wraps instead of one line: a long pasted URL shows in
+                        // full rather than scrolling sideways collapsed.
+                        singleLine = false,
+                        maxLines = 5,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().tvTextFieldKeys(repoUrl)
                     )
