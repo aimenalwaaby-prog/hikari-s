@@ -3392,6 +3392,11 @@ fun DetailScreen(
     // server stashed while it is open — see confirmDlServer below.
     var showDlDest by remember { mutableStateOf(false) }
     var dlPendingSrv by remember { mutableStateOf<StreamSource?>(null) }
+    // Quality asked once per batch (see askBatchQuality): the picked server's
+    // own variants, with the destination stashed alongside while open.
+    var showDlQuality by remember { mutableStateOf(false) }
+    var dlQualityOpts by remember { mutableStateOf(listOf<Pair<Int, Long>>()) }
+    var dlPendingKind by remember { mutableStateOf(com.hikari.app.download.DownloadKind.OFFLINE) }
     var dlChecked by remember { mutableStateOf(setOf<String>()) }
     var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
     var dlServers by remember { mutableStateOf(listOf<StreamSource>()) }
@@ -3435,7 +3440,48 @@ fun DetailScreen(
         dlPendingSrv = srv
         showDlDest = true
     }
-    fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind) {
+    // The batch's per-episode match for the picked server: same name on the
+    // same provider first, then either half, then whatever resolved — the
+    // same preference the single-download queue uses.
+    fun matchDlServer(servers: List<StreamSource>, srv: StreamSource): StreamSource =
+        servers.firstOrNull { it.name == srv.name && it.providerId == srv.providerId }
+            ?: servers.firstOrNull { it.providerId == srv.providerId }
+            ?: servers.firstOrNull { it.name == srv.name }
+            ?: servers[0]
+    // The second once-per-batch question (destination was the first): read
+    // the picked server's own qualities off the first episode — the same
+    // "Choose quality" the single download asks — and queue the whole batch
+    // at the answer. A single-variant source skips the question and goes
+    // straight in at Highest.
+    fun askBatchQuality(srv: StreamSource, kind: com.hikari.app.download.DownloadKind) {
+        showDlDest = false
+        val first = dlTargets.firstOrNull() ?: return
+        scope.launch {
+            val servers = runCatching { vm.serversForBatch(batchItem, first) }.getOrDefault(emptyList())
+            if (servers.isEmpty()) {
+                runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
+                return@launch
+            }
+            val src = matchDlServer(servers, srv)
+            val isHls = src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8")
+            if (!isHls) {
+                startBatchDownload(srv, kind, 0, 0L)
+                return@launch
+            }
+            val quals = runCatching {
+                com.hikari.app.download.DownloadEngine.hlsQualities(src.url, src.headers)
+            }.getOrDefault(emptyList())
+            if (quals.size <= 1) {
+                startBatchDownload(srv, kind, 0, 0L)
+                return@launch
+            }
+            dlPendingSrv = srv
+            dlPendingKind = kind
+            dlQualityOpts = quals
+            showDlQuality = true
+        }
+    }
+    fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, preferredHeight: Int, preferredBandwidth: Long) {
         showDlDest = false
         val eps = dlTargets
         if (eps.isEmpty()) return
@@ -3447,10 +3493,7 @@ fun DetailScreen(
                 for (ep in eps) {
                     val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
                     if (servers.isEmpty()) continue
-                    val src = servers.firstOrNull { it.name == srv.name && it.providerId == srv.providerId }
-                        ?: servers.firstOrNull { it.providerId == srv.providerId }
-                        ?: servers.firstOrNull { it.name == srv.name }
-                        ?: servers[0]
+                    val src = matchDlServer(servers, srv)
                     if (src.url.isBlank()) continue
                     val label = if (ep.season > 1) "S" + ep.season + " E" + ep.number else "E" + ep.number
                     val task = com.hikari.app.download.DownloadTask(
@@ -3466,6 +3509,8 @@ fun DetailScreen(
                         headers = src.headers,
                         isM3u8 = src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8"),
                         subtitles = src.subtitles,
+                        preferredHeight = preferredHeight,
+                        preferredBandwidth = preferredBandwidth,
                         kind = kind,
                         status = com.hikari.app.download.DownloadStatus.QUEUED,
                         createdAt = System.currentTimeMillis()
@@ -3574,7 +3619,7 @@ fun DetailScreen(
             selectedKey = null,
             onPick = { key ->
                 if (pending != null) {
-                    startBatchDownload(
+                    askBatchQuality(
                         pending,
                         if (key == "phone") com.hikari.app.download.DownloadKind.EXPORT
                         else com.hikari.app.download.DownloadKind.OFFLINE,
@@ -3584,6 +3629,43 @@ fun DetailScreen(
                 }
             },
             onDismiss = { showDlDest = false },
+        )
+    }
+    if (showDlQuality) {
+        val pending = dlPendingSrv
+        ChoiceDialog(
+            title = tr("Choose quality"),
+            items = buildList {
+                add(
+                    ChoiceItem(
+                        key = "best",
+                        label = tr("Highest quality"),
+                        supporting = tr("The best this server offers"),
+                    )
+                )
+                dlQualityOpts.forEachIndexed { index, q ->
+                    add(
+                        ChoiceItem(
+                            key = "q$index",
+                            label = if (q.first > 0) q.first.toString() + "p" else tr("Default quality"),
+                        )
+                    )
+                }
+            },
+            selectedKey = "best",
+            onPick = { key ->
+                // Backing out picks Highest: the batch still runs rather than
+                // dying on a dismissed sheet.
+                showDlQuality = false
+                if (pending != null) {
+                    val q = key.removePrefix("q").toIntOrNull()?.let { dlQualityOpts.getOrNull(it) }
+                    startBatchDownload(pending, dlPendingKind, q?.first ?: 0, q?.second ?: 0L)
+                }
+            },
+            onDismiss = {
+                showDlQuality = false
+                if (pending != null) startBatchDownload(pending, dlPendingKind, 0, 0L)
+            },
         )
     }
     // NOTE: no "Preparing downloads" modal any more. It used to sit here with

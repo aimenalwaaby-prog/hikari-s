@@ -1,3 +1,8 @@
+## 0.11.81 (continuous build only)
+
+### Added
+- Download-all asks the same questions a single-episode download asks: after the destination it reads the picked server's qualities once and asks "Choose quality" once (Highest + the server's variants, like the player's own menu) — the answer rides on every episode. Backing out of the quality sheet keeps Highest so the batch still runs
+
 ## 0.11.80 (continuous build only)
 
 ### Added
