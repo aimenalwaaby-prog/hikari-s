@@ -104,10 +104,10 @@ fun TvProviderPill(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.60f),
+        color = TvDesktop.SurfaceCard,
         modifier = modifier
             .tvPress(previewPass = true, onClick = onClick)
-            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), RoundedCornerShape(50)),
+            .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(50)),
     ) {
         Row(
             Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -119,7 +119,7 @@ fun TvProviderPill(
                 name ?: tr("All providers"),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = TvDesktop.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -127,7 +127,7 @@ fun TvProviderPill(
             Icon(
                 Icons.Filled.KeyboardArrowDown,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = TvDesktop.TextMuted,
                 modifier = Modifier.size(16.dp),
             )
         }
@@ -143,10 +143,10 @@ fun TvProfilePill(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.60f),
+        color = TvDesktop.SurfaceCard,
         modifier = modifier
             .tvPress(previewPass = true, onClick = onClick)
-            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), RoundedCornerShape(50)),
+            .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(50)),
     ) {
         Row(
             Modifier.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
@@ -172,7 +172,7 @@ fun TvProfilePill(
                 name ?: tr("Main"),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = TvDesktop.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -180,7 +180,7 @@ fun TvProfilePill(
             Icon(
                 Icons.Filled.KeyboardArrowDown,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = TvDesktop.TextMuted,
                 modifier = Modifier.size(16.dp),
             )
         }
@@ -233,7 +233,7 @@ fun TvHomeHeaderBar(
             Text(
                 tr("Every stream, one place."),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = TvDesktop.TextMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -358,8 +358,8 @@ fun TvSelectProviderDialog(
         // Dark glass box with tight chrome: the header is one compact block so
         // the provider grid owns the dialog (the "R on the next line + big
         // blank header" report).
-        shape = RoundedCornerShape(20.dp),
-        containerColor = Color(0xFF15181F),
+        shape = RoundedCornerShape(TvDesktop.CornerLarge),
+        containerColor = TvDesktop.SurfaceElevated,
         tonalElevation = 0.dp,
         title = {
             Column(Modifier.fillMaxWidth()) {
@@ -368,6 +368,7 @@ fun TvSelectProviderDialog(
                         tr("Select Provider"),
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge,
+                        color = TvDesktop.TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -376,10 +377,16 @@ fun TvSelectProviderDialog(
                     val allSelected = selection.isEmpty()
                     Surface(
                         onClick = onPickAll,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(TvDesktop.CornerCard),
                         color = if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll),
+                        else TvDesktop.SurfaceCard,
+                        modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll)
+                            .border(
+                                1.dp,
+                                if (allSelected) MaterialTheme.colorScheme.primary
+                                else TvDesktop.GlassEdge,
+                                RoundedCornerShape(TvDesktop.CornerCard),
+                            ),
                     ) {
                         Row(
                             Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -389,7 +396,7 @@ fun TvSelectProviderDialog(
                                 Icons.Filled.Language,
                                 contentDescription = null,
                                 tint = if (allSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                else TvDesktop.TextMuted,
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(6.dp))
@@ -397,7 +404,7 @@ fun TvSelectProviderDialog(
                                 tr("All Plugins (Global)"),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = TvDesktop.TextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -416,7 +423,7 @@ fun TvSelectProviderDialog(
                 Text(
                     tr("Choose a dedicated provider or search across all installed plugins"),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TvDesktop.TextMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
@@ -433,14 +440,14 @@ fun TvSelectProviderDialog(
                     placeholder = {
                         Text(
                             tr("Filter providers…"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = TvDesktop.TextMuted,
                         )
                     },
                     leadingIcon = {
                         Icon(
                             Icons.Filled.Search,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = TvDesktop.TextMuted,
                             modifier = Modifier.size(18.dp),
                         )
                     },
@@ -450,13 +457,13 @@ fun TvSelectProviderDialog(
                                 Icon(
                                     Icons.Filled.Close,
                                     contentDescription = tr("Clear"),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = TvDesktop.TextMuted,
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
                         }
                     } else null,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(TvDesktop.CornerCard),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -525,13 +532,15 @@ fun TvManageFeedDialog(
     val available = providers.filter { p -> p.config.id !in working.value }
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(TvDesktop.CornerLarge),
+        containerColor = TvDesktop.SurfaceElevated,
         title = {
             Column {
-                Text(tr("Manage Home Screen Feed"), fontWeight = FontWeight.Bold)
+                Text(tr("Manage Home Screen Feed"), fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary)
                 Text(
                     tr("Mix providers into one Home feed. Empty means everything."),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TvDesktop.TextMuted,
                 )
             }
         },
@@ -548,7 +557,7 @@ fun TvManageFeedDialog(
                     Text(
                         tr("Global — all installed plugins"),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = TvDesktop.TextMuted,
                     )
                 }
                 active.forEach { p ->
@@ -587,7 +596,7 @@ fun TvManageFeedDialog(
                     tr("Available Plugins"),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TvDesktop.TextMuted,
                 )
                 Spacer(Modifier.height(6.dp))
                 LazyVerticalGrid(
@@ -655,19 +664,19 @@ private fun TvProviderCard(
      *  no flag. */
     flagCode: String? = null,
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(TvDesktop.CornerCard)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(
                 if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                else TvDesktop.SurfaceCard
             )
             .border(
                 1.5.dp,
                 if (selected) MaterialTheme.colorScheme.primary
-                else Color.Transparent,
+                else TvDesktop.GlassEdge,
                 shape,
             )
             .clickable(onClick = onClick)
@@ -686,6 +695,7 @@ private fun TvProviderCard(
                 name,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                color = TvDesktop.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -693,7 +703,7 @@ private fun TvProviderCard(
                 Text(
                     supporting,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TvDesktop.TextMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -730,7 +740,9 @@ fun TvProfileMenuDialog(
     var newName by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(tr("Profiles"), fontWeight = FontWeight.Bold) },
+        shape = RoundedCornerShape(TvDesktop.CornerLarge),
+        containerColor = TvDesktop.SurfaceElevated,
+        title = { Text(tr("Profiles"), fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary) },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 Text(
@@ -745,7 +757,7 @@ fun TvProfileMenuDialog(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(TvDesktop.CornerCard))
                             .background(
                                 if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
                                 else Color.Transparent
@@ -762,7 +774,7 @@ fun TvProfileMenuDialog(
                                 .clip(CircleShape)
                                 .background(
                                     if (active) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant
+                                    else TvDesktop.SurfaceElevated
                                 ),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -771,7 +783,7 @@ fun TvProfileMenuDialog(
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = if (active) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                else TvDesktop.TextMuted,
                             )
                         }
                         Spacer(Modifier.width(10.dp))
@@ -801,7 +813,7 @@ fun TvProfileMenuDialog(
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodyMedium,
                         placeholder = { Text(tr("Profile name…")) },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(TvDesktop.CornerCard),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(6.dp))
@@ -828,7 +840,7 @@ fun TvProfileMenuDialog(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(TvDesktop.CornerCard))
                             .clickable { adding = true }
                             .tvPress(previewPass = true, onClick = { adding = true })
                             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -851,7 +863,7 @@ fun TvProfileMenuDialog(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(TvDesktop.CornerCard))
                         .clickable(onClick = onManage)
                         .tvPress(previewPass = true, onClick = onManage)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -860,7 +872,7 @@ fun TvProfileMenuDialog(
                     Icon(
                         Icons.Filled.Settings,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = TvDesktop.TextMuted,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))

@@ -119,22 +119,27 @@ fun TvCinemaCard(
   // the frame, and a portrait poster is cropped into it anchored at the TOP
   // (faces/title art, never the middle hair strip). No letterbox, no dark
   // side bars — a narrow poster floating between blanks is never the look.
+  //
+  // The desktop language: 8dp corners, a true-black card that separates from
+  // the page by its hairline (never a grey fill), and the focus glow + scale
+  // while the remote sits on it (see tvFocusGlow — focus IS hover on a TV).
   val hero = Artwork.heroModel(item)
   val art = hero.first
+  val cardShape = RoundedCornerShape(TvDesktop.CornerCard)
   // No clip on the outer Column: the corner curve used to reach down into the
   // title/year lines and bite their edges off. Only the artwork itself is
   // rounded (see the image Box below).
   Column(
-    modifier.width(cardWidth).clickable(onClick = onClick).tvPress(previewPass = true, onClick = onClick),
+    modifier.width(cardWidth).clickable(onClick = onClick).tvPress(previewPass = true, onClick = onClick).tvFocusGlow(TvDesktop.CornerCard),
   ) {
     Box(
-      Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
+      Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape).background(TvDesktop.SurfaceElevated).border(1.dp, TvDesktop.GlassEdge, cardShape),
       contentAlignment = Alignment.Center,
     ) {
       Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
-      AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop, alignment = Artwork.CINEMA_ALIGNMENT)
+      AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape), contentScale = ContentScale.Crop, alignment = Artwork.CINEMA_ALIGNMENT)
       item.rating?.takeIf { it > 0 }?.let { r ->
-        Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(8.dp), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+        Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(TvDesktop.CornerCard), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
           Text("★ " + "%.1f".format(r), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFC107), modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp))
         }
       }
@@ -156,17 +161,20 @@ fun TvVerticalCard(
   cardWidth: androidx.compose.ui.unit.Dp = 150.dp,
 ) {
   val art = Artwork.model(item)
+  // Desktop language, like the cinema card above: 8dp corners, true-black
+  // surfaces, focus glow + scale while the remote sits on the card.
+  val cardShape = RoundedCornerShape(TvDesktop.CornerCard)
   Column(
-    modifier.width(cardWidth).clickable(onClick = onClick).tvPress(previewPass = true, onClick = onClick),
+    modifier.width(cardWidth).clickable(onClick = onClick).tvPress(previewPass = true, onClick = onClick).tvFocusGlow(TvDesktop.CornerCard),
   ) {
     Box(
-      Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant).border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
+      Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(cardShape).background(TvDesktop.SurfaceElevated).border(1.dp, TvDesktop.GlassEdge, cardShape),
       contentAlignment = Alignment.Center,
     ) {
       Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
-      AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
+      AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(cardShape), contentScale = ContentScale.Crop)
       item.rating?.takeIf { it > 0 }?.let { r ->
-        Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(8.dp), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+        Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(TvDesktop.CornerCard), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
           Text("★ " + "%.1f".format(r), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFC107), modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp))
         }
       }

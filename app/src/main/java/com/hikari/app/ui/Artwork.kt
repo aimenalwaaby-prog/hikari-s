@@ -126,6 +126,50 @@ object Artwork {
     /** Looked-up wide art for [item] (null while the lookup is still running). */
     fun backdrop(item: MediaItem): String? = lookup(item) { it.backdrop }
 
+    /**
+     * Starts the TMDB/IMDb artwork lookup for [item] WITHOUT subscribing the
+     * caller to the result.
+     *
+     * The normal lookups kick off lazily on first read, which on the
+     * television detail page meant the TMDB round-trip only started once the
+     * provider's own detail response had landed — the backdrop then arrived a
+     * beat after everything else. The detail page (and the home hero) call
+     * this the moment the title opens, from nav args alone, so the art is
+     * already in flight — ideally already cached — when the page paints.
+     * Single-flight and disk-cached like everything else here, so calling it
+     * early never costs a duplicate request.
+     */
+    fun prefetch(item: MediaItem) {
+        val key = keyOf(item) ?: return
+        loadOnce()
+        val e = memory[key]
+        if (e != null) {
+            if (System.currentTimeMillis() - e.at < MISS_TTL_MS) return
+            // A stale miss: this title may have gained art since. Re-ask once.
+            enqueue(key, item)
+            return
+        }
+        enqueue(key, item)
+    }
+
+    /**
+     * Hero art for the TELEVISION layout as (model, isWide).
+     *
+     * Same shape as [heroModel], but the TMDB lookup always outranks the
+     * provider's own art: the television wears high-quality TMDB backdrops
+     * (w1280) and posters on every detail/hero surface. The provider's art is
+     * still the first paint — the lookup is asynchronous — and the [revision]
+     * repaint swaps the hero to TMDB the moment it lands (which, with the
+     * open-time [prefetch], is usually before the page finishes loading).
+     */
+    fun tvHeroModel(item: MediaItem): Pair<Any?, Boolean> {
+        backdrop(item)?.let { return PosterLoader.model(it) to true }
+        item.backdropUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to true }
+        poster(item)?.let { return PosterLoader.model(it) to false }
+        item.posterUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to false }
+        return PosterLoader.model(null) to false
+    }
+
     private fun lookup(item: MediaItem, pick: (Entry) -> String?): String? {
         // Snapshot read: repaints the calling cell when a lookup completes.
         revision.value

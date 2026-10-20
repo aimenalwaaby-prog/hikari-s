@@ -151,12 +151,17 @@ fun TvNavRail(
             // full-height gradient wash. Deliberately NO clip here: the
             // focused tab's labelled pill expands past the bar over the
             // content, and clipping would cut it off.
+            //
+            // True black, not the old grey wash: on the AMOLED theme (the
+            // fresh-install default) every background is pure black, so the
+            // rail is a black pill with a glass hairline like the reference's
+            // own AMOLED surfaces.
             .padding(start = 10.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
             .background(
-                Color(0xFF14161C).copy(alpha = 0.72f),
+                TvDesktop.SurfaceCard,
                 RoundedCornerShape(28.dp),
             )
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(28.dp))
+            .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(28.dp))
             .padding(vertical = 18.dp),
     ) {
         // How much height each tab may have: what is left after the wordmark,
@@ -299,6 +304,21 @@ private fun TvNavRailItem(
             .padding(vertical = 6.dp, horizontal = 6.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
+        // The reference dock's active cue: a thin accent bar on the row's
+        // leading edge while this tab is the current one — readable at a
+        // glance without stealing the expansion that belongs to the D-pad
+        // position (see `expanded` above).
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 1.dp)
+                    .width(3.dp)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(scheme.primary),
+            )
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start,

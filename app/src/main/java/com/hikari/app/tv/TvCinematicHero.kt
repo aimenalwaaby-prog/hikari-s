@@ -82,7 +82,6 @@ fun TvCinematicHero(
     val item = items[index.coerceIn(items.indices)]
     // The overview's [more] expansion resets per title, like the index does.
     var overviewExpanded by remember(item) { mutableStateOf(false) }
-    val art = remember(item) { Artwork.heroModel(item) }
     val scheme = MaterialTheme.colorScheme
     val bg = scheme.background
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
@@ -121,13 +120,29 @@ fun TvCinematicHero(
                 }
                 .clickable { onOpen(item) },
         ) {
-            PosterImage(
-                model = art.first,
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alignment = com.hikari.app.ui.Artwork.CINEMA_ALIGNMENT,
-            )
+            // Stepping between titles crossfades the art (the reference's
+            // screen-state crossfade): an instant swap reads as a flicker on a
+            // full-bleed image. Keyed on the title's id with per-key art, so
+            // the outgoing backdrop paints until it has faded out. A title
+            // that left the list falls back to the current art for both
+            // states — a plain swap, never a blank.
+            androidx.compose.animation.Crossfade(
+                targetState = item.uniqueId,
+                label = "tvHeroArt",
+            ) { id ->
+                // TMDB first, like the TV detail page (see Artwork.tvHeroModel):
+                // the hero always wears high-quality TMDB backdrops.
+                val fadeArt = remember(id) {
+                    Artwork.tvHeroModel(items.firstOrNull { it.uniqueId == id } ?: item)
+                }
+                PosterImage(
+                    model = fadeArt.first,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alignment = com.hikari.app.ui.Artwork.CINEMA_ALIGNMENT,
+                )
+            }
             Box(
                 Modifier
                     .fillMaxSize()

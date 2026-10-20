@@ -91,6 +91,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -152,6 +153,7 @@ import com.hikari.app.data.TitleRating
 import com.hikari.app.data.TmdbMeta
 import com.hikari.app.data.TmdbSourceType
 import com.hikari.app.data.TmdbSpec
+import com.hikari.app.data.TmdbStills
 import com.hikari.app.data.Translator
 import com.hikari.app.data.Trailer
 import com.hikari.app.data.WatchProgress
@@ -3372,6 +3374,14 @@ fun DetailScreen(
             rawType = rawType.ifBlank { m?.rawType.orEmpty() },
         )
     }
+    // Television wears TMDB art on every hero/backdrop surface (see
+    // Artwork.tvHeroModel): kick that lookup off the moment the title opens,
+    // from nav args alone, instead of waiting for the provider's own detail
+    // response — so the high-quality backdrop is already in flight (usually
+    // already cached) when the page paints.
+    if (isTvLayout) {
+        LaunchedEffect(savedItem) { Artwork.prefetch(savedItem) }
+    }
     val isSaved = favorites.any { it.uniqueId == savedItem.uniqueId }
     // A title joins the Library THROUGH a category, so the button opens the
     // picker rather than saving blind: "Add to library" asks which categories
@@ -3397,12 +3407,33 @@ fun DetailScreen(
     var showDlQuality by remember { mutableStateOf(false) }
     var dlQualityOpts by remember { mutableStateOf(listOf<Pair<Int, Long>>()) }
     var dlPendingKind by remember { mutableStateOf(com.hikari.app.download.DownloadKind.OFFLINE) }
+    // ChoiceDialog fires onDismiss() and THEN onPick() on every tap — so a tap
+    // on a quality would queue the batch twice (Highest from the dismiss,
+    // then the pick). The dismiss path therefore only queues when no pick
+    // claimed the dialog, checked after the tap's own pick has run.
+    var dlQualityClaimed by remember { mutableStateOf(false) }
     var dlChecked by remember { mutableStateOf(setOf<String>()) }
     var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
     var dlServers by remember { mutableStateOf(listOf<StreamSource>()) }
     var dlBusy by remember { mutableStateOf(false) }
     var dlMsg by remember { mutableStateOf<String?>(null) }
     val batchItem = m ?: savedItem
+    // Television episode stills, straight from TMDB (see TmdbStills): the
+    // provider's own thumbnail wins wherever it has one — this map only fills
+    // the blanks, keyed by (season, episode), and the shelf keeps its old art
+    // when TMDB has nothing. Loaded once the episode list for the shown
+    // season is known, so switching seasons re-asks for the new range.
+    val tvEpStills = remember { mutableStateMapOf<Pair<Int, Int>, String>() }
+    if (isTvLayout) {
+        LaunchedEffect(m?.uniqueId, sortedEps) {
+            tvEpStills.clear()
+            if (!detailIsSeries || sortedEps.isEmpty()) return@LaunchedEffect
+            val map = TmdbStills.stillsFor(batchItem, sortedEps.map { it.season }.toSet())
+            for ((k, v) in map) {
+                if (v.isNotBlank()) tvEpStills[k] = v
+            }
+        }
+    }
     fun dlLabel(e: Episode): String {
         val base = if (e.season > 1) "S" + e.season + " E" + e.number else "E" + e.number
         val nm = e.name?.trim().orEmpty()
@@ -3478,6 +3509,7 @@ fun DetailScreen(
             dlPendingSrv = srv
             dlPendingKind = kind
             dlQualityOpts = quals
+            dlQualityClaimed = false
             showDlQuality = true
         }
     }
@@ -3657,6 +3689,7 @@ fun DetailScreen(
                 // Backing out picks Highest: the batch still runs rather than
                 // dying on a dismissed sheet.
                 showDlQuality = false
+                dlQualityClaimed = true
                 if (pending != null) {
                     val q = key.removePrefix("q").toIntOrNull()?.let { dlQualityOpts.getOrNull(it) }
                     startBatchDownload(pending, dlPendingKind, q?.first ?: 0, q?.second ?: 0L)
@@ -3664,7 +3697,18 @@ fun DetailScreen(
             },
             onDismiss = {
                 showDlQuality = false
-                if (pending != null) startBatchDownload(pending, dlPendingKind, 0, 0L)
+                // A tap runs this BEFORE onPick (see dlQualityClaimed): queue
+                // Highest only when no pick claimed the dialog — deferred past
+                // the tap so the pick's own queue wins.
+                if (pending != null && !dlQualityClaimed) {
+                    scope.launch {
+                        delay(150)
+                        if (!dlQualityClaimed && pending != null) {
+                            dlQualityClaimed = true
+                            startBatchDownload(pending, dlPendingKind, 0, 0L)
+                        }
+                    }
+                }
             },
         )
     }
@@ -3972,7 +4016,7 @@ fun DetailScreen(
         val item = m ?: return@LaunchedEffect
         heroLogo = runCatching { TmdbMeta.logo(item) }.getOrNull()
     }
-    val tvHeroImage = m?.let { Artwork.heroModel(it) }
+    val tvHeroImage = m?.let { if (isTvLayout) Artwork.tvHeroModel(it) else Artwork.heroModel(it) }
         ?: (PosterLoader.model(posterUrl) to false)
 
                     val tvPlayRow: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { topPad ->
@@ -4325,6 +4369,7 @@ fun DetailScreen(
                                         EpisodePosterCard(
                                             ep = ep,
                                             fallbackImage = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
+                                            tmdbStill = tvEpStills[ep.season to ep.number],
                                             onClick = { tryPlay(ep) },
                                             onDownload = { tryDownload(ep) },
                                             modifier = Modifier.width((150f * tvEpisodeScale).dp),
@@ -4786,6 +4831,7 @@ fun DetailScreen(
                                             EpisodePosterCard(
                                                 ep = ep,
                                                 fallbackImage = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
+                                                tmdbStill = tvEpStills[ep.season to ep.number],
                                                 onClick = { tryPlay(ep) },
                                                 onDownload = { tryDownload(ep) },
                                                 modifier = Modifier.width((160f * tvEpisodeScale).dp),
@@ -8235,6 +8281,9 @@ private fun TrailerRow(trailers: List<Trailer>, onClick: (Trailer) -> Unit) {
 private fun EpisodePosterCard(
     ep: Episode,
     fallbackImage: String? = null,
+    /** TMDB still for this episode (TV only): fills the frame when the
+     *  provider shipped no thumbnail of its own. Null keeps the old art. */
+    tmdbStill: String? = null,
     onClick: () -> Unit,
     onDownload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -8268,7 +8317,7 @@ private fun EpisodePosterCard(
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            val thumb = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: fallbackImage)
+            val thumb = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() } ?: fallbackImage)
             if (thumb != null) {
                 AsyncImage(
                     model = thumb,

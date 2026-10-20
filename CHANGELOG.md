@@ -1,3 +1,13 @@
+## 0.11.82 (continuous build only)
+
+### Added (TV UI only — phone UI untouched)
+- Television wears the desktop client's visual language: true-black AMOLED surfaces, 8dp corners, accent focus ring + scale on every poster card (focus is hover on a TV), thin accent bar on the rail's current tab, hero art crossfade between titles
+- Same language on the rest of TV chrome: home header pills, provider/feed/profile dialogs and every tab header paint from the same black/8dp/accent tokens
+- TMDB art first on TV: detail backdrops/heroes always prefer high-quality TMDB images (lookups start the moment a title opens), episode shelves fill blank thumbnails with TMDB stills, home hero prefetches TMDB backdrops
+
+### Fixed
+- Tapping a download-all quality queued the whole batch twice (Highest + the pick): the quality sheet now queues exactly once
+
 ## 0.11.81 (continuous build only)
 
 ### Added

@@ -877,6 +877,14 @@ fun HomeScreen(nav: NavHostController) {
         tvHero = emptyList()
     }
     val featured = if (TvMode.current()) tvHero.ifEmpty { featuredLive } else featuredLive
+    // Television hero art is TMDB backdrops (see TvCinematicHero): start those
+    // lookups the moment the hero set is known, so the banner paints
+    // high-quality art instead of waiting for a scroll to trigger each cell.
+    if (TvMode.current()) {
+        LaunchedEffect(featured) {
+            featured.take(8).forEach { Artwork.prefetch(it) }
+        }
+    }
     val openGlobalSearch: () -> Unit = {
         Routes.navigateTab(nav, Routes.SEARCH)
     }

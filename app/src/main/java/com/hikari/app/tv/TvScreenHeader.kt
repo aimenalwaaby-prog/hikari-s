@@ -41,7 +41,7 @@ fun TvScreenHeader(
                 title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = TvDesktop.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -49,7 +49,7 @@ fun TvScreenHeader(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TvDesktop.TextMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
