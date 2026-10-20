@@ -1,3 +1,9 @@
+## 0.11.76 (continuous build only)
+
+### Fixed
+- Player closing when returning from the background with PiP off (screenshot-proven: Home for one second, back to Hikari, player gone, detail screen showing): MainActivity was singleTask, and reusing the task for a singleTask root clears every activity above it — it is singleTop now, so the task comes forward intact and the player resumes. Download/work notification taps carry CLEAR_TOP|SINGLE_TOP so they still reach the existing window instead of stacking a second one. PiP auto-enter is also gated on the OS actually allowing PiP (feature + app-ops check, re-asserted every resume): with PiP turned off, Home no longer fires a doomed auto-enter whose dismiss check finished the player behind the user's back
+- IPTV tab now reads like My Stuff: three swipeable pages (IPTV | Tor | Network stream) under a pill strip, with the strip and pager sharing one state in both directions (TV draws the section directly, pills only). Each page has its own header counts, its own tile-shape button with its own remembered shape, its own scroll position, and its own + button opening the add dialog preset to that kind (playlist link/file, torrent magnet/URL/hash, direct stream link). The dialog title follows the preset too
+
 ## 0.11.75 (continuous build only)
 
 ### Fixed
@@ -4865,9 +4871,3 @@ Fixed:
 - Out-of-memory crashes on image-heavy screens.
 - Search paging, catalog categories, plugin settings scrolling, mojibake in titles, hero banner swipe, continuous numbering on single-season shows, a Kotlin interpolation crash on CJK season markers (`第2季`).
 - A blank band under the status bar after returning from the background in fullscreen.
-## 0.11.75 (continuous build only)
-
-### Fixed
-- Episode cards showing the play + download buttons riding high above the episode text (screenshot-proven): the card row aligned to the top — the whole row is vertically centred now, so the buttons sit in the middle of the box
-- Sources sheet opening onto a blank box while servers are still being searched (screenshot-proven: empty list over the searching footer): the empty-list fast path skipped the loading placeholder on the very first paint, so nothing was ever added — an empty search now always shows "Please wait — servers are loading…" (with the provider name when one is searched first), which hides itself the moment the first server lands. The detail screen's server sheet shows the same wait message in place of its empty list
-- Cold-start crash after an extension's settings screen outlived its code (crash-log-proven on 0.11.33: `Unable to instantiate fragment com.cncverse.M3UPlaylistPlayer.Settings` on every launch): the saved fragment back-stack is dropped before the FragmentManager restores it — fragments here are only plugin dialogs/sheets, so nothing of the app is lost and a stale save can never kill launch again

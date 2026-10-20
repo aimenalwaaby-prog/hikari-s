@@ -509,6 +509,11 @@ class AppStore(private val ctx: Context) {
         /** Shape of the tiles on the IPTV tab's playlist/group grids (see
          *  [TileShapes]: poster / square / wide). */
         val IPTV_SHAPE = stringPreferencesKey("iptvTileShape")
+        /** Per-section tile shapes for the IPTV tab's Tor and Network stream
+         *  pages (the playlist page keeps IPTV_SHAPE above): each of the three
+         *  sections remembers its own look. */
+        val IPTV_TOR_SHAPE = stringPreferencesKey("iptvTorTileShape")
+        val IPTV_STREAM_SHAPE = stringPreferencesKey("iptvStreamTileShape")
         val APP_ICON = stringPreferencesKey("appIcon")
         /** Language TMDB titles are shown in. "" = follow the app language,
          *  "none" = leave TMDB on English, otherwise a TMDB code ("es-ES"). */
@@ -2529,6 +2534,22 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun setIptvShape(shape: String) {
         write("IPTV_SHAPE") { it[K.IPTV_SHAPE] = TileShapes.normalize(shape) }
+    }
+
+    /** Shape of the IPTV tab's Tor page tiles ([TileShapes] key; poster by default). */
+    fun iptvTorShapeFlow(): Flow<String> =
+        store.data.map { TileShapes.normalize(it[K.IPTV_TOR_SHAPE]) }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun setIptvTorShape(shape: String) {
+        write("IPTV_TOR_SHAPE") { it[K.IPTV_TOR_SHAPE] = TileShapes.normalize(shape) }
+    }
+
+    /** Shape of the IPTV tab's Network stream page tiles ([TileShapes] key; poster by default). */
+    fun iptvStreamShapeFlow(): Flow<String> =
+        store.data.map { TileShapes.normalize(it[K.IPTV_STREAM_SHAPE]) }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun setIptvStreamShape(shape: String) {
+        write("IPTV_STREAM_SHAPE") { it[K.IPTV_STREAM_SHAPE] = TileShapes.normalize(shape) }
     }
 
     // ---- The Manga tab (ON by default; Settings → Taskbar buttons) ----

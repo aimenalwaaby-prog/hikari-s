@@ -35,8 +35,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -57,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -125,8 +128,14 @@ fun IptvScreen(nav: NavHostController) {
     val app = LocalContext.current.applicationContext as HikariApp
     val all by app.providers.providers.collectAsState()
     val playlists = remember(all) { all.filterIsInstance<IptvProvider>() }
-    val shapeFlow = remember { app.store.iptvShapeFlow() }
-    val shape by shapeFlow.collectAsState(initial = TileShapes.POSTER)
+    // One tile shape per section — each of the three pages remembers its own
+    // look (the playlist page keeps the original key).
+    val playlistShapeFlow = remember { app.store.iptvShapeFlow() }
+    val playlistShape by playlistShapeFlow.collectAsState(initial = TileShapes.POSTER)
+    val torShapeFlow = remember { app.store.iptvTorShapeFlow() }
+    val torShape by torShapeFlow.collectAsState(initial = TileShapes.POSTER)
+    val streamShapeFlow = remember { app.store.iptvStreamShapeFlow() }
+    val streamShape by streamShapeFlow.collectAsState(initial = TileShapes.POSTER)
     val scope = rememberCoroutineScope()
     val uiContext = LocalContext.current
 
@@ -293,132 +302,111 @@ fun IptvScreen(nav: NavHostController) {
         reading = false
     }
 
-    Column(Modifier.fillMaxSize()) {
-        IptvHeader(
-            title = tr("IPTV"),
-            subtitle = if (playlists.isEmpty()) tr("No playlists yet")
-            else I18n.t("%s playlists · %s channels")
-                .replace("%s", playlists.size.toString())
-                .replace("%s", cards.sumOf { it.channels }.toString()),
-            onBack = null,
-            shape = shape,
-            onCycleShape = { scope.launch { app.store.setIptvShape(nextShape(shape)) } },
-            onSearch = null,
-            onAdd = { showAdd = true },
+    // ---- Three swipeable sections like My Stuff (IPTV | Tor | Network stream)
+    // The pill strip and the pager share one `section` state in both directions
+    // (tap animates over, swipe settles back); TV draws the section directly
+    // with pills as the only switcher, like MyStuffScreen does.
+    var section by rememberSaveable { mutableStateOf(IptvSection.PLAYLIST) }
+    val tvNow = com.hikari.app.tv.TvMode.current()
+    val pager = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = 0,
+        pageCount = { 3 },
+    )
+    var pagingProgrammatically by remember { mutableStateOf(false) }
+    fun pageIndex(s: String): Int = when (s) {
+        IptvSection.TORRENT -> 1
+        IptvSection.STREAM -> 2
+        else -> 0
+    }
+    fun sectionAt(page: Int): String = when (page) {
+        1 -> IptvSection.TORRENT
+        2 -> IptvSection.STREAM
+        else -> IptvSection.PLAYLIST
+    }
+    LaunchedEffect(section) {
+        val target = pageIndex(section)
+        if (target == pager.settledPage) return@LaunchedEffect
+        if (target == pager.currentPage && !pager.isScrollInProgress) return@LaunchedEffect
+        pagingProgrammatically = true
+        try {
+            if (tvNow) pager.scrollToPage(target)
+            else pager.animateScrollToPage(target)
+        } finally {
+            pagingProgrammatically = false
+        }
+    }
+    LaunchedEffect(pager) {
+        androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { page ->
+            if (pagingProgrammatically) return@collect
+            val shown = sectionAt(page)
+            if (shown != section) section = shown
+        }
+    }
+
+    val playlistCards = remember(cards) { cards.filter { !it.torrent && !it.stream } }
+    val torCards = remember(cards) { cards.filter { it.torrent } }
+    val streamCards = remember(cards) { cards.filter { it.stream && !it.torrent } }
+
+    // Opens the add dialog preset to one section's kind: Tor takes a magnet /
+    // .torrent URL / info hash, Network stream a direct link, IPTV a playlist
+    // link or file. The dialog's own pills can still switch after.
+    fun presetAdd(kind: String) {
+        when (kind) {
+            IptvSection.TORRENT -> {
+                addStream = true
+                addTorrent = true
+            }
+            IptvSection.STREAM -> {
+                addStream = true
+                addTorrent = false
+            }
+            else -> {
+                addStream = false
+                addTorrent = false
+            }
+        }
+        addLink = ""
+        addName = ""
+        addFileLabel = ""
+        addFilePath = ""
+        showAdd = true
+    }
+
+    @Composable
+    fun SectionPage(kind: String) {
+        IptvSectionPage(
+            kind = kind,
+            playlistCards = playlistCards,
+            torCards = torCards,
+            streamCards = streamCards,
+            playlistsEmpty = playlists.isEmpty(),
+            reading = reading,
+            playlistShape = playlistShape,
+            torShape = torShape,
+            streamShape = streamShape,
+            nav = nav,
+            onCyclePlaylist = { scope.launch { app.store.setIptvShape(nextShape(playlistShape)) } },
+            onCycleTor = { scope.launch { app.store.setIptvTorShape(nextShape(torShape)) } },
+            onCycleStream = { scope.launch { app.store.setIptvStreamShape(nextShape(streamShape)) } },
+            onAddPreset = { presetAdd(it) },
+            onRemove = { removeTarget = it },
         )
-        when {
-            playlists.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Filled.LiveTv,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(40.dp),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        tr("No IPTV playlist yet"),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        tr(
-                            "Paste an M3U/M3U8 link (or pick a playlist file) and it " +
-                                "appears here as a tile."
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp),
-                    )
-                    Surface(
-                        onClick = { showAdd = true },
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(tr("Add playlist"))
-                        }
-                    }
-                }
-            }
+    }
 
-            cards.isEmpty() && reading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = tileMinFor(shape)),
-                // Playlist cards position held across visits (see
-                // ScrollKeeper).
-                state = com.hikari.app.ui.components.keptGridState(
-                    "iptv",
-                    itemKeys = remember(cards) { cards.map { it.id } },
-                ),
+    Column(Modifier.fillMaxSize()) {
+        IptvSectionStrip(
+            sections = listOf(IptvSection.PLAYLIST, IptvSection.TORRENT, IptvSection.STREAM),
+            current = section,
+            onPick = { section = it },
+        )
+        if (tvNow) {
+            Box(Modifier.fillMaxSize()) { SectionPage(section) }
+        } else {
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pager,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    end = 12.dp,
-                    top = 4.dp,
-                    bottom = LocalTaskbarInset.current + 24.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(cards, key = { it.id }) { card ->
-                    IptvTile(
-                        cover = card.cover,
-                        name = card.name,
-                        subtitle = when {
-                            card.error != null -> card.error
-                            card.torrent -> tr("Torrent")
-                            card.stream -> tr("Network stream")
-                            card.channels == 0 -> tr("Empty playlist")
-                            else -> I18n.t("%s channels · %s groups")
-                                .replace("%s", card.channels.toString())
-                                .replace("%s", card.groups.toString())
-                        },
-                        shape = shape,
-                        badge = if (card.error != null) tr("Didn't load") else null,
-                        onRemove = { removeTarget = card },
-                    ) {
-                        if (card.torrent) {
-                            Routes.safeNavigate(
-                                nav,
-                                Routes.catalog(
-                                    providerId = card.id,
-                                    catalogId = IptvProvider.CATALOG_ALL,
-                                    title = card.name,
-                                    providerName = card.name,
-                                    type = MediaType.MOVIE,
-                                    rawType = "torrent",
-                                ),
-                            )
-                        } else if (card.stream && !card.torrent) {
-                            // A network stream is one file, not a channel list: it opens
-                            // straight on its detail page (Play), with no All-channels /
-                            // Ungrouped folders in between — and plays as VOD, not live.
-                            Routes.safeNavigate(
-                                nav,
-                                Routes.detail(
-                                    providerId = card.id,
-                                    type = MediaType.MOVIE,
-                                    mediaId = card.url,
-                                    title = card.name,
-                                    posterUrl = card.cover,
-                                    rawType = "stream",
-                                ),
-                            )
-                        } else {
-                            Routes.safeNavigate(nav, Routes.iptvPlaylist(card.id))
-                        }
-                    }
-                }
+            ) { page ->
+                SectionPage(sectionAt(page))
             }
         }
     }
@@ -426,7 +414,7 @@ fun IptvScreen(nav: NavHostController) {
     if (showAdd) {
         AlertDialog(
             onDismissRequest = { if (!adding) showAdd = false },
-            title = { Text(if (addStream) tr("Add network stream") else tr("Add IPTV playlist")) },
+            title = { Text(if (addTorrent) tr("Add torrent") else if (addStream) tr("Add network stream") else tr("Add IPTV playlist")) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     // Playlist or single link. Kept in front of the fields
@@ -1275,6 +1263,312 @@ private suspend fun readGroups(p: IptvProvider, mode: String): List<IptvGroupTil
 // -------------------------------------------------------------------- pieces --
 
 /** The tab's own title bar (no back button on the root tab). */
+/** The three swipeable pages of the IPTV tab — the My Stuff pattern:
+ *  pills up top, pages below, one shared state in both directions. */
+private object IptvSection {
+    const val PLAYLIST = "playlist"
+    const val TORRENT = "torrent"
+    const val STREAM = "stream"
+}
+
+/** The pill strip above the pages (IPTV | Tor | Network stream). */
+@Composable
+private fun IptvSectionStrip(sections: List<String>, current: String, onPick: (String) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        sections.forEach { section ->
+            IptvSectionPill(
+                label = when (section) {
+                    IptvSection.TORRENT -> tr("Tor")
+                    IptvSection.STREAM -> tr("Network stream")
+                    else -> tr("IPTV")
+                },
+                icon = when (section) {
+                    IptvSection.TORRENT -> Icons.Filled.Download
+                    IptvSection.STREAM -> Icons.Filled.Link
+                    else -> Icons.Filled.LiveTv
+                },
+                selected = current == section,
+                modifier = Modifier.weight(1f),
+            ) { onPick(section) }
+        }
+    }
+}
+
+/** One section button of the strip (selected = primary pill, else surface). */
+@Composable
+private fun IptvSectionPill(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (selected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier.height(38.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * One IPTV section page: its own header (own title/counts, own tile-shape
+ * button, own + button opening the add dialog preset to this kind) above its
+ * own grid. Each page keeps its own shape and its own scroll position.
+ */
+@Composable
+private fun IptvSectionPage(
+    kind: String,
+    playlistCards: List<IptvCard>,
+    torCards: List<IptvCard>,
+    streamCards: List<IptvCard>,
+    playlistsEmpty: Boolean,
+    reading: Boolean,
+    playlistShape: String,
+    torShape: String,
+    streamShape: String,
+    nav: NavHostController,
+    onCyclePlaylist: () -> Unit,
+    onCycleTor: () -> Unit,
+    onCycleStream: () -> Unit,
+    onAddPreset: (String) -> Unit,
+    onRemove: (IptvCard) -> Unit,
+) {
+    val pageCards = when (kind) {
+        IptvSection.TORRENT -> torCards
+        IptvSection.STREAM -> streamCards
+        else -> playlistCards
+    }
+    val pageShape = when (kind) {
+        IptvSection.TORRENT -> torShape
+        IptvSection.STREAM -> streamShape
+        else -> playlistShape
+    }
+    Column(Modifier.fillMaxSize()) {
+        IptvHeader(
+            title = when (kind) {
+                IptvSection.TORRENT -> tr("Tor")
+                IptvSection.STREAM -> tr("Network stream")
+                else -> tr("IPTV")
+            },
+            subtitle = when (kind) {
+                IptvSection.TORRENT -> if (torCards.isEmpty()) tr("No torrents yet")
+                else I18n.t("%s torrents").replace("%s", torCards.size.toString())
+                IptvSection.STREAM -> if (streamCards.isEmpty()) tr("No network streams yet")
+                else I18n.t("%s network streams").replace("%s", streamCards.size.toString())
+                else -> if (playlistsEmpty) tr("No playlists yet")
+                else I18n.t("%s playlists · %s channels")
+                    .replace("%s", playlistCards.size.toString())
+                    .replace("%s", playlistCards.sumOf { it.channels }.toString())
+            },
+            onBack = null,
+            shape = pageShape,
+            onCycleShape = when (kind) {
+                IptvSection.TORRENT -> onCycleTor
+                IptvSection.STREAM -> onCycleStream
+                else -> onCyclePlaylist
+            },
+            onSearch = null,
+            onAdd = { onAddPreset(kind) },
+        )
+        IptvKindGrid(
+            kind = kind,
+            cards = pageCards,
+            reading = reading,
+            shape = pageShape,
+            keeperKey = when (kind) {
+                IptvSection.TORRENT -> "iptv_tor"
+                IptvSection.STREAM -> "iptv_stream"
+                else -> "iptv"
+            },
+            showOnboarding = kind == IptvSection.PLAYLIST && playlistsEmpty,
+            emptyTitle = when (kind) {
+                IptvSection.TORRENT -> tr("No torrents yet")
+                IptvSection.STREAM -> tr("No network streams yet")
+                else -> tr("No IPTV playlist yet")
+            },
+            emptyBody = when (kind) {
+                IptvSection.TORRENT -> tr("Paste a magnet link, a .torrent URL or a bare info hash and it appears here as a tile.")
+                IptvSection.STREAM -> tr("Paste a direct link (m3u8, mp4, Terabox, MDisk…) and it appears here as a tile.")
+                else -> tr("Paste an M3U/M3U8 link (or pick a playlist file) and it appears here as a tile.")
+            },
+            emptyAction = when (kind) {
+                IptvSection.TORRENT -> tr("Add torrent")
+                IptvSection.STREAM -> tr("Add stream")
+                else -> tr("Add playlist")
+            },
+            onEmptyAdd = { onAddPreset(kind) },
+            nav = nav,
+            onRemove = onRemove,
+        )
+    }
+}
+
+/**
+ * The body under one section's header: the onboarding card (playlist page with
+ * nothing added yet), a spinner while the first read lands, an empty card, or
+ * the tile grid. Tile taps route by kind exactly like the old single list.
+ */
+@Composable
+private fun IptvKindGrid(
+    kind: String,
+    cards: List<IptvCard>,
+    reading: Boolean,
+    shape: String,
+    keeperKey: String,
+    showOnboarding: Boolean,
+    emptyTitle: String,
+    emptyBody: String,
+    emptyAction: String,
+    onEmptyAdd: () -> Unit,
+    nav: NavHostController,
+    onRemove: (IptvCard) -> Unit,
+) {
+    when {
+        showOnboarding || (cards.isEmpty() && !reading) -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Filled.LiveTv,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(40.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    emptyTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    emptyBody,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp),
+                )
+                Surface(
+                    onClick = onEmptyAdd,
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(emptyAction)
+                    }
+                }
+            }
+        }
+
+        cards.isEmpty() && reading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+
+        else -> LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = tileMinFor(shape)),
+            // Each page holds its own scroll position across visits (see
+            // ScrollKeeper).
+            state = com.hikari.app.ui.components.keptGridState(
+                keeperKey,
+                itemKeys = remember(cards) { cards.map { it.id } },
+            ),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = 4.dp,
+                bottom = LocalTaskbarInset.current + 24.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(cards, key = { it.id }) { card ->
+                IptvTile(
+                    cover = card.cover,
+                    name = card.name,
+                    subtitle = when {
+                        card.error != null -> card.error
+                        card.torrent -> tr("Torrent")
+                        card.stream -> tr("Network stream")
+                        card.channels == 0 -> tr("Empty playlist")
+                        else -> I18n.t("%s channels · %s groups")
+                            .replace("%s", card.channels.toString())
+                            .replace("%s", card.groups.toString())
+                    },
+                    shape = shape,
+                    badge = if (card.error != null) tr("Didn't load") else null,
+                    onRemove = { onRemove(card) },
+                ) {
+                    if (card.torrent) {
+                        Routes.safeNavigate(
+                            nav,
+                            Routes.catalog(
+                                providerId = card.id,
+                                catalogId = IptvProvider.CATALOG_ALL,
+                                title = card.name,
+                                providerName = card.name,
+                                type = MediaType.MOVIE,
+                                rawType = "torrent",
+                            ),
+                        )
+                    } else if (card.stream && !card.torrent) {
+                        // A network stream is one file, not a channel list: it opens
+                        // straight on its detail page (Play), with no All-channels /
+                        // Ungrouped folders in between — and plays as VOD, not live.
+                        Routes.safeNavigate(
+                            nav,
+                            Routes.detail(
+                                providerId = card.id,
+                                type = MediaType.MOVIE,
+                                mediaId = card.url,
+                                title = card.name,
+                                posterUrl = card.cover,
+                                rawType = "stream",
+                            ),
+                        )
+                    } else {
+                        Routes.safeNavigate(nav, Routes.iptvPlaylist(card.id))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun IptvHeader(
     title: String,

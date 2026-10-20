@@ -3,6 +3,7 @@ package com.hikari.app.player
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.app.Dialog
+import android.app.AppOpsManager
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -2378,11 +2379,14 @@ class PlayerActivity : ComponentActivity() {
             pipBtn?.setOnClickListener { enterPip() }
             if (Build.VERSION.SDK_INT >= 31) {
                 // API 31+ prefers setAutoEnterEnabled over onUserLeaveHint so
-                // the enter fires exactly once.
+                // the enter fires exactly once — but only when PiP is actually
+                // allowed (see isPipAllowedNow): with PiP turned off at OS level
+                // a doomed auto-enter attempt is what flashed a PiP window and
+                // had the dismiss check finish the player behind the user's back.
                 setPictureInPictureParams(
                     PictureInPictureParams.Builder()
                         .setAspectRatio(Rational(16, 9))
-                        .setAutoEnterEnabled(true)
+                        .setAutoEnterEnabled(isPipAllowedNow())
                         .build()
                 )
             }
@@ -3187,6 +3191,27 @@ class PlayerActivity : ComponentActivity() {
         return failoverAskOnFailure
     }
 
+    /** Whether the system will currently let this app open a PiP window:
+     *  the device must have the feature AND the user must not have turned PiP
+     *  off for Hikari (OS app settings). A doomed enter attempt with PiP
+     *  denied is what flashed a window and had the dismiss check finish the
+     *  player behind the user's back — every auto-enter path checks this. */
+    private fun isPipAllowedNow(): Boolean {
+        if (Build.VERSION.SDK_INT < 26) return false
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return runCatching {
+            val ops = getSystemService(AppOpsManager::class.java) ?: return@runCatching true
+            when (ops.checkOpNoThrow(
+                AppOpsManager.OPSTR_PICTURE_IN_PICTURE,
+                android.os.Process.myUid(),
+                packageName,
+            )) {
+                AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> false
+                else -> true
+            }
+        }.getOrDefault(true)
+    }
+
     /** Enters picture-in-picture mode (SDK 26+). The window is sized to the
      *  video's actual aspect ratio (16:9 until the video is known), so the
      *  user gets a properly-proportioned mini window instead of letterboxed
@@ -3194,6 +3219,10 @@ class PlayerActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun enterPip() {
         if (Build.VERSION.SDK_INT < 26 || inPip) return
+        if (!isPipAllowedNow()) {
+            Toast.makeText(this, I18n.t("Picture-in-picture is turned off"), Toast.LENGTH_SHORT).show()
+            return
+        }
         val p = player ?: return
         val hasVideo = p.currentTracks.groups.any { it.type == C.TRACK_TYPE_VIDEO }
         if (!hasVideo) {
@@ -3222,7 +3251,7 @@ class PlayerActivity : ComponentActivity() {
         super.onUserLeaveHint()
         if (Build.VERSION.SDK_INT in 26..30) {
             if (inPip || isFinishing) return
-            if (player?.isPlaying == true) enterPip()
+            if (player?.isPlaying == true && isPipAllowedNow()) enterPip()
         }
     }
 
@@ -16130,6 +16159,19 @@ class PlayerActivity : ComponentActivity() {
         if (pipStoppedWithPending) {
             pipStoppedWithPending = false
             pipRestoreAfterExpand()
+        }
+        // Re-assert the auto-enter permission every return: the user can flip
+        // PiP for Hikari in OS settings while the app is alive, and stale
+        // params would auto-enter into a denial (or miss an allowed enter).
+        if (Build.VERSION.SDK_INT >= 31) {
+            runCatching {
+                setPictureInPictureParams(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .setAutoEnterEnabled(isPipAllowedNow())
+                        .build()
+                )
+            }
         }
         hideSystemUi()
         // The remote's targets are set up once the whole window exists (see

@@ -122,12 +122,15 @@
              `hikari://oauth` VIEW intent, and with the activity in the browser's
              back stack as a second instance the app would be rebuilt from
              scratch — the dialog that started the sign-in (and holds the `state`
-             the service will check) would be gone. As a singleTask the link
-             lands in the window that is already running, through onNewIntent. -->
+             the service will check) would be gone. (singleTop, not singleTask — see below). -->
+        <!-- launchMode singleTop: a singleTask root would CLEAR the player above it
+             on every launcher re-tap (the reported "back from background kills the
+             player" bug). OAuth still lands via onNewIntent since the sign-in starts
+             from this activity's own dialog. Do NOT switch back to singleTask. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|locale|layoutDirection|fontScale|density">
 
             <!-- The tracker sign-in redirect (the device's browser route).
