@@ -1,3 +1,8 @@
+## 0.11.79 (continuous build only)
+
+### Fixed
+- Resume button showing "Resu..." and repo Add button showing "Add Repos..." (screenshot-proven): only the label text shrinks — the pills keep their exact size — and adaptively, so even "Resume E2650" steps down and fits instead of cutting off. The phone Play button and both dialog pills also give the label more of the pill via tighter inner padding
+
 ## 0.11.78 (continuous build only)
 
 ### Fixed

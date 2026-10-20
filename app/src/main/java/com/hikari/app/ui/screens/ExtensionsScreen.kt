@@ -4911,6 +4911,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         onClick = { showRepoDialog = false },
                         modifier = Modifier.weight(1f).height(52.dp),
                         shape = RoundedCornerShape(50),
+                        // Tighter inside padding (weight + height fix the
+                        // pill — the label just gets more of it).
+                        contentPadding = PaddingValues(horizontal = 12.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = Color(0xFF3A3F47),
                             contentColor = Color.White,
@@ -4921,6 +4924,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontSize = 13.sp
+                            ),
                         )
                     }
                     Button(
@@ -4961,6 +4967,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                     },
                     modifier = Modifier.weight(1f).height(52.dp),
                     shape = RoundedCornerShape(50),
+                    // Tighter inside padding (weight + height fix the pill —
+                    // the label just gets more of it).
+                    contentPadding = PaddingValues(horizontal = 12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFFC9D3F2),
                         contentColor = Color(0xFF1B1E26),
@@ -4968,11 +4977,18 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
                 ) {
+                    // Adaptive like the detail Play label: longer translations
+                    // step the text down instead of cutting off — the pill
+                    // never changes.
+                    val addRepoLabel = tr("Add Repository")
                     Text(
-                        tr("Add Repository"),
+                        addRepoLabel,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontSize = 13.sp * (14f / addRepoLabel.length.toFloat()).coerceIn(0.75f, 1f)
+                        ),
                     )
                 }
                 }

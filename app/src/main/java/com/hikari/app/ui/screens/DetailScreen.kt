@@ -3882,11 +3882,18 @@ fun DetailScreen(
                             // Single line, always: "Resume S1 E5" wrapped onto
                             // two lines and came out as a tall pill beside the
                             // fixed Download/Save buttons (screenshot-proven).
+                            // The label alone shrinks — and ADAPTIVELY: a long
+                            // episode number ("Resume E2650") steps down
+                            // further so it still fits instead of cutting off.
+                            // The pill itself is untouched.
                             Text(
                                 detailActionLabel,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontSize = 13.sp * (10f / detailActionLabel.length.toFloat()).coerceIn(0.68f, 1f)
+                                ),
                             )
                         }
                         // Trailer beside Play, like the reference layout: opens
@@ -4866,7 +4873,11 @@ fun DetailScreen(
                                 .weight(1f)
                                 // The remote lands here when the page opens (see
                                 // playFocus above); a no-op on a phone.
-                                .focusRequester(playFocus)
+                                .focusRequester(playFocus),
+                            // Tighter inside padding (width is weight-driven,
+                            // so the pill is exactly as big — the label just
+                            // gets more of it, for "Resume E2650" and friends).
+                            contentPadding = PaddingValues(horizontal = 12.dp),
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
@@ -4877,11 +4888,18 @@ fun DetailScreen(
                             // "Preparing…" spinner of its own. And always ONE
                             // line: "Resume E1" wrapped and the pill came out
                             // tall beside Download/Library (screenshot-proven).
+                            // The label alone shrinks — and ADAPTIVELY: a long
+                            // episode number ("Resume E2650") steps down
+                            // further so it still fits instead of cutting off.
+                            // The pill itself is untouched.
                             Text(
                                 actionLabel,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontSize = 13.sp * (10f / actionLabel.length.toFloat()).coerceIn(0.68f, 1f)
+                                ),
                             )
                         }
                         // The MARK state is deliberately NOT a button in this row
