@@ -5591,7 +5591,6 @@ fun DetailScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 6.dp)
                         )
-                        )
                     }
                     // (the still-searching wait message lives in the
                     // streams.isEmpty() && loadingStreams branch above — this
