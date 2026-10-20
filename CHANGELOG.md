@@ -1,3 +1,11 @@
+## 0.11.80 (continuous build only)
+
+### Added
+- Download-all asks the destination once after the server pick — In Hikari or Phone storage, the same two the player's Download button offers — and every episode queues there
+
+### Fixed
+- Blocking "Preparing downloads" box sitting on screen, undismissable, while a batch queued (screenshot-proven, app unusable until every episode resolved): queueing runs in the background with a toast at the start and the end — each episode lands in the Downloads section the moment it queues, where pause / resume / delete already live
+
 ## 0.11.79 (continuous build only)
 
 ### Fixed

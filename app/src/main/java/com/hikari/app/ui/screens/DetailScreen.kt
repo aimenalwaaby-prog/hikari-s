@@ -3388,6 +3388,10 @@ fun DetailScreen(
     var showDlChoice by remember { mutableStateOf(false) }
     var showDlSelect by remember { mutableStateOf(false) }
     var showDlServer by remember { mutableStateOf(false) }
+    // Destination asked once per batch (in-app or phone), with the picked
+    // server stashed while it is open — see confirmDlServer below.
+    var showDlDest by remember { mutableStateOf(false) }
+    var dlPendingSrv by remember { mutableStateOf<StreamSource?>(null) }
     var dlChecked by remember { mutableStateOf(setOf<String>()) }
     var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
     var dlServers by remember { mutableStateOf(listOf<StreamSource>()) }
@@ -3419,16 +3423,28 @@ fun DetailScreen(
             }
         }
     }
+    // Server picked for a batch: stash it and ask the destination ONCE — the
+    // same two the player's own Download button offers (in-app or phone) —
+    // and every episode queues there. The queueing itself then runs in the
+    // background with no modal: each episode lands in the Downloads section
+    // the moment it is queued, where it can be paused, resumed or deleted,
+    // and the app stays usable throughout.
     fun confirmDlServer(srv: StreamSource) {
         showDlServer = false
+        if (dlTargets.isEmpty()) return
+        dlPendingSrv = srv
+        showDlDest = true
+    }
+    fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind) {
+        showDlDest = false
         val eps = dlTargets
         if (eps.isEmpty()) return
+        runCatching { android.widget.Toast.makeText(context, "Queueing " + eps.size + " episodes… see Downloads to manage them.", android.widget.Toast.LENGTH_SHORT).show() }
         scope.launch {
             dlBusy = true
             val done = runCatching {
                 var n = 0
-                for ((idx, ep) in eps.withIndex()) {
-                    dlMsg = "Queueing " + (idx + 1) + "/" + eps.size + " (" + dlLabel(ep) + ")..."
+                for (ep in eps) {
                     val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
                     if (servers.isEmpty()) continue
                     val src = servers.firstOrNull { it.name == srv.name && it.providerId == srv.providerId }
@@ -3438,7 +3454,7 @@ fun DetailScreen(
                     if (src.url.isBlank()) continue
                     val label = if (ep.season > 1) "S" + ep.season + " E" + ep.number else "E" + ep.number
                     val task = com.hikari.app.download.DownloadTask(
-                        id = com.hikari.app.download.DownloadTask.idFor(batchItem.providerId.ifBlank { "detail" }, batchItem.id, ep.id, com.hikari.app.download.DownloadKind.OFFLINE),
+                        id = com.hikari.app.download.DownloadTask.idFor(batchItem.providerId.ifBlank { "detail" }, batchItem.id, ep.id, kind),
                         title = batchItem.title.ifBlank { "Video" },
                         episodeLabel = label,
                         poster = batchItem.posterUrl,
@@ -3450,7 +3466,7 @@ fun DetailScreen(
                         headers = src.headers,
                         isM3u8 = src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8"),
                         subtitles = src.subtitles,
-                        kind = com.hikari.app.download.DownloadKind.OFFLINE,
+                        kind = kind,
                         status = com.hikari.app.download.DownloadStatus.QUEUED,
                         createdAt = System.currentTimeMillis()
                     )
@@ -3460,8 +3476,7 @@ fun DetailScreen(
                 n
             }.getOrDefault(0)
             dlBusy = false
-            dlMsg = null
-            runCatching { android.widget.Toast.makeText(context, if (done > 0) "Queued " + done + " download" + (if (done == 1) "" else "s") + " from " + srv.name else "No episodes could be queued.", android.widget.Toast.LENGTH_LONG).show() }
+            runCatching { android.widget.Toast.makeText(context, if (done > 0) "Queued " + done + " download" + (if (done == 1) "" else "s") + " from " + srv.name + " — see Downloads." else "No episodes could be queued.", android.widget.Toast.LENGTH_LONG).show() }
         }
     }
     val openDlChoice: () -> Unit = {
@@ -3540,20 +3555,42 @@ fun DetailScreen(
             }
         )
     }
-    if (dlBusy) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = {},
-            title = { androidx.compose.material3.Text("Preparing downloads") },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
-                    Spacer(Modifier.width(12.dp))
-                    androidx.compose.material3.Text(dlMsg ?: "Working...")
+    if (showDlDest) {
+        val pending = dlPendingSrv
+        ChoiceDialog(
+            title = tr("Download"),
+            items = listOf(
+                ChoiceItem(
+                    key = "hikari",
+                    label = tr("In Hikari"),
+                    supporting = tr("Kept offline inside the app"),
+                ),
+                ChoiceItem(
+                    key = "phone",
+                    label = tr("Phone storage"),
+                    supporting = tr("Saved to your device's Downloads folder"),
+                ),
+            ),
+            selectedKey = null,
+            onPick = { key ->
+                if (pending != null) {
+                    startBatchDownload(
+                        pending,
+                        if (key == "phone") com.hikari.app.download.DownloadKind.EXPORT
+                        else com.hikari.app.download.DownloadKind.OFFLINE,
+                    )
+                } else {
+                    showDlDest = false
                 }
             },
-            confirmButton = {}
+            onDismiss = { showDlDest = false },
         )
     }
+    // NOTE: no "Preparing downloads" modal any more. It used to sit here with
+    // no way to dismiss while the batch queued, making the app unusable until
+    // every episode resolved — the queue now runs in the background (see
+    // startBatchDownload) with a toast at the start and the end, and the
+    // Downloads section owns everything in between.
 
     if (librarySheet) {
         CategoryPickerSheet(
