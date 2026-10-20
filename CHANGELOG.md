@@ -1,3 +1,10 @@
+## 0.11.75 (continuous build only)
+
+### Fixed
+- Episode cards showing the play + download buttons riding high above the episode text (screenshot-proven): the card row aligned to the top — the whole row is vertically centred now, so the buttons sit in the middle of the box
+- Sources sheet opening onto a blank box while servers are still being searched (screenshot-proven: empty list over the searching footer): the empty-list fast path skipped the loading placeholder on the very first paint, so nothing was ever added — an empty search now always shows "Please wait — servers are loading…" (naming the provider when one is searched first, plus "servers appear here the moment the first one is found"), which hides itself the moment the first server lands. The detail screen's searching state shows the same wait message
+- Cold-start crash after an extension's settings screen outlived its code (crash-log-proven on 0.11.33: `Unable to instantiate fragment com.cncverse.M3UPlaylistPlayer.Settings` on every launch): the saved fragment back-stack is dropped before the FragmentManager restores it — fragments here are only plugin dialogs/sheets, so nothing of the app is lost and a stale save can never kill launch again
+
 ## 0.11.74 (continuous build only)
 
 ### Fixed
@@ -4858,3 +4865,9 @@ Fixed:
 - Out-of-memory crashes on image-heavy screens.
 - Search paging, catalog categories, plugin settings scrolling, mojibake in titles, hero banner swipe, continuous numbering on single-season shows, a Kotlin interpolation crash on CJK season markers (`第2季`).
 - A blank band under the status bar after returning from the background in fullscreen.
+## 0.11.75 (continuous build only)
+
+### Fixed
+- Episode cards showing the play + download buttons riding high above the episode text (screenshot-proven): the card row aligned to the top — the whole row is vertically centred now, so the buttons sit in the middle of the box
+- Sources sheet opening onto a blank box while servers are still being searched (screenshot-proven: empty list over the searching footer): the empty-list fast path skipped the loading placeholder on the very first paint, so nothing was ever added — an empty search now always shows "Please wait — servers are loading…" (with the provider name when one is searched first), which hides itself the moment the first server lands. The detail screen's server sheet shows the same wait message in place of its empty list
+- Cold-start crash after an extension's settings screen outlived its code (crash-log-proven on 0.11.33: `Unable to instantiate fragment com.cncverse.M3UPlaylistPlayer.Settings` on every launch): the saved fragment back-stack is dropped before the FragmentManager restores it — fragments here are only plugin dialogs/sheets, so nothing of the app is lost and a stale save can never kill launch again

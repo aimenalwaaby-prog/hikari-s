@@ -66,6 +66,14 @@ class MainActivity : AppCompatActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         installSplashScreen()
+        // A saved fragment the APK no longer ships (crash-log-proven:
+        // com.cncverse.M3UPlaylistPlayer.Settings — an extension's settings
+        // screen persisted across an update/uninstall) makes super.onCreate
+        // throw during FragmentManager state restore and the app dies on launch
+        // every time until data is cleared. Fragments here are only ever plugin
+        // dialogs/sheets (the app UI is Compose), so dropping the saved fragment
+        // back-stack is safe — and it can never crash the cold start again.
+        runCatching { savedInstanceState?.remove("android:support:fragments") }
         super.onCreate(savedInstanceState)
         // Publish a real result launcher to the CloudStream runtime. Extension
         // settings screens use `MainActivity.companion.activityResultLauncher`

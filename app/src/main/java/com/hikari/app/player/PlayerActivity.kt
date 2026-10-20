@@ -8020,7 +8020,12 @@ class PlayerActivity : ComponentActivity() {
             // paint-level sig guard covers most of these, but a rebuild called
             // from open/post paths must also settle instead of tearing down
             // 20+ cards per tick and keeping rows mid-layout.
-            if (sig == builtSig && builtSelected == currentIndex && stateRowView == null &&
+            // An EMPTY list must never take this fast path: on open over zero
+            // servers sig == builtSig == empty, so the first paint returned here
+            // and the "servers are loading" placeholder below was never added —
+            // the blank box over the searching footer from the report. Empty
+            // always falls through to the placeholder branch.
+            if (sig.isNotEmpty() && sig == builtSig && builtSelected == currentIndex && stateRowView == null &&
                 (list.childCount - 1) == sig.size) return
             // Append-only live growth (the common search case: new servers land
             // at the end of the last section): keep every view on screen and
@@ -8184,7 +8189,7 @@ class PlayerActivity : ComponentActivity() {
                 ))
                 val who = originProviderName.takeIf { it.isNotBlank() }
                 stateRow.addView(TextView(this).apply {
-                    text = if (who != null) "Searching $who\u2026" else "Searching your providers\u2026"
+                    text = if (who != null) "Please wait — searching $who for servers\u2026" else "Please wait — servers are loading\u2026"
                     dpText(11.5f)
                     includeFontPadding = false
                     setTextColor(0xFFD5DCE8.toInt())

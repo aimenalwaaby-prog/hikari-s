@@ -5561,11 +5561,17 @@ fun DetailScreen(
                         run {
                             val originName = providers.firstOrNull { it.config.id == (m?.providerId ?: providerId) }
                                 ?.config?.name?.ifBlank { null }
-                            if (originName != null) "Searching $originName for servers…"
-                            else tr("Searching for servers…")
+                            if (originName != null) "Please wait — searching $originName for servers…"
+                            else tr("Please wait — servers are loading…")
                         },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        tr("Servers will appear here the moment the first one is found."),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 streams.isEmpty() -> Column(
@@ -5585,7 +5591,11 @@ fun DetailScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(top = 6.dp)
                         )
+                        )
                     }
+                    // (the still-searching wait message lives in the
+                    // streams.isEmpty() && loadingStreams branch above — this
+                    // branch is only reached when the search finished empty.)
                     if (lastSearchNarrowed) {
                         // The narrowed pass ("this extension only") found
                         // nothing playable — offer the same title across the
@@ -8445,7 +8455,10 @@ private fun EpisodeRow(
             .clickable(onClick = onClick)
             .tvPress(previewPass = false, onClick = onClick)
             .padding(horizontal = (16f * s).dp, vertical = if (glass) 12.dp else (8f * s).dp),
-        verticalAlignment = Alignment.Top
+        // The whole card (thumb, text, buttons) is vertically centred: with Top
+        // the play + download buttons sat visibly higher than the episode text
+        // (screenshot-proven), and the buttons must sit in the middle of the box.
+        verticalAlignment = Alignment.CenterVertically
     ) {
         val thumb = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: fallbackImage)
         if (thumb != null) {
