@@ -109,6 +109,7 @@ import com.hikari.app.data.MediaItem as AppMediaItem
 import com.hikari.app.data.StreamSource
 import com.hikari.app.data.SubtitleSource
 import com.hikari.app.data.ServerMeta
+import com.hikari.app.data.WatchProgress
 import com.hikari.app.data.WatchStats
 import com.hikari.app.download.DownloadEngine
 import com.hikari.app.download.DownloadKind
@@ -15962,17 +15963,18 @@ class PlayerActivity : ComponentActivity() {
     /**
      * Persists current playback position into the watch history (if the
      * detail screen supplied history context and the user hasn't paused
-     * history). Skips the very start of a video (<10s — a quick peek shouldn't
-     * litter the history) and throttles to one write per 10s of progress.
+     * history). Skips the very first second — a tap that never started
+     * should not litter the history — and throttles to one write per 5s of
+     * progress. Even a second of watching marks the video as watching (see
+     * [WatchProgress]), so the threshold stays at one second, not higher.
      */
     private fun recordProgress() {
         val entry = historyEntry ?: return
         val p = player ?: return
         val pos = p.currentPosition
-        // 5s (not 10s) is "meaningfully started" — the earlier threshold meant a
-        // short-but-real watch left NO history at all, which is exactly how the
-        // Continue Watching shelf and the resume prompt stayed empty.
-        if (pos < 5_000) return
+        // 1s is "meaningfully started": anything less never started, and
+        // anything more is already a watch the shelves must know about.
+        if (pos < WatchProgress.STARTED_MS) return
         if (kotlin.math.abs(pos - lastSavedPos) < 5_000) return
         lastSavedPos = pos
         // 0 (not pos) when the duration isn't known yet — otherwise the entry
@@ -15997,7 +15999,10 @@ class PlayerActivity : ComponentActivity() {
             // video. Nothing is sent when the duration is unknown (0), and each
             // video is only ever reported once (see TrackerSync.pushWatched).
             try {
-                if (dur > 0 && pos >= (dur * 9) / 10) {
+                // Watched through to the credits window (see WatchProgress:
+                // the last minutes are credits nobody sits through), reported
+                // once per video like before.
+                if (WatchProgress.isWatched(pos, dur)) {
                     TrackerSync.pushWatched(app.store, TrackerSync.mediaOf(h), h.uniqueKey)
                 }
             } catch (_: Throwable) {
@@ -16082,7 +16087,9 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun resumable(pos: Long, dur: Long): Boolean =
-        pos >= 5_000L && (dur <= 0L || pos < dur - 10_000L)
+        // 2s keeps a just-tapped 0:01 from nagging while the shelves already
+        // count it as watching; the end is the credits window, not 10s.
+        pos >= 2_000L && (dur <= 0L || !WatchProgress.isWatched(pos, dur))
 
     private fun showResumeDialog(positionMs: Long) {
         if (isFinishing || isDestroyed) return

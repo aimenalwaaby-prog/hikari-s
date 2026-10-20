@@ -1,3 +1,13 @@
+## 0.11.77 (continuous build only)
+
+### Added
+- Automatic watch tracking: playing anything for even a second marks it Watching, and watching it through to the last ~5 minutes (the credits nobody sits through) marks it Watched — per episode for series, same rule for movies. One shared rule (WatchProgress) drives the player writes, the Resume button, the Watching/Watched chips, the Continue Watching shelf and the tracker push, so marks and real plays can never disagree
+- Each episode row now shows its own small Watched / Watching pill under the play + download buttons; untouched episodes show nothing
+
+### Fixed
+- Resume button ("Resume E1") wrapping onto two lines and coming out taller than the Download / Library buttons beside it (screenshot-proven): the label is strictly one line with ellipsis now, on both the phone row and the TV hero, so all three buttons share one height
+- Cheap-looking repo-add box (screenshot-proven): the add dialog is restyled like the reference — centred title, engine tile with icon + name, REPOSITORY URL caption, rounded URL field, and twin Cancel / Add Repository pills at equal weight and one height. It is the one shared dialog, so every repo kind (CloudStream, Hikari, Nuvio, SkyStream, Aniyomi, Vega, Zangetsu, LNReader, Sora, Anymex, Kotatsu) gets the new look
+
 ## 0.11.76 (continuous build only)
 
 ### Fixed

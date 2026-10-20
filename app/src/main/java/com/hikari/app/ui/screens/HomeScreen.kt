@@ -126,6 +126,7 @@ import com.hikari.app.data.RepoProvenance
 import com.hikari.app.data.TmdbGenres
 import com.hikari.app.data.TmdbSourceType
 import com.hikari.app.data.TmdbSpec
+import com.hikari.app.data.WatchProgress
 import com.hikari.app.data.Profiles
 import com.hikari.app.tv.TvCinematicHero
 import com.hikari.app.tv.TvHomeHeaderBar
@@ -831,8 +832,11 @@ fun HomeScreen(nav: NavHostController) {
     val continueEntries = remember(history) {
         history.asSequence()
             .filter {
-                it.positionMs > 1_000L &&
-                    (it.durationMs <= 0L || it.positionMs < it.durationMs - 10_000L)
+                // Started (even a second counts) but not watched through to
+                // the credits window — the same rule the player, the detail
+                // page and the tracker push all use (see WatchProgress).
+                it.positionMs >= WatchProgress.STARTED_MS &&
+                    !WatchProgress.isWatched(it.positionMs, it.durationMs)
             }
             // Newest first, one card per video/episode. The store dedupes, but a
             // legacy/racing write could leave a duplicate — and a duplicate

@@ -154,6 +154,7 @@ import com.hikari.app.data.TmdbSourceType
 import com.hikari.app.data.TmdbSpec
 import com.hikari.app.data.Translator
 import com.hikari.app.data.Trailer
+import com.hikari.app.data.WatchProgress
 import com.hikari.app.tracker.TrackerSync
 import com.hikari.app.net.StreamProbe
 import com.hikari.app.player.PlayerActivity
@@ -3174,7 +3175,8 @@ fun DetailScreen(
     }
 
     // Saved progress for the given video (movie = null episode), or null when
-    // there is nothing worth resuming (never really started / basically done).
+    // there is nothing worth resuming (never really started, or already
+    // watched through to the credits window — see WatchProgress).
     val savedProgressFor: (Episode?) -> Pair<Long, Long>? = { ep ->
         val eid = ep?.id.orEmpty()
         val h = historyForTitle.firstOrNull { it.episodeId == eid }
@@ -3182,8 +3184,8 @@ fun DetailScreen(
         var dur = h?.durationMs ?: 0L
         // Fallback: arrived from History with the position in the nav arg.
         if (h == null && eid == episodeId && startPositionMs > 0L) pos = startPositionMs
-        if (pos <= 1_000L) null
-        else if (dur > 0L && pos > dur - 10_000L) null
+        if (pos < WatchProgress.STARTED_MS) null
+        else if (WatchProgress.isWatched(pos, dur)) null
         else pos to dur
     }
 
@@ -3606,15 +3608,15 @@ fun DetailScreen(
     val markTargetEp: Episode? = if (markIsSeries) (resumeEp ?: sortedEps.firstOrNull()) else null
     val markTargetHistory = historyForTitle.firstOrNull { it.episodeId == markTargetEp?.id.orEmpty() }
     // "Watched" is exactly the condition the Continue Watching shelf treats as
-    // finished (see HomeScreen): a known length, and a position within ten
-    // seconds of its end.
+    // finished (see HomeScreen and WatchProgress): reached the credits window
+    // of a known length, so a mark and a real play cannot disagree.
     val markWatched = markTargetHistory?.let {
-        it.durationMs > 0L && it.positionMs >= it.durationMs - 10_000L
+        WatchProgress.isWatched(it.positionMs, it.durationMs)
     } ?: false
     val markWatching = savedProgressFor(markTargetEp) != null
     val markAllWatched = markIsSeries && sortedEps.isNotEmpty() && sortedEps.all { ep ->
         historyForTitle.firstOrNull { it.episodeId == ep.id }?.let {
-            it.durationMs > 0L && it.positionMs >= it.durationMs - 10_000L
+            WatchProgress.isWatched(it.positionMs, it.durationMs)
         } == true
     }
     val markLater = watchLaterCat != null && savedCategories.contains(watchLaterCat.id)
@@ -3624,8 +3626,21 @@ fun DetailScreen(
      *  same finished condition the Continue Watching shelf uses. */
     fun isEpSeen(ep: Episode): Boolean =
         historyForTitle.firstOrNull { it.episodeId == ep.id }?.let {
-            it.durationMs > 0L && it.positionMs >= it.durationMs - 10_000L
+            WatchProgress.isWatched(it.positionMs, it.durationMs)
         } == true
+
+    /** Per-episode watch state for the rows below: 0 = untouched, 1 =
+     *  watching (even a second counts), 2 = watched (credits window). A
+     *  movie answers through its null episode, exactly like the marks. */
+    fun epWatchState(ep: Episode?): Int {
+        val h = historyForTitle.firstOrNull { it.episodeId == ep?.id.orEmpty() }
+            ?: return 0
+        return when {
+            WatchProgress.isWatched(h.positionMs, h.durationMs) -> 2
+            h.positionMs >= WatchProgress.STARTED_MS -> 1
+            else -> 0
+        }
+    }
 
     /** Records one mark as a history entry. `position`/`duration` are what the
      *  shelf reads, so "watched" is written as a FINISHED entry (the title's own
@@ -3864,7 +3879,15 @@ fun DetailScreen(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text(detailActionLabel)
+                            // Single line, always: "Resume S1 E5" wrapped onto
+                            // two lines and came out as a tall pill beside the
+                            // fixed Download/Save buttons (screenshot-proven).
+                            Text(
+                                detailActionLabel,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         // Trailer beside Play, like the reference layout: opens
                         // the title's own trailer instead of scrolling for it.
@@ -4219,6 +4242,7 @@ fun DetailScreen(
                                         sizeScale = tvEpisodeScale,
                                         glass = episodeGlass,
                                         hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                        watchState = epWatchState(ep),
                                     )
                                 }
                             }
@@ -4850,8 +4874,15 @@ fun DetailScreen(
                             // source search keeps running in the background
                             // (prefetch + live feed) and the sheet shows its
                             // own loader, so the button must never sit on a
-                            // "Preparing…" spinner of its own.
-                            Text(actionLabel)
+                            // "Preparing…" spinner of its own. And always ONE
+                            // line: "Resume E1" wrapped and the pill came out
+                            // tall beside Download/Library (screenshot-proven).
+                            Text(
+                                actionLabel,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         // The MARK state is deliberately NOT a button in this row
                         // any more. It was one (a check beside Play, mirroring the
@@ -5319,6 +5350,7 @@ fun DetailScreen(
                                         sizeScale = tvEpisodeScale,
                                         glass = episodeGlass,
                                         hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                        watchState = epWatchState(ep),
                                     )
                                 }
                             }
@@ -8435,6 +8467,9 @@ private fun EpisodeRow(
     glass: Boolean = false,
     /** Anti-spoiler: blur the thumb and mask the title/overview. */
     hideSpoilers: Boolean = false,
+    /** Per-episode watch state (see epWatchState): 0 = untouched, 1 =
+     *  watching, 2 = watched. Drawn as a small pill under the buttons. */
+    watchState: Int = 0,
 ) {
     val s = sizeScale.coerceIn(0.8f, 1.6f)
     val tokens = rememberGlassTokens()
@@ -8553,7 +8588,10 @@ private fun EpisodeRow(
         }
         // Play + download ride one centered row of equal buttons: a bare Icon
         // against a 44dp IconButton sat the triangle visibly higher than the
-        // download glyph (screenshot-proven on Black Clover S2).
+        // download glyph (screenshot-proven on Black Clover S2). The episode's
+        // own watch state rides UNDER them as a small pill, right-aligned so
+        // it sits in the row's own corner instead of stretching anything.
+        Column(horizontalAlignment = Alignment.End) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = onClick,
@@ -8578,6 +8616,61 @@ private fun EpisodeRow(
                 }
             }
         }
+        if (watchState != 0) {
+            Spacer(Modifier.height(2.dp))
+            EpisodeWatchBadge(watchState = watchState, sizeScale = s)
+        }
+        }
+    }
+}
+
+/**
+ * The episode row's own watch pill: a small readout under the play + download
+ * buttons (1 = watching, 2 = watched). Deliberately tiny — an 11sp label in
+ * a tight pill — so it fits the row's corner without moving anything else.
+ * Untouched episodes draw nothing at all rather than a pill that says "no".
+ */
+@Composable
+private fun EpisodeWatchBadge(
+    watchState: Int,
+    sizeScale: Float = 1f,
+) {
+    if (watchState != 1 && watchState != 2) return
+    val scheme = MaterialTheme.colorScheme
+    val watched = watchState == 2
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (watched) scheme.primary.copy(alpha = 0.20f) else Color.Transparent
+            )
+            .border(
+                width = 1.dp,
+                color = if (watched) scheme.primary.copy(alpha = 0.60f)
+                else scheme.outline.copy(alpha = 0.60f),
+                shape = RoundedCornerShape(50),
+            )
+            .padding(horizontal = (8f * sizeScale).dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (watched) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = scheme.primary,
+                modifier = Modifier.size((11f * sizeScale).dp),
+            )
+            Spacer(Modifier.width(3.dp))
+        }
+        Text(
+            if (watched) tr("Watched") else tr("Watching"),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = (11f * sizeScale).sp
+            ),
+            color = if (watched) scheme.primary else scheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 

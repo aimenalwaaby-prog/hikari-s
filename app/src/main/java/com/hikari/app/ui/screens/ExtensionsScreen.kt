@@ -72,8 +72,10 @@ import com.hikari.app.ui.NuvioTriangle
 import com.hikari.app.ui.StremioDiamond
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,6 +110,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -4722,11 +4725,61 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                          RepoKind.ANYMEX -> "Add Anymex repo"
                         RepoKind.KOTATSU -> "Add Kotatsu repo"
                         RepoKind.CS3 -> "Add CloudStream repo"
-                    }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                 )
             },
             text = {
                 Column {
+                    // The kind tile, like the reference picker's header: one
+                    // glance says which engine this box adds a repo to. One
+                    // shared dialog owns every kind, so all of them get it.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF4E5B8C)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                when {
+                                    isNuvio || isVega || isZangetsu || isSky || isSora -> Icons.Filled.Movie
+                                    isKotatsu || isLnReader || isAniyomi || isAnymex -> Icons.Filled.MenuBook
+                                    else -> Icons.Filled.Extension
+                                },
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            when (repoDialogKind) {
+                                RepoKind.HIKARI -> "Hikari"
+                                RepoKind.NUVIO -> "Nuvio"
+                                RepoKind.SKYSTREAM -> "SkyStream"
+                                RepoKind.ANIYOMI -> "Aniyomi"
+                                RepoKind.VEGA -> "Vega"
+                                RepoKind.ZANGETSU -> "Zangetsu"
+                                RepoKind.LNREADER -> "LNReader"
+                                RepoKind.SORA -> "Sora"
+                                RepoKind.ANYMEX -> "Anymex"
+                                RepoKind.KOTATSU -> "Kotatsu"
+                                RepoKind.CS3 -> "CloudStream"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
                     Text(
                         when {
                             isHikari ->
@@ -4796,7 +4849,14 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        tr("REPOSITORY URL"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
                     OutlinedTextField(
                         value = repoUrl,
                         onValueChange = { repoUrl = it },
@@ -4817,6 +4877,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                             )
                         },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().tvTextFieldKeys(repoUrl)
                     )
                     errorMsg?.let {
@@ -4830,9 +4891,32 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 }
             },
             confirmButton = {
-                Button(
-                    enabled = repoUrl.isNotBlank(),
-                    onClick = {
+                // The reference picker's twin pills: Cancel and Add share one
+                // row at equal weight and one height, each strictly one line,
+                // so neither can outgrow the other whatever the language.
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    FilledTonalButton(
+                        onClick = { showRepoDialog = false },
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Color(0xFF3A3F47),
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text(
+                            tr("Cancel"),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Button(
+                        enabled = repoUrl.isNotBlank(),
+                        onClick = {
                         // Close at once: the task runs on the ViewModel scope
                         // and reports on the screen, so nothing here waits for
                         // a download (the old "disabled while busy" made Add,
@@ -4865,12 +4949,26 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                 vm.refreshRepo(repo)
                             },
                         )
-                    }
-                ) { Text(tr("Add")) }
+                    },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFC9D3F2),
+                        contentColor = Color(0xFF1B1E26),
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                ) {
+                    Text(
+                        tr("Add Repository"),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                }
             },
-            dismissButton = {
-                TextButton(onClick = { showRepoDialog = false }) { Text(tr("Cancel")) }
-            }
+            dismissButton = {}
         )
     }
 
