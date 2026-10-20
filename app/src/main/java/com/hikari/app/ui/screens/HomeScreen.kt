@@ -1757,6 +1757,8 @@ private fun CollectionFoldersOnHome(
                 collection.name,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
+                else Color.Unspecified,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -1767,7 +1769,8 @@ private fun CollectionFoldersOnHome(
             Text(
                 tr("No folders yet — add one in Settings → Personal Catalog creator."),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
             )
             return@Column
@@ -2406,13 +2409,17 @@ internal fun ProviderPickerSheet(
  */
 @Composable
 private fun FilterChipLine(label: String, selected: Boolean, onClick: () -> Unit) {
+    // Television chips read muted-on-black with a hairline edge (desktop
+    // language); phones keep the outline chip.
+    val tvChip = com.hikari.app.tv.TvMode.current()
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
         color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
         border = if (selected) null else BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+            if (tvChip) com.hikari.app.tv.TvDesktop.GlassEdge
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
         ),
         modifier = Modifier.padding(vertical = 2.dp),
     ) {
@@ -2421,6 +2428,7 @@ private fun FilterChipLine(label: String, selected: Boolean, onClick: () -> Unit
             style = MaterialTheme.typography.labelMedium,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = if (selected) MaterialTheme.colorScheme.onPrimary
+            else if (tvChip) com.hikari.app.tv.TvDesktop.TextMuted
             else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
         )
@@ -3984,7 +3992,8 @@ private fun HomeGenreStrip(onPick: (name: String, genresText: String, keywordsTe
                 tr("Browse by genre"),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
+                else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -4002,7 +4011,8 @@ private fun HomeGenreStrip(onPick: (name: String, genresText: String, keywordsTe
             Text(
                 tr("No genre matches") + " \u201c${query.trim()}\u201d",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),

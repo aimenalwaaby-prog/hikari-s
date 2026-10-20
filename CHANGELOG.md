@@ -1,3 +1,12 @@
+## 0.11.83 (continuous build only)
+
+### Fixed
+- Download-all now always shows the server picker when ANY selected episode has a downloadable server: every picked episode is asked (not just the first) and the picker opens on the union, with a live "Finding servers (i/N)…" line and a Cancel that truly stops a stale search from popping the picker later. Queued episodes land in Downloads as before, where pause/resume/delete already live and the service starts each in turn.
+- Detail/hero backdrops prefer high-quality TMDB art over low-res provider thumbs on phones and TV alike (the stretched donghua backgrounds).
+
+### Added (TV layout only, except the backdrop fix above)
+- Whole TV interface repainted in the desktop-client language, every corner: rail, headers, hero, shelves, cards, detail hero/episodes/dialogs, search field, settings cards/rows, extension repo rows, library cards, downloads rows, IPTV/My Stuff pills, choice dialogs, genre chips, empty states, skeletons — true-black surfaces, 8dp/12dp corners, hairline edges, white/muted text, accent selections.
+
 ## 0.11.82 (continuous build only)
 
 ### Added (TV UI only — phone UI untouched)

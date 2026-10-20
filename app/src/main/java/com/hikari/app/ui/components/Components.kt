@@ -459,21 +459,29 @@ fun EmptyState(
             .padding(horizontal = 32.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Television empty states read white/muted on the black page.
+        val tv = TvMode.current()
         Icon(
             Icons.Filled.Movie,
             contentDescription = null,
             modifier = Modifier.size(56.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
+            tint = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+            else MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(12.dp))
         // tr() here (not at every call site) so an error/empty state written
         // anywhere in the app is translated: an unknown string — a raw error
         // from an extension, say — comes back unchanged.
-        Text(tr(title), style = MaterialTheme.typography.titleMedium)
+        Text(
+            tr(title),
+            style = MaterialTheme.typography.titleMedium,
+            color = if (tv) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
+        )
         Text(
             tr(subtitle),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+            else MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 6.dp)
         )
@@ -481,7 +489,8 @@ fun EmptyState(
             Text(
                 tr(detail),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                color = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 10.dp)
             )
@@ -516,12 +525,20 @@ fun GlassSearchField(
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null,
 ) {
     val glass = rememberGlassTokens()
+    // Television search field: flat elevated-black pill with a hairline edge
+    // (the reference search bar); phones keep the glass pill.
+    val tv = TvMode.current()
     val fieldShape = RoundedCornerShape(30.dp)
     Surface(
         shape = fieldShape,
-        color = if (glass.dark) glass.fillTop else MaterialTheme.colorScheme.surface,
-        shadowElevation = if (glass.dark) 0.dp else 4.dp,
-        modifier = modifier.border(1.dp, glass.border, fieldShape)
+        color = if (tv) com.hikari.app.tv.TvDesktop.SurfaceElevated
+        else if (glass.dark) glass.fillTop else MaterialTheme.colorScheme.surface,
+        shadowElevation = if (glass.dark || tv) 0.dp else 4.dp,
+        modifier = modifier.border(
+            1.dp,
+            if (tv) com.hikari.app.tv.TvDesktop.GlassEdge else glass.border,
+            fieldShape,
+        )
     ) {
         Row(
             Modifier
@@ -533,7 +550,8 @@ fun GlassSearchField(
             Icon(
                 Icons.Filled.Search,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp)
             )
             Spacer(Modifier.width(12.dp))
@@ -542,7 +560,8 @@ fun GlassSearchField(
                     Text(
                         placeholder,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -552,7 +571,8 @@ fun GlassSearchField(
                     onValueChange = onValueChange,
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = if (tv) com.hikari.app.tv.TvDesktop.TextPrimary
+                        else MaterialTheme.colorScheme.onSurface
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     // A remote must be able to leave the box — see
@@ -568,7 +588,8 @@ fun GlassSearchField(
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = tr("Clear"),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1413,6 +1434,8 @@ fun ContinueWatchingRow(
             tr("Continue Watching"),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
+            color = if (TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
+            else Color.Unspecified,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
         Spacer(Modifier.height(8.dp))
@@ -1458,7 +1481,17 @@ private fun ContinueWatchingCard(
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .clip(style.shape())
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(
+                    if (TvMode.current()) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+                .then(
+                    if (TvMode.current()) Modifier.border(
+                        1.dp,
+                        com.hikari.app.tv.TvDesktop.GlassEdge,
+                        style.shape(),
+                    ) else Modifier
+                )
         ) {
             HeroArtwork(
                 model = PosterLoader.model(backdrop ?: h.posterUrl),
@@ -1587,6 +1620,11 @@ fun GlassCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val glass = rememberGlassTokens()
+    // Television cards wear the desktop language — flat elevated-black with
+    // 12dp corners and a hairline edge — while phones keep the glass card.
+    // One branch here repaints every settings card and repo row on TV.
+    val tv = TvMode.current()
+    val cardShape = if (tv) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerLarge) else shape
     Column(
         modifier
             .fillMaxWidth()
@@ -1594,12 +1632,19 @@ fun GlassCard(
             // would otherwise float with no edge against the paper background.
             // On the dark themes the shadow would simply mud the translucent
             // fill, and the hairline below does the separating instead.
-            .then(if (glass.dark) Modifier else Modifier.shadow(3.dp, shape, clip = false))
-            .clip(shape)
+            .then(if (glass.dark || tv) Modifier else Modifier.shadow(3.dp, shape, clip = false))
+            .clip(cardShape)
             // A whisper of white at the top falling to half of that at the
             // bottom — the falloff is what reads as glass (see GlassTokens).
-            .background(Brush.verticalGradient(listOf(glass.fillTop, glass.fillBottom)), shape)
-            .border(1.dp, glass.border, shape)
+            .then(
+                if (tv) Modifier.background(com.hikari.app.tv.TvDesktop.SurfaceElevated)
+                else Modifier.background(Brush.verticalGradient(listOf(glass.fillTop, glass.fillBottom)), shape)
+            )
+            .border(
+                1.dp,
+                if (tv) com.hikari.app.tv.TvDesktop.GlassEdge else glass.border,
+                cardShape,
+            )
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         content = content,
     )
@@ -1642,7 +1687,10 @@ fun GlassDialog(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val glass = rememberGlassTokens()
-    val shape = GlassShape
+    // Television wears the desktop dialog language: a flat elevated-black
+    // box with 12dp corners and a hairline edge (the reference's dialog
+    // panels are flat, never glass). Phones keep the glass panel untouched.
+    val shape = if (tv) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerLarge) else GlassShape
     val tv = TvMode.current()
     // A short fade + scale so the panel appears rather than blinks.
     val appear = remember { Animatable(0f) }
@@ -1720,11 +1768,21 @@ fun GlassDialog(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {}
-                    .then(if (glass.dark) Modifier else Modifier.shadow(6.dp, shape, clip = false))
+                    .then(if (glass.dark && !tv) Modifier else Modifier.shadow(6.dp, shape, clip = false))
                     .clip(shape)
-                    .background(MaterialTheme.colorScheme.surface)
-                    .background(Brush.verticalGradient(listOf(glass.fillTop, glass.fillBottom)))
-                    .border(1.dp, glass.border, shape)
+                    .background(
+                        if (tv) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                        else MaterialTheme.colorScheme.surface
+                    )
+                    .then(
+                        if (tv) Modifier
+                        else Modifier.background(Brush.verticalGradient(listOf(glass.fillTop, glass.fillBottom)))
+                    )
+                    .border(
+                        1.dp,
+                        if (tv) com.hikari.app.tv.TvDesktop.GlassEdge else glass.border,
+                        shape,
+                    )
                     .padding(20.dp),
                 content = {
                     if (title != null || showClose) {
@@ -1734,7 +1792,8 @@ fun GlassDialog(
                                     tr(title),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
+                                    color = if (tv) com.hikari.app.tv.TvDesktop.TextPrimary
+                                    else MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.weight(1f),
                                 )
                             } else {
@@ -1745,7 +1804,8 @@ fun GlassDialog(
                                     Icon(
                                         Icons.Filled.Close,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (tv) com.hikari.app.tv.TvDesktop.TextMuted
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }

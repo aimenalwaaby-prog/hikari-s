@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hikari.app.i18n.tr
+import com.hikari.app.tv.TvMode
 import com.hikari.app.ui.navigation.LocalTaskbarInset
 import com.hikari.app.ui.theme.rememberGlassTokens
 import com.hikari.app.tv.tvTextFieldKeys
@@ -85,6 +86,9 @@ fun ChoiceDialog(
     // The remote's landing spot on a television: the FIRST row, so the very
     // first arrow press walks the list (see [GlassDialog.initialFocus]).
     val firstRow = remember { FocusRequester() }
+    // Television rows read white/muted (the desktop dialog language); the
+    // phone keeps its own row colors.
+    val tvChoice = TvMode.current()
     GlassDialog(onDismiss = onDismiss, title = title, initialFocus = firstRow) {
         LazyColumn(
             Modifier.heightIn(max = maxHeight),
@@ -124,13 +128,15 @@ fun ChoiceDialog(
                             item.label,
                             style = MaterialTheme.typography.bodyLarge,
                             color = if (isOn) MaterialTheme.colorScheme.primary
+                            else if (tvChoice) com.hikari.app.tv.TvDesktop.TextPrimary
                             else MaterialTheme.colorScheme.onSurface,
                         )
                         if (!item.supporting.isNullOrBlank()) {
                             Text(
                                 item.supporting,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -195,6 +201,8 @@ fun MultiChoiceDialog(
     // text field would swallow the arrows (the field has its own
     // [tvTextFieldKeys] once it is focused deliberately).
     val firstRow = remember { FocusRequester() }
+    // Television rows read white/muted (see [ChoiceDialog]).
+    val tvChoice = TvMode.current()
     val shown = if (!searchable || query.isBlank()) {
         options
     } else {
@@ -209,7 +217,8 @@ fun MultiChoiceDialog(
             Text(
                 tr(footnote),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
         }
@@ -226,7 +235,8 @@ fun MultiChoiceDialog(
                     Icon(
                         Icons.Filled.Search,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
                 trailingIcon = {
@@ -235,7 +245,8 @@ fun MultiChoiceDialog(
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -250,7 +261,8 @@ fun MultiChoiceDialog(
             Text(
                 tr("Nothing matches that."),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 12.dp),
             )
         }
@@ -297,6 +309,7 @@ fun MultiChoiceDialog(
                             item.label,
                             style = MaterialTheme.typography.bodyLarge,
                             color = if (isOn) MaterialTheme.colorScheme.primary
+                            else if (tvChoice) com.hikari.app.tv.TvDesktop.TextPrimary
                             else MaterialTheme.colorScheme.onSurface,
                         )
                         if (!item.supporting.isNullOrBlank() || (locked && !disabledNote.isNullOrBlank())) {
@@ -306,7 +319,8 @@ fun MultiChoiceDialog(
                                     if (locked) disabledNote else null,
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -326,7 +340,8 @@ fun MultiChoiceDialog(
             Text(
                 tr("Tap a row to include or exclude it."),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -354,6 +369,8 @@ fun ChoiceRow(
     val glass = rememberGlassTokens()
     val shape = GlassShape
     val hasLeading = leadingIcon != null || !leadingText.isNullOrBlank()
+    // Television rows read white/muted (see [ChoiceDialog]).
+    val tvChoice = TvMode.current()
     Row(
         modifier
             .fillMaxWidth()
@@ -380,13 +397,15 @@ fun ChoiceRow(
             Text(
                 value,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextPrimary
+                else MaterialTheme.colorScheme.onSurface,
             )
             if (!supporting.isNullOrBlank()) {
                 Text(
                     supporting,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -394,7 +413,8 @@ fun ChoiceRow(
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (tvChoice) com.hikari.app.tv.TvDesktop.TextMuted
+            else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

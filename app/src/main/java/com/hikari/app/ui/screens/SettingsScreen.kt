@@ -1487,6 +1487,7 @@ fun SettingsScreen(nav: NavHostController) {
                         tr("Settings"),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
+                        color = com.hikari.app.tv.TvDesktop.TextPrimary,
                         modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
                     )
                 }
@@ -1640,6 +1641,7 @@ private fun SettingsFolderRow(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = if (selected) MaterialTheme.colorScheme.primary
+                    else if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
                     else MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(2.dp))
@@ -1647,7 +1649,8 @@ private fun SettingsFolderRow(
                     Text(
                         tr(folder.subtitle),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1656,6 +1659,7 @@ private fun SettingsFolderRow(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = if (selected) MaterialTheme.colorScheme.primary
+                else if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
@@ -1685,13 +1689,14 @@ private fun TvLeftRow(icon: ImageVector, title: String, onClick: () -> Unit) {
                 title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                color = com.hikari.app.tv.TvDesktop.TextPrimary,
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(10.dp))
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = com.hikari.app.tv.TvDesktop.TextMuted,
                 modifier = Modifier.size(20.dp)
             )
         }

@@ -136,7 +136,7 @@ fun TvCinemaCard(
       Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape).background(TvDesktop.SurfaceElevated).border(1.dp, TvDesktop.GlassEdge, cardShape),
       contentAlignment = Alignment.Center,
     ) {
-      Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
+      Icon(Icons.Filled.Movie, contentDescription = null, tint = TvDesktop.TextMuted.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
       AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape), contentScale = ContentScale.Crop, alignment = Artwork.CINEMA_ALIGNMENT)
       item.rating?.takeIf { it > 0 }?.let { r ->
         Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(TvDesktop.CornerCard), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
@@ -144,12 +144,12 @@ fun TvCinemaCard(
         }
       }
     }
-    Text(item.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
+    Text(item.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
     val sub = buildList {
       item.year?.let { add(it.toString()) }
       if (item.genres.isNotEmpty()) add(item.genres.first())
     }.joinToString(" • ")
-    Text(sub.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp, end = 2.dp))
+    Text(sub.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp, end = 2.dp))
   }
 }
 
@@ -171,7 +171,7 @@ fun TvVerticalCard(
       Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(cardShape).background(TvDesktop.SurfaceElevated).border(1.dp, TvDesktop.GlassEdge, cardShape),
       contentAlignment = Alignment.Center,
     ) {
-      Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
+      Icon(Icons.Filled.Movie, contentDescription = null, tint = TvDesktop.TextMuted.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
       AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(cardShape), contentScale = ContentScale.Crop)
       item.rating?.takeIf { it > 0 }?.let { r ->
         Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(TvDesktop.CornerCard), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
@@ -179,12 +179,12 @@ fun TvVerticalCard(
         }
       }
     }
-    Text(item.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
+    Text(item.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
     val sub = buildList {
       item.year?.let { add(it.toString()) }
       if (item.genres.isNotEmpty()) add(item.genres.first())
     }.joinToString(" • ")
-    Text(sub.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp, end = 2.dp))
+    Text(sub.ifBlank { " " }, style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp, end = 2.dp))
   }
 }
 
@@ -214,7 +214,7 @@ fun TvCinemaRow(
   Column(Modifier.padding(top = 22.dp)) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
-        Text(tr(title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(tr(title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (providerName.isNotBlank()) Text(providerName.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
       }
       // Shelf arrows, in the reference shape: step the row by a page without
@@ -233,7 +233,7 @@ fun TvCinemaRow(
           }
         })
       ) {
-        Icon(Icons.Filled.ChevronLeft, contentDescription = tr("Scroll left"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Filled.ChevronLeft, contentDescription = tr("Scroll left"), tint = TvDesktop.TextMuted)
       }
       androidx.compose.material3.IconButton(
         onClick = {
@@ -249,7 +249,7 @@ fun TvCinemaRow(
           }
         })
       ) {
-        Icon(Icons.Filled.ChevronRight, contentDescription = tr("Scroll right"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Filled.ChevronRight, contentDescription = tr("Scroll right"), tint = TvDesktop.TextMuted)
       }
       if (onShowAll != null) TextButton(onClick = onShowAll, modifier = Modifier.tvPress(previewPass = true, onClick = onShowAll)) { Text(tr("Show All"), fontWeight = FontWeight.Bold) }
     }

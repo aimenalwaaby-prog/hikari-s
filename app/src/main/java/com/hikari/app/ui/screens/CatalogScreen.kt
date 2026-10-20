@@ -1143,14 +1143,19 @@ private fun CatalogSkeletonGrid(columns: Int, modifier: Modifier = Modifier, cin
         verticalArrangement = Arrangement.spacedBy(18.dp),
         userScrollEnabled = false,
     ) {
+        // Television skeleton boxes read elevated-black (desktop language).
+        val tvSkel = com.hikari.app.tv.TvMode.current()
         items(columns * 3) {
             Column(Modifier.alpha(pulse)) {
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .aspectRatio(if (cinema) 16f / 9f else 2f / 3f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clip(RoundedCornerShape(if (tvSkel) 8.dp else 14.dp))
+                        .background(
+                            if (tvSkel) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
                 )
                 Box(
                     Modifier
@@ -1158,7 +1163,10 @@ private fun CatalogSkeletonGrid(columns: Int, modifier: Modifier = Modifier, cin
                         .fillMaxWidth(0.85f)
                         .height(12.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .background(
+                            if (tvSkel) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
                 )
             }
         }

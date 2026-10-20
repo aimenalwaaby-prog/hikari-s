@@ -7575,13 +7575,21 @@ private fun RepoCard(
             // Glass tile in the provider-card language (gradient + hairline); the
             // repo's real icon fills it, the letter fallback wears white.
             val repoGlass = rememberGlassTokens()
-            val repoTile = RoundedCornerShape(if (com.hikari.app.tv.TvMode.current()) 16.dp else 10.dp)
+            val repoTile = RoundedCornerShape(if (com.hikari.app.tv.TvMode.current()) 8.dp else 10.dp)
             Box(
                 Modifier
                     .size(if (com.hikari.app.tv.TvMode.current()) 52.dp else 40.dp)
                     .clip(repoTile)
-                    .background(Brush.verticalGradient(listOf(repoGlass.fillTop, repoGlass.fillBottom)))
-                    .border(1.dp, repoGlass.border, repoTile),
+                    .background(
+                        if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                        else Brush.verticalGradient(listOf(repoGlass.fillTop, repoGlass.fillBottom))
+                    )
+                    .border(
+                        1.dp,
+                        if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.GlassEdge
+                        else repoGlass.border,
+                        repoTile,
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 // The repo's real icon (its repo.json iconUrl, else the GitHub
@@ -7609,6 +7617,8 @@ private fun RepoCard(
                     repo.name,
                     style = if (com.hikari.app.tv.TvMode.current()) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
                     fontWeight = if (com.hikari.app.tv.TvMode.current()) FontWeight.Bold else FontWeight.Medium,
+                    color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
+                    else Color.Unspecified,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth()

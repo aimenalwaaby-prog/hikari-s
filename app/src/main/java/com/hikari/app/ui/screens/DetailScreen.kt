@@ -3416,6 +3416,11 @@ fun DetailScreen(
     var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
     var dlServers by remember { mutableStateOf(listOf<StreamSource>()) }
     var dlBusy by remember { mutableStateOf(false) }
+    // Lookup generation: the server search runs in the background while the
+    // episode picker stays open with its progress line. Tapping Cancel bumps
+    // this, so a stale lookup can never pop the server picker (or its toast)
+    // after the user has already backed out.
+    var dlGen by remember { mutableStateOf(0) }
     var dlMsg by remember { mutableStateOf<String?>(null) }
     val batchItem = m ?: savedItem
     // Television episode stills, straight from TMDB (see TmdbStills): the
@@ -3439,22 +3444,39 @@ fun DetailScreen(
         val nm = e.name?.trim().orEmpty()
         return if (nm.isBlank()) base else base + " - " + nm.take(60)
     }
+    // The batch's server search: EVERY selected episode is asked (not just
+    // the first), and the picker opens on the UNION — the same servers the
+    // single download lists — so the server page appears whenever ANY picked
+    // episode has a downloadable server. The episode picker stays open
+    // underneath with a live "(i/N)…" progress line, and Cancel there bumps
+    // [dlGen] so a stale search can never pop the picker after backing out.
     fun resolveFirstServer(eps: List<Episode>) {
         if (eps.isEmpty() || dlBusy) return
         dlTargets = eps
-        showDlChoice = false
-        showDlSelect = false
+        val gen = dlGen + 1
+        dlGen = gen
         scope.launch {
             dlBusy = true
-            dlMsg = "Finding servers for " + dlLabel(eps[0]) + "..."
-            val servers = runCatching { vm.serversForBatch(batchItem, eps[0]) }.getOrDefault(emptyList())
+            val seen = LinkedHashSet<String>()
+            val union = ArrayList<StreamSource>()
+            for ((i, ep) in eps.withIndex()) {
+                if (gen != dlGen) return@launch
+                dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
+                val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                for (s in servers) {
+                    if (seen.add(s.providerId + "|" + s.name)) union.add(s)
+                }
+            }
+            if (gen != dlGen) return@launch
             dlBusy = false
-            if (servers.isEmpty()) {
+            if (union.isEmpty()) {
                 dlMsg = null
                 runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
             } else {
                 dlMsg = null
-                dlServers = servers
+                dlServers = union
+                showDlChoice = false
+                showDlSelect = false
                 showDlServer = true
             }
         }
@@ -3562,9 +3584,18 @@ fun DetailScreen(
     }
     if (showDlChoice) {
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!dlBusy) showDlChoice = false },
+            onDismissRequest = { if (!dlBusy) { dlGen++; showDlChoice = false } },
             title = { androidx.compose.material3.Text("Download episodes") },
-            text = { androidx.compose.material3.Text(sortedEps.size.toString() + " episodes. Pick specific ones or grab everything from one server.") },
+            text = {
+                Column(Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.Text(sortedEps.size.toString() + " episodes. Pick specific ones or grab everything from one server.")
+                    val msg = dlMsg
+                    if (msg != null) {
+                        Spacer(Modifier.height(6.dp))
+                        androidx.compose.material3.Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = { dlChecked = sortedEps.map { it.id }.toSet(); showDlChoice = false; showDlSelect = true }) { androidx.compose.material3.Text("Select episodes") }
             },
@@ -3575,10 +3606,15 @@ fun DetailScreen(
     }
     if (showDlSelect) {
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!dlBusy) showDlSelect = false },
+            onDismissRequest = { if (!dlBusy) { dlGen++; showDlSelect = false } },
             title = { androidx.compose.material3.Text("Select episodes") },
             text = {
                 Column(Modifier.heightIn(max = 420.dp)) {
+                    val msg = dlMsg
+                    if (msg != null) {
+                        androidx.compose.material3.Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(4.dp))
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         androidx.compose.material3.TextButton(onClick = { dlChecked = sortedEps.map { it.id }.toSet() }) { androidx.compose.material3.Text("All") }
                         androidx.compose.material3.TextButton(onClick = { dlChecked = emptySet() }) { androidx.compose.material3.Text("None") }
@@ -3607,21 +3643,44 @@ fun DetailScreen(
                 ) { androidx.compose.material3.Text("Download (" + dlChecked.size + ")") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showDlSelect = false }, enabled = !dlBusy) { androidx.compose.material3.Text("Cancel") }
+                androidx.compose.material3.TextButton(onClick = { dlGen++; showDlSelect = false }, enabled = !dlBusy) { androidx.compose.material3.Text("Cancel") }
             }
         )
     }
     if (showDlServer) {
+        // Television wears the desktop dialog language (elevated black box,
+        // 12dp corners, white/muted text); the phone keeps its own dialog.
+        val tvDl = com.hikari.app.tv.TvMode.current()
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { if (!dlBusy) showDlServer = false },
-            title = { androidx.compose.material3.Text("Pick server (" + dlTargets.size + " episodes)") },
+            shape = if (tvDl) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerLarge)
+            else androidx.compose.material3.AlertDialogDefaults.shape,
+            containerColor = if (tvDl) com.hikari.app.tv.TvDesktop.SurfaceElevated
+            else androidx.compose.material3.AlertDialogDefaults.containerColor,
+            title = {
+                androidx.compose.material3.Text(
+                    "Pick server (" + dlTargets.size + " episodes)",
+                    color = if (tvDl) com.hikari.app.tv.TvDesktop.TextPrimary
+                    else androidx.compose.material3.AlertDialogDefaults.titleContentColor,
+                )
+            },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp).fillMaxWidth()) {
                     items(dlServers, key = { it.providerId + "|" + it.name + "|" + it.url }) { srv ->
                         Column(Modifier.fillMaxWidth().clickable(enabled = !dlBusy) { confirmDlServer(srv) }.padding(vertical = 8.dp)) {
-                            androidx.compose.material3.Text(srv.name, maxLines = 1)
+                            androidx.compose.material3.Text(
+                                srv.name,
+                                maxLines = 1,
+                                color = if (tvDl) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
+                            )
                             val sub = listOf(srv.providerName, srv.details).filter { it.isNotBlank() }.joinToString(" - ")
-                            if (sub.isNotBlank()) androidx.compose.material3.Text(sub, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+                            if (sub.isNotBlank()) androidx.compose.material3.Text(
+                                sub,
+                                maxLines = 1,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (tvDl) com.hikari.app.tv.TvDesktop.TextMuted
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -7040,7 +7099,8 @@ private fun Hero(
                         Brush.verticalGradient(
                             0f to Color.Black.copy(alpha = 0.40f),
                             0.45f to Color.Transparent,
-                            1f to MaterialTheme.colorScheme.background,
+                            1f to if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.Background
+                            else MaterialTheme.colorScheme.background,
                         )
                     )
             )
@@ -8295,6 +8355,11 @@ private fun EpisodePosterCard(
 ) {
     val s = sizeScale.coerceIn(0.8f, 1.6f)
     val tokens = rememberGlassTokens()
+    // Television wears the desktop card language (8dp corners,
+    // elevated-black thumb, hairline edge, white/muted text).
+    val tvEp = com.hikari.app.tv.TvMode.current()
+    val epCard = if (tvEp) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerCard)
+    else RoundedCornerShape(10.dp)
     Column(
         (if (glass) {
             modifier
@@ -8304,7 +8369,7 @@ private fun EpisodePosterCard(
                 .padding((8f * s).dp)
         } else {
             modifier
-                .clip(RoundedCornerShape(10.dp))
+                .clip(epCard)
         })
             .clickable(onClick = onClick)
             .tvPress(previewPass = false, onClick = onClick)
@@ -8314,8 +8379,18 @@ private fun EpisodePosterCard(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(1.55f)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clip(epCard)
+                .background(
+                    if (tvEp) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+                .then(
+                    if (tvEp) Modifier.border(
+                        1.dp,
+                        com.hikari.app.tv.TvDesktop.GlassEdge,
+                        epCard,
+                    ) else Modifier
+                )
         ) {
             val thumb = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() } ?: fallbackImage)
             if (thumb != null) {
@@ -8393,6 +8468,7 @@ private fun EpisodePosterCard(
             style = MaterialTheme.typography.labelMedium.copy(
                 fontSize = (MaterialTheme.typography.labelMedium.fontSize.value * s).sp
             ),
+            color = if (tvEp) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = (2f * s).dp, top = (5f * s).dp, end = (2f * s).dp)
@@ -8407,7 +8483,8 @@ private fun EpisodePosterCard(
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = (MaterialTheme.typography.labelSmall.fontSize.value * s).sp
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (tvEp) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = (2f * s).dp, top = (2f * s).dp, end = (2f * s).dp)
@@ -8659,6 +8736,9 @@ private fun EpisodeRow(
 ) {
     val s = sizeScale.coerceIn(0.8f, 1.6f)
     val tokens = rememberGlassTokens()
+    // Television rows sit flat on the black page (desktop language) with
+    // white/muted text; phones keep the near-page fill.
+    val tvRow = com.hikari.app.tv.TvMode.current()
     Row(
         (if (glass) {
             Modifier
@@ -8670,7 +8750,10 @@ private fun EpisodeRow(
         } else {
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.98f))
+                .background(
+                    if (tvRow) Color.Transparent
+                    else MaterialTheme.colorScheme.background.copy(alpha = 0.98f)
+                )
         })
             .clickable(onClick = onClick)
             .tvPress(previewPass = false, onClick = onClick)
@@ -8696,7 +8779,10 @@ private fun EpisodeRow(
                 Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(
+                        if (tvRow) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -8717,6 +8803,7 @@ private fun EpisodeRow(
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = (MaterialTheme.typography.bodyMedium.fontSize.value * s).sp
                 ),
+                color = if (tvRow) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -8744,7 +8831,8 @@ private fun EpisodeRow(
                 Text(
                     ratedLine,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (tvRow) com.hikari.app.tv.TvDesktop.TextMuted
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -8753,7 +8841,8 @@ private fun EpisodeRow(
                 Text(
                     aired,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (tvRow) com.hikari.app.tv.TvDesktop.TextMuted
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -8765,7 +8854,8 @@ private fun EpisodeRow(
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = (MaterialTheme.typography.bodySmall.fontSize.value * s).sp
                     ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (tvRow) com.hikari.app.tv.TvDesktop.TextMuted
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = (2f * s).dp)

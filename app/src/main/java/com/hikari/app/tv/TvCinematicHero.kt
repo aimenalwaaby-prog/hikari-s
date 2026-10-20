@@ -94,8 +94,8 @@ fun TvCinematicHero(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(h)
-                .clip(RoundedCornerShape(20.dp))
-                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(TvDesktop.CornerLarge))
+                .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(TvDesktop.CornerLarge))
                 // Left/Right steps through featured titles. Preview (not the
                 // plain handler) so the focus system never sees the keypress
                 // and the hero keeps focus while browsing.

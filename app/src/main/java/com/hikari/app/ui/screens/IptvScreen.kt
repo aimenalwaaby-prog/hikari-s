@@ -803,17 +803,25 @@ private fun torrentDisplayName(link: String): String {
 /** One of the add dialog's two modes: Playlist, or a single Network stream. */
 @Composable
 private fun AddModePill(label: String, selected: Boolean, onClick: () -> Unit) {
+    // Television pills sit black with a hairline edge (desktop language).
+    val tvPill = com.hikari.app.tv.TvMode.current()
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
         color = if (selected) MaterialTheme.colorScheme.primary
+        else if (tvPill) com.hikari.app.tv.TvDesktop.SurfaceCard
         else MaterialTheme.colorScheme.surfaceVariant,
+        border = if (!selected && tvPill) androidx.compose.foundation.BorderStroke(
+            1.dp,
+            com.hikari.app.tv.TvDesktop.GlassEdge,
+        ) else null,
     ) {
         Text(
             label,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = if (selected) MaterialTheme.colorScheme.onPrimary
+            else if (tvPill) com.hikari.app.tv.TvDesktop.TextMuted
             else MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1309,11 +1317,18 @@ private fun IptvSectionPill(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    // Television pills sit black with a hairline edge (see [AddModePill]).
+    val tvPill = com.hikari.app.tv.TvMode.current()
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
         color = if (selected) MaterialTheme.colorScheme.primary
+        else if (tvPill) com.hikari.app.tv.TvDesktop.SurfaceCard
         else MaterialTheme.colorScheme.surfaceVariant,
+        border = if (!selected && tvPill) androidx.compose.foundation.BorderStroke(
+            1.dp,
+            com.hikari.app.tv.TvDesktop.GlassEdge,
+        ) else null,
         modifier = modifier.height(38.dp),
     ) {
         Row(
@@ -1325,6 +1340,7 @@ private fun IptvSectionPill(
                 icon,
                 contentDescription = null,
                 tint = if (selected) MaterialTheme.colorScheme.onPrimary
+                else if (tvPill) com.hikari.app.tv.TvDesktop.TextMuted
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp),
             )
@@ -1336,6 +1352,7 @@ private fun IptvSectionPill(
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) MaterialTheme.colorScheme.onPrimary
+                else if (tvPill) com.hikari.app.tv.TvDesktop.TextMuted
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

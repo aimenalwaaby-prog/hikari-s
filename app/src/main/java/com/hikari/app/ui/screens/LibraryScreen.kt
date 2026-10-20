@@ -455,7 +455,8 @@ private fun LibraryCard(
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
+                else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp)
             )
             if (categories.isNotEmpty()) {
@@ -482,9 +483,11 @@ private fun TrackerLibraryCard(item: MediaItem, onClick: () -> Unit) {
             model = if (com.hikari.app.tv.TvMode.current()) Artwork.backdropModel(item) else Artwork.model(item),
             contentDescription = item.title,
             style = style,
-            modifier = Modifier.fillMaxWidth().aspectRatio(if (tvLib) 16f / 9f else 0.67f).clip(RoundedCornerShape(12.dp)),
+            modifier = Modifier.fillMaxWidth().aspectRatio(if (tvLib) 16f / 9f else 0.67f)
+                .clip(RoundedCornerShape(if (tvLib) 8.dp else 12.dp)),
         )
         Text(item.title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium,
+            color = if (tvLib) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
             maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
     }
 }

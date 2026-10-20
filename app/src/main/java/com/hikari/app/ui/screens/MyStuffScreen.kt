@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -288,12 +289,15 @@ private fun MyStuffLockGate(onUnlock: () -> Unit) {
             Text(
                 tr("My Stuff is locked"),
                 style = MaterialTheme.typography.titleLarge,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
+                else Color.Unspecified,
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 tr("Enter the My Stuff password to see your library, history and downloads."),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
@@ -410,6 +414,7 @@ private fun MyStuffPill(
     onClick: () -> Unit,
 ) {
     val fg = if (selected) MaterialTheme.colorScheme.onPrimary
+    else if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
     else MaterialTheme.colorScheme.onSurfaceVariant
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
@@ -454,7 +459,11 @@ private fun MyStuffPill(
             modifier = Modifier.fillMaxSize(),
             shape = RoundedCornerShape(50),
             color = if (selected) MaterialTheme.colorScheme.primary
+            else if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.SurfaceCard
             else MaterialTheme.colorScheme.surfaceVariant,
+            border = if (!selected && com.hikari.app.tv.TvMode.current())
+                androidx.compose.foundation.BorderStroke(1.dp, com.hikari.app.tv.TvDesktop.GlassEdge)
+            else null,
         ) {
             Row(
                 Modifier

@@ -110,12 +110,19 @@ object Artwork {
      * NOT centre-crop it into a 16:9 frame — see `HeroArtwork`. Like the other
      * lookups this reads [revision], so a hero swaps to the real backdrop the
      * moment its lookup lands.
+     *
+     * TMDB first, provider art second: the provider's own backdrop is frequently
+     * a low-res thumb that stretches into a blurry band full-bleed (the
+     * screenshot-proven donghua detail pages), while TMDB carries the same
+     * high-quality backdrop the reference client shows. Applies on phones and
+     * televisions alike — every hero/cinema surface paints from here.
      */
     fun heroModel(item: MediaItem, skipExtensionBackdrop: Boolean = false): Pair<Any?, Boolean> {
+        backdrop(item)?.let { return PosterLoader.model(it) to true }
         if (!skipExtensionBackdrop) {
             item.backdropUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to true }
         }
-        backdrop(item)?.let { return PosterLoader.model(it) to true }
+        poster(item)?.let { return PosterLoader.model(it) to false }
         item.posterUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to false }
         return PosterLoader.model(poster(item)) to false
     }
@@ -153,22 +160,11 @@ object Artwork {
     }
 
     /**
-     * Hero art for the TELEVISION layout as (model, isWide).
-     *
-     * Same shape as [heroModel], but the TMDB lookup always outranks the
-     * provider's own art: the television wears high-quality TMDB backdrops
-     * (w1280) and posters on every detail/hero surface. The provider's art is
-     * still the first paint — the lookup is asynchronous — and the [revision]
-     * repaint swaps the hero to TMDB the moment it lands (which, with the
-     * open-time [prefetch], is usually before the page finishes loading).
+     * Hero art for the TELEVISION layout as (model, isWide). Same as
+     * [heroModel] now that it is TMDB-first everywhere (see above): kept as a
+     * named entry point so television callers keep reading their intent.
      */
-    fun tvHeroModel(item: MediaItem): Pair<Any?, Boolean> {
-        backdrop(item)?.let { return PosterLoader.model(it) to true }
-        item.backdropUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to true }
-        poster(item)?.let { return PosterLoader.model(it) to false }
-        item.posterUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to false }
-        return PosterLoader.model(null) to false
-    }
+    fun tvHeroModel(item: MediaItem): Pair<Any?, Boolean> = heroModel(item)
 
     private fun lookup(item: MediaItem, pick: (Entry) -> String?): String? {
         // Snapshot read: repaints the calling cell when a lookup completes.

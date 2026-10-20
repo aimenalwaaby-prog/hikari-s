@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -145,6 +146,8 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
 @Composable
 private fun DownloadRow(t: DownloadTask, onDelete: () -> Unit) {
     val context = LocalContext.current
+    // Television rows read white/muted on the black page (desktop language).
+    val tvDl = com.hikari.app.tv.TvMode.current()
     Row(
         Modifier
             .fillMaxWidth()
@@ -166,7 +169,10 @@ private fun DownloadRow(t: DownloadTask, onDelete: () -> Unit) {
                 Modifier
                     .size(64.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(
+                        if (tvDl) com.hikari.app.tv.TvDesktop.SurfaceElevated
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -182,6 +188,7 @@ private fun DownloadRow(t: DownloadTask, onDelete: () -> Unit) {
                 t.title,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
+                color = if (tvDl) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -192,7 +199,8 @@ private fun DownloadRow(t: DownloadTask, onDelete: () -> Unit) {
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (tvDl) com.hikari.app.tv.TvDesktop.TextMuted
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -203,7 +211,8 @@ private fun DownloadRow(t: DownloadTask, onDelete: () -> Unit) {
                 color = when (t.status) {
                     DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
                     DownloadStatus.DONE -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> if (tvDl) com.hikari.app.tv.TvDesktop.TextMuted
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
