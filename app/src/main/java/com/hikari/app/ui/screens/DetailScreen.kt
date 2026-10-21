@@ -92,6 +92,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -154,6 +155,7 @@ import com.hikari.app.data.TmdbMeta
 import com.hikari.app.data.TmdbSourceType
 import com.hikari.app.data.TmdbSpec
 import com.hikari.app.data.TmdbStills
+import com.hikari.app.data.TmdbScreenshots
 import com.hikari.app.data.Translator
 import com.hikari.app.data.Trailer
 import com.hikari.app.data.WatchProgress
@@ -180,6 +182,10 @@ import com.hikari.app.ui.theme.rememberGlassTokens
 import com.hikari.app.ui.components.HeroArtwork
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.tv.tvPress
+import com.hikari.app.tv.Cs3RatingBadges
+import com.hikari.app.tv.Cs3SectionHeader
+import com.hikari.app.tv.Cs3EpisodeCard
+import com.hikari.app.tv.Cs3HeaderLink
 import com.hikari.app.web.WebViewActivity
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CompletableDeferred
@@ -3429,6 +3435,10 @@ fun DetailScreen(
     // when TMDB has nothing. Loaded once the episode list for the shown
     // season is known, so switching seasons re-asks for the new range.
     val tvEpStills = remember { mutableStateMapOf<Pair<Int, Int>, String>() }
+    // Television screenshots strip, straight from TMDB (see TmdbScreenshots):
+    // the reference client's own Screenshots section. Backdrops only, capped
+    // at 8 — a title with no backdrops simply shows no section.
+    val tvScreenshots = remember { mutableStateListOf<String>() }
     if (isTvLayout) {
         LaunchedEffect(m?.uniqueId, sortedEps) {
             tvEpStills.clear()
@@ -3437,6 +3447,13 @@ fun DetailScreen(
             for ((k, v) in map) {
                 if (v.isNotBlank()) tvEpStills[k] = v
             }
+        }
+        // Screenshots ride the same title trigger, not the episode list: a
+        // movie has no seasons but still gets its strip.
+        LaunchedEffect(m?.uniqueId) {
+            tvScreenshots.clear()
+            val item = batchItem ?: return@LaunchedEffect
+            tvScreenshots.addAll(TmdbScreenshots.backdropsFor(item))
         }
     }
     fun dlLabel(e: Episode): String {
@@ -4194,15 +4211,12 @@ fun DetailScreen(
                     
                     .onSizeChanged { headerPx = it.height }
             ) {
-                // "Full bleed and blur detail" paints the sharp art HERE, in
-                // the scrolling hero item itself: the art scrolls up and away
-                // with the header (like the reference client) and everything
-                // below moves over the fixed blurred backdrop. Painting it in
-                // the fixed backdrop instead left sharp art behind the cast
-                // forever, which is why the toggle looked like it did
-                // nothing. Off (or phone): the hero stays transparent and the
-                // fixed backdrop owns the art, exactly as before.
-                if (tvBlurDetail) {
+                // The sharp art paints HERE only when it is genuinely wide
+                // (a TMDB 16:9 backdrop). A portrait poster sharp-cropped
+                // full-bleed is the beheaded-subject bug from the TV photos,
+                // so poster-only titles leave the hero transparent and read
+                // over the fixed blurred backdrop.
+                if (tvBlurDetail && tvHeroImage.second) {
                     AsyncImage(
                         model = tvHeroImage.first,
                         contentDescription = null,
@@ -4266,11 +4280,13 @@ fun DetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // The reference season header inside the panel.
                                 Text(
-                                    tr("Episodes (%s)").replace("%s", shownEps.size.toString()),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White,
+                                    if (seasons.size > 1) tr("Season %s").replace("%s", activeSeason.toString()) + " \u00b7 " + tr("Episodes (%s)").replace("%s", shownEps.size.toString())
+                                    else tr("Episodes (%s)").replace("%s", shownEps.size.toString()),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = com.hikari.app.tv.Cs3.TextPrimary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 IconButton(
@@ -4464,16 +4480,20 @@ fun DetailScreen(
                                 }
                             } else {
                                 pageEps.forEach { ep ->
-                                    EpisodeRow(
+                                    val h = historyForTitle.firstOrNull { it.episodeId == ep.id }
+                                    val prog = if (h != null && h.durationMs > 0) (h.positionMs.toFloat() / h.durationMs).coerceIn(0f, 1f) else 0f
+                                    TvCs3EpisodeCard(
                                         ep = ep,
-                                        fallbackImage = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
-                                        onClick = { tryPlay(ep) },
-                                        onDownload = { tryDownload(ep) },
-                                        sizeScale = tvEpisodeScale,
-                                        glass = episodeGlass,
-                                        hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                        tmdbStill = tvEpStills[ep.season to ep.number],
+                                        fallbackBlur = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
                                         watchState = epWatchState(ep),
+                                        progress = prog,
+                                        hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                        onPlay = { tryPlay(ep) },
+                                        onDownload = { tryDownload(ep) },
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
+                                    Spacer(Modifier.height(10.dp))
                                 }
                             }
                         }
@@ -4525,14 +4545,19 @@ fun DetailScreen(
                     Spacer(Modifier.height(10.dp))
                     if (!detailIsSeries) tvPlayRow(12.dp)
 
+                    // Row 1: year, type, runtime — the reference's primary
+                    // meta line under the title.
                     val tvMeta = buildList {
-                        m?.rating?.takeIf { it > 0 }?.let { add("★ " + "%.1f".format(it)) }
                         m?.year?.let { add(it.toString()) }
-                        if (m?.genres?.isNotEmpty() == true) add(m.genres.take(3).joinToString(" · "))
-                        extras?.details?.runtimeMinutes?.let { mins ->
+                        when (m?.type) {
+                            com.hikari.app.data.MediaType.MOVIE -> add(tr("Movie"))
+                            com.hikari.app.data.MediaType.SERIES -> add(tr("TV Series"))
+                            else -> {}
+                        }
+                        extras?.details?.runtimeMinutes?.takeIf { it > 0 }?.let { mins ->
                             add(if (mins >= 60) (mins / 60).toString()+"h "+(mins % 60).toString()+"m" else mins.toString()+"m")
                         }
-                    }.joinToString("  ·  ")
+                    }.joinToString("  \u00b7  ")
                     if (tvMeta.isNotBlank()) Text(tvMeta, style = MaterialTheme.typography.titleSmall,
                         color = Color.White.copy(alpha = 0.92f), modifier = Modifier.padding(top = 8.dp))
                     // Production, above the ratings: the reference layout's
@@ -4550,26 +4575,29 @@ fun DetailScreen(
                             Routes.safeNavigate(nav, Routes.tmdbGridSpec(spec.encode(), c.name))
                         }
                     }
-                    // The review-score badges with the title block: the reference
-                    // TV layout leads with its ratings, and the strip used to
-                    // sit below the hero in the scroll.
+                    // Row 2: the reference's ratings row — branded badges then
+                    // genres — with the content-rating chip at the end.
                     val tvCert = extras?.details?.certification?.trim()?.takeIf { it.isNotEmpty() }
                     if (showDetailRating && (ratings.isNotEmpty() || !tvCert.isNullOrBlank())) {
-                        // Wraps instead of scrolling: every badge stays on
-                        // screen with no horizontal swipe (the cut-off "P…"
-                        // badge report).
-                        FlowRow(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ratings.forEach { r -> RatingBadge(r) { ratingInfo = r } }
-                            if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
+                            Cs3RatingBadges(ratings, tvCert) { ratingInfo = it }
+                            if (!m?.genres.isNullOrEmpty()) {
+                                Text(
+                                    m!!.genres.take(4).joinToString(", "),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                            }
                         }
                     } else if (!tvCert.isNullOrBlank()) {
-                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             com.hikari.app.tv.TvCertChip(tvCert)
                         }
                     }
@@ -4650,75 +4678,15 @@ fun DetailScreen(
 
     Box(Modifier.fillMaxSize()) {
         if (isTvLayout) {
-            Box(Modifier.fillMaxSize()) {
-                if (tvBlurDetail) {
-                    // "Full bleed and blur detail" (opt-in), the reference
-                    // client's header: the blurred art sits under the WHOLE
-                    // page, and the sharp art lives ONLY in the header box
-                    // above the content. Scrolled-to sections (cast, details,
-                    // episodes) move over blur, never over a second sharp
-                    // copy of the image. Top-anchored so faces and title art
-                    // stay in frame on tall art.
-                    AsyncImage(
-                        model = tvHeroImage.first,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .blur(28.dp, BlurredEdgeTreatment.Unbounded),
-                    )
-                    // Readability dim over the blur; the shared gradients
-                    // below add the cinematic falloff on top of this.
-                    Box(
-                        Modifier.fillMaxSize().background(
-                            Color.Black.copy(alpha = 0.45f)
-                        )
-                    )
-                    // NOTE: no sharp art here. The sharp header lives INSIDE
-                    // the scrolling hero item (see heroBlock): a fixed sharp
-                    // layer would never scroll away, so the cast and details
-                    // would sit over sharp art forever and the toggle would
-                    // look like it does nothing. The fixed backdrop is blur
-                    // only, always.
-                } else {
-                    // tvHeroImage.second is true only for genuinely wide art: a
-                    // portrait poster gets the cinematic blurred-fill treatment
-                    // instead of a letterboxed strip with black bars down both
-                    // sides (the reported TV detail header).
-                    HeroArtwork(
-                        model = tvHeroImage.first,
-                        wide = tvHeroImage.second,
-                        modifier = Modifier.fillMaxSize(),
-                        // A poster-only title has no wide art: the zoomed fill
-                        // copy is anchored to the TOP so the title art and faces
-                        // stay in frame instead of a forehead/hair strip.
-                        fillAlignment = Alignment.TopCenter,
-                    )
-                }
-                Box(
-                    Modifier.fillMaxSize().background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Black.copy(alpha = 0.14f),
-                                Color.Black.copy(alpha = 0.46f),
-                                Color.Black.copy(alpha = 0.88f),
-                            )
-                        )
-                    )
-                )
-                Box(
-                    Modifier.fillMaxSize().background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                Color.Black.copy(alpha = 0.40f),
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.26f),
-                            )
-                        )
-                    )
-                )
-            }
+            // The reference client's header contract, aspect-safe: genuinely
+            // wide art (a TMDB 16:9 backdrop) paints sharp with the triple
+            // gradient; a poster-only title fills blurred. A portrait poster
+            // sharp-cropped full-bleed is what the TV photos proved broken.
+            com.hikari.app.tv.Cs3BackdropArt(
+                model = tvHeroImage.first,
+                wide = tvHeroImage.second,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
 
     // The status bar's height, in dp (a composable read, so it is taken here
@@ -4758,42 +4726,21 @@ fun DetailScreen(
                                     )
                             ) {
                                 tvPlayRow(8.dp)
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                // The reference season header: Season N, episode
+                                // count, sort + view actions pinned right.
+                                val seasonTitle = if (seasons.size > 1) tr("Season %s").replace("%s", activeSeason.toString()) + " \u00b7 " + tr("Episodes (%s)").replace("%s", shownEps.size.toString())
+                                else tr("Episodes (%s)").replace("%s", shownEps.size.toString())
+                                Cs3SectionHeader(
+                                    title = seasonTitle,
                                 ) {
-                                    Text(
-                                        tr("Episodes (%s)").replace("%s", shownEps.size.toString()),
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.White,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = { epsNewestFirst = !epsNewestFirst },
-                                        modifier = Modifier.size(40.dp).tvPress(
-                                            previewPass = true,
-                                            onClick = { epsNewestFirst = !epsNewestFirst }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Cs3HeaderLink(
+                                            label = if (epsNewestFirst) tr("Newest first") else tr("Oldest first"),
+                                            onClick = { epsNewestFirst = !epsNewestFirst },
                                         )
-                                    ) {
-                                        Icon(
-                                            if (epsNewestFirst) Icons.Filled.ArrowDownward else Icons.Filled.ArrowUpward,
-                                            contentDescription = if (epsNewestFirst) tr("Newest episode first") else tr("Oldest episode first"),
-                                            tint = Color.White
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { episodeViewMode = 0 },
-                                        modifier = Modifier.size(40.dp).tvPress(
-                                            previewPass = true,
-                                            onClick = { episodeViewMode = 0 }
-                                        )
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ViewList,
-                                            contentDescription = tr("Use episode list"),
-                                            tint = Color.White
+                                        Cs3HeaderLink(
+                                            label = tr("List view"),
+                                            onClick = { episodeViewMode = 0 },
                                         )
                                     }
                                 }
@@ -4887,15 +4834,18 @@ fun DetailScreen(
                                             pageEps,
                                             key = { index, ep -> "tv-ep-poster-shelf-" + index + "-" + ep.season + "-" + ep.number }
                                         ) { _, ep ->
-                                            EpisodePosterCard(
+                                            val h = historyForTitle.firstOrNull { it.episodeId == ep.id }
+                                            val prog = if (h != null && h.durationMs > 0) (h.positionMs.toFloat() / h.durationMs).coerceIn(0f, 1f) else 0f
+                                            TvCs3EpisodeCard(
                                                 ep = ep,
-                                                fallbackImage = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
                                                 tmdbStill = tvEpStills[ep.season to ep.number],
-                                                onClick = { tryPlay(ep) },
-                                                onDownload = { tryDownload(ep) },
-                                                modifier = Modifier.width((160f * tvEpisodeScale).dp),
-                                                sizeScale = tvEpisodeScale,
+                                                fallbackBlur = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
+                                                watchState = epWatchState(ep),
+                                                progress = prog,
                                                 hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                                onPlay = { tryPlay(ep) },
+                                                onDownload = { tryDownload(ep) },
+                                                modifier = Modifier.width(((if (episodeBigStyle) 420f else 300f) * tvEpisodeScale).dp),
                                             )
                                         }
                                     }
@@ -5312,6 +5262,45 @@ fun DetailScreen(
                                 trailer.youtubeKey,
                                 (m?.title ?: title) + " — " + trailer.name
                             )
+                        }
+                    }
+                }
+                // Television Screenshots, the reference client's own strip:
+                // TMDB backdrops in a 16:9 rail. Phone untouched — this
+                // section never existed there, and the strip simply doesn't
+                // render when TMDB has no backdrops for the title.
+                if (isTvLayout && tvScreenshots.isNotEmpty()) {
+                    item(key = "tv-screenshots") {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, end = 20.dp, top = 18.dp)
+                        ) {
+                            Cs3SectionHeader(title = tr("Screenshots"))
+                            Spacer(Modifier.height(10.dp))
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(horizontal = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(tvScreenshots, key = { "tv-shot-" + it }) { shot ->
+                                    AsyncImage(
+                                        model = PosterLoader.model(shot),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .width(320.dp)
+                                            .aspectRatio(16f / 9f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(com.hikari.app.tv.Cs3.SurfaceElevated)
+                                            .border(
+                                                0.5.dp,
+                                                com.hikari.app.tv.Cs3.Edge,
+                                                RoundedCornerShape(8.dp)
+                                            ),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -8338,6 +8327,52 @@ private fun TrailerRow(trailers: List<Trailer>, onClick: (Trailer) -> Unit) {
 }
 
 @Composable
+/* The reference client's episode card on TV: a 16:9 still (the provider's
+ * own thumbnail, else the TMDB still) with rating badge + watched check,
+ * the S/E code, bold title, two-line synopsis and duration — over the dark
+ * card with the hairline edge. Every TV episode mode renders through here,
+ * so the stills, badges and progress read the same everywhere. A title with
+ * no still at all gets the show art BLURRED, never a sharp-cropped poster. */
+@Composable
+private fun TvCs3EpisodeCard(
+    ep: Episode,
+    tmdbStill: String?,
+    fallbackBlur: String?,
+    watchState: Int,
+    progress: Float,
+    hideSpoilers: Boolean,
+    onPlay: () -> Unit,
+    onDownload: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val epNum = ep.number
+    val code = if (ep.season != null && ep.season > 0) "S" + ep.season + " \u00b7 " + tr("Episode %s").replace("%s", epNum.toString()).uppercase()
+    else tr("Episode %s").replace("%s", epNum.toString()).uppercase()
+    val title = ep.name?.takeIf { it.isNotBlank() } ?: tr("Episode %s").replace("%s", epNum.toString())
+    val desc = when {
+        isEpisodeUnaired(ep.released) -> tr("Not released yet")
+        !ep.overview.isNullOrBlank() -> ep.overview.trim()
+        else -> ""
+    }
+    val mins = ep.runtime?.takeIf { it > 0 }
+    val duration = mins?.let { if (it >= 60) (it / 60).toString() + "h " + (it % 60).toString() + "m" else it.toString() + "m" }
+    Cs3EpisodeCard(
+        art = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() }),
+        fallbackBlur = PosterLoader.model(fallbackBlur),
+        code = code,
+        title = title,
+        desc = desc,
+        duration = duration,
+        rating10 = ep.rating?.takeIf { it > 0.0 },
+        progress = if (watchState == 1) progress else 0f,
+        watched = watchState == 2,
+        hideSpoilers = hideSpoilers,
+        onPlay = onPlay,
+        onDownload = onDownload,
+        modifier = modifier,
+    )
+}
+
 private fun EpisodePosterCard(
     ep: Episode,
     fallbackImage: String? = null,

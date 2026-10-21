@@ -38,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -131,17 +133,25 @@ fun TvCinematicHero(
                 label = "tvHeroArt",
             ) { id ->
                 // TMDB first, like the TV detail page (see Artwork.tvHeroModel):
-                // the hero always wears high-quality TMDB backdrops.
+                // the hero wears high-quality TMDB backdrops. Aspect-safe like
+                // the reference: genuinely wide art paints sharp; a
+                // poster-only title fills BLURRED (a sharp-cropped poster is
+                // what beheaded subjects on the TV hero).
                 val fadeArt = remember(id) {
                     Artwork.tvHeroModel(items.firstOrNull { it.uniqueId == id } ?: item)
                 }
                 PosterImage(
                     model = fadeArt.first,
                     contentDescription = item.title,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().then(
+                        if (!fadeArt.second) Modifier.blur(20.dp, BlurredEdgeTreatment.Unbounded) else Modifier
+                    ),
                     contentScale = ContentScale.Crop,
                     alignment = com.hikari.app.ui.Artwork.CINEMA_ALIGNMENT,
                 )
+                if (!fadeArt.second && fadeArt.first != null) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.32f)))
+                }
             }
             Box(
                 Modifier

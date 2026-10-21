@@ -32,6 +32,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -115,16 +117,19 @@ fun TvCinemaCard(
   modifier: Modifier = Modifier,
   cardWidth: androidx.compose.ui.unit.Dp = 280.dp,
 ) {
-  // A cinema card is ALWAYS a full-bleed 16:9 crop: genuinely wide art fills
-  // the frame, and a portrait poster is cropped into it anchored at the TOP
-  // (faces/title art, never the middle hair strip). No letterbox, no dark
-  // side bars — a narrow poster floating between blanks is never the look.
+  // A cinema card is ALWAYS a full-bleed 16:9 frame, but only genuinely
+  // wide art paints SHARP in it (the reference's own contract: TMDB
+  // backdrops sharp, posters blurred). A portrait poster sharp-cropped into
+  // 16:9 is what beheaded subjects and cut-off title text on the TV shelves —
+  // so a poster-only title fills BLURRED behind the same hairline, atmosphere
+  // without the crop. No letterbox, no dark side bars.
   //
   // The desktop language: 8dp corners, a true-black card that separates from
   // the page by its hairline (never a grey fill), and the focus glow + scale
   // while the remote sits on it (see tvFocusGlow — focus IS hover on a TV).
   val hero = Artwork.heroModel(item)
   val art = hero.first
+  val artWide = hero.second
   val cardShape = RoundedCornerShape(TvDesktop.CornerCard)
   // No clip on the outer Column: the corner curve used to reach down into the
   // title/year lines and bite their edges off. Only the artwork itself is
@@ -137,7 +142,10 @@ fun TvCinemaCard(
       contentAlignment = Alignment.Center,
     ) {
       Icon(Icons.Filled.Movie, contentDescription = null, tint = TvDesktop.TextMuted.copy(alpha = 0.4f), modifier = Modifier.size(28.dp))
-      AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape), contentScale = ContentScale.Crop, alignment = Artwork.CINEMA_ALIGNMENT)
+      AsyncImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape).then(if (!artWide) Modifier.blur(16.dp, BlurredEdgeTreatment.Unbounded) else Modifier), contentScale = ContentScale.Crop, alignment = Artwork.CINEMA_ALIGNMENT)
+      if (!artWide && art != null) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape).background(Color.Black.copy(alpha = 0.32f)))
+      }
       item.rating?.takeIf { it > 0 }?.let { r ->
         Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(TvDesktop.CornerCard), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
           Text("★ " + "%.1f".format(r), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFC107), modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp))

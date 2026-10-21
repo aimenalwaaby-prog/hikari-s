@@ -1,3 +1,10 @@
+## 0.11.84 (continuous build only)
+
+### Changed (TV layout rebuilt toward the desktop client — phone UI untouched)
+- TV detail is now the reference client's header: aspect-safe backdrop (TMDB 16:9 art sharp with the triple gradient; poster-only titles fill blurred, never stretched), title → year/type/runtime → branded ratings + genres → plot → actions, a Season N • Episodes header with sort/list actions, and — for series — episode cards with stills, S/E codes, ratings, progress and watched checks in every view mode
+- New TV Screenshots strip from TMDB backdrops; cast, trailers, collection and Related/Similar rows unchanged and still shared
+- TV shelves and the home hero paint posters sharp only when genuinely wide and blur-fill otherwise, so portrait art stops cropping mid-face; home hero keeps its rotation, dots and prefetch
+
 ## 0.11.83 (continuous build only)
 
 ### Fixed
