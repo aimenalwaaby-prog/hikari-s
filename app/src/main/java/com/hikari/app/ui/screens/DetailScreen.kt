@@ -4584,7 +4584,7 @@ fun DetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Cs3RatingBadges(ratings, tvCert) { ratingInfo = it }
+                            Cs3RatingBadges(ratings, tvCert, onRatingClick = { ratingInfo = it })
                             if (!m?.genres.isNullOrEmpty()) {
                                 Text(
                                     m!!.genres.take(4).joinToString(", "),
@@ -8326,7 +8326,6 @@ private fun TrailerRow(trailers: List<Trailer>, onClick: (Trailer) -> Unit) {
     }
 }
 
-@Composable
 /* The reference client's episode card on TV: a 16:9 still (the provider's
  * own thumbnail, else the TMDB still) with rating badge + watched check,
  * the S/E code, bold title, two-line synopsis and duration — over the dark
