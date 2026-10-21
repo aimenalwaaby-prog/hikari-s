@@ -7921,7 +7921,6 @@ private fun isDartOnlyPlugin(p: Cs3RepoPlugin): Boolean {    val u = p.url
     return false
 }
 
-@Composable
 /**
  * The reference client's extension box over one repo entry: icon (resolved
  * lazily exactly like [RepoPluginIcon] — most listings declare no icon),
@@ -7980,6 +7979,7 @@ private fun TvPluginCardEntry(
     )
 }
 
+@Composable
 private fun PluginRow(
     p: Cs3RepoPlugin,
     installed: Boolean,
