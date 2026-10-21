@@ -8372,6 +8372,7 @@ private fun TvCs3EpisodeCard(
     )
 }
 
+@Composable
 private fun EpisodePosterCard(
     ep: Episode,
     fallbackImage: String? = null,
