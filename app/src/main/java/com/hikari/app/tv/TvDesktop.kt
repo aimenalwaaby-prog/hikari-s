@@ -21,36 +21,31 @@ import androidx.compose.ui.unit.dp
 /**
  * The desktop client's visual language, translated onto the television layout.
  *
- * Every value here mirrors that client's tokens: pure-black AMOLED surfaces
- * (Background/SurfaceCard Black, SurfaceElevated #0A0A0A — their exact AMOLED
- * triple), white-on-black text, the hairline border, 8dp corners and the
- * 8/12/16/20/24 spacing scale. The ACCENT is not hardcoded: it reads the
- * app's own colour scheme, so Settings → Appearance & Theme → Accent colour
- * drives the TV exactly like the phone, and the AMOLED Black theme (the fresh-
- * install default) lands on true black with no grey layers.
+ * Every value here mirrors that client's exact tokens: the Navy triple
+ * (Background 0xFF0C0C16 / SurfaceCard 0xFF161624 / SurfaceElevated 0xFF20202E,
+ * divider 0xFF2A2A38), white-on-navy text, the hairline border, 8dp corners
+ * and the spacing scale. The ACCENT is the reference's own purple
+ * (0xFF6C5CE7), hardcoded — one-to-one with the reference means the TV does
+ * not follow the phone's Settings accent.
  *
- * This is deliberately a read-only overlay, not a second theme engine: there
- * is nothing to save, sync or migrate, so it cannot change behaviour — TV
- * components just paint from here instead of the phone-tuned surfaces.
+ * TV-only overlay (tv/ package): the phone theme is untouched.
  */
 object TvDesktop {
 
-    /** Page background: true black, like the reference's AMOLED mode. */
-    val Background: Color = Color.Black
+    /** Page background: the reference's exact Navy. */
+    val Background: Color = Color(0xFF0C0C16)
 
-    /** Card surface: true black — cards separate from the page by their
-     *  hairline border and content, never by a grey fill. */
-    val SurfaceCard: Color = Color.Black
+    /** Card surface: the reference's exact card Navy. */
+    val SurfaceCard: Color = Color(0xFF161624)
 
-    /** Elevated surface (thumb placeholders, rails, sheets): one step above
-     *  black, the reference's exact AMOLED elevated value. */
-    val SurfaceElevated: Color = Color(0xFF0A0A0A)
+    /** Elevated surface: the reference's exact elevated Navy. */
+    val SurfaceElevated: Color = Color(0xFF20202E)
 
     val TextPrimary: Color = Color.White
     val TextMuted: Color = Color.White.copy(alpha = 0.7f)
 
-    /** Hairline divider/border on black. */
-    val Divider: Color = Color(0xFF1C1C22)
+    /** Hairline divider/border. */
+    val Divider: Color = Color(0xFF2A2A38)
 
     /** Glass hairline for floating bars and lit cards. */
     val GlassEdge: Color = Color.White.copy(alpha = 0.14f)
@@ -70,9 +65,12 @@ object TvDesktop {
     /** 2:3 poster geometry, same as the reference. */
     const val PosterAspect: Float = 2f / 3f
 
-    /** The app's accent on TV (Settings → Appearance & Theme → Accent). */
+    /** The reference's own purple accent, hardcoded for one-to-one TV. */
+    val Purple: Color = Color(0xFF6C5CE7)
+
+    /** The accent on TV (the reference purple, not the phone's setting). */
     val accent: Color
-        @Composable get() = MaterialTheme.colorScheme.primary
+        @Composable get() = Purple
 }
 
 /**

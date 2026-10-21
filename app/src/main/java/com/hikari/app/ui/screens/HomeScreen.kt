@@ -1164,6 +1164,11 @@ fun HomeScreen(nav: NavHostController) {
                         // watch-history store, so it leaves the shelf and the
                         // History tab at the same time.
                         onRemove = { h -> scope.launch { app.store.removeHistory(h.uniqueKey) } },
+                        // TV also gets the reference's Clear History action in
+                        // the shelf header — same shared store, whole shelf.
+                        onClearAll = if (TvMode.current()) {
+                            { scope.launch { app.store.clearHistory() } }
+                        } else null,
                     )
                 }
             }

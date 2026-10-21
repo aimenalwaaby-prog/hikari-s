@@ -1,3 +1,11 @@
+## 0.11.85 (continuous build only)
+
+### Changed (TV layout one-to-one with the desktop client — phone UI untouched)
+- TV accent is the reference purple everywhere (was the phone's gold setting); navy triple background + divider tokens across the TV surfaces
+- TV detail sections rebuilt to the reference: cast/characters rail with View All dialog grid, trailer rail with count header and OFFICIAL/type cards, Show Details two-column block with studio/network logo rows, Screenshots mosaic with count pill, Related/Similar shelves with chevron headers, hero with wordmark-or-title plus Watch Now
+- Every home shelf wears the reference header (bold title, purple View All pill, scroll chevrons) with the provider line kept underneath; Continue Watching adds Clear History on TV; extension repo pages and search results render the reference 2-per-row boxes (icon, name + flag, version • repo, description, type chips, Install/Installed/Uninstall)
+- TMDB title resolution now tries every known name of a title (display + original), so non-Nuvio sources land their TMDB hero/detail art more often
+
 ## 0.11.84 (continuous build only)
 
 ### Changed (TV layout rebuilt toward the desktop client — phone UI untouched)

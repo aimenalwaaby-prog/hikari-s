@@ -91,6 +91,7 @@ import com.hikari.app.ui.RatingBadge
 import com.hikari.app.ui.rememberPosterScore
 import com.hikari.app.ui.rememberPosterStyle
 import com.hikari.app.ui.rememberVisibleItems
+import com.hikari.app.tv.Cs3ShelfHeader
 import com.hikari.app.tv.TvMode
 import com.hikari.app.tv.TvUi
 import com.hikari.app.ui.theme.rememberGlassTokens
@@ -1414,6 +1415,9 @@ fun ContinueWatchingRow(
      *  Continue Watching is fed from the same watch-history store as the
      *  History tab, so removing here removes it from both. */
     onRemove: ((HistoryEntry) -> Unit)? = null,
+    /** When non-null the TV header shows the reference's "Clear History"
+     *  action beside the shelf header (it clears the same shared store). */
+    onClearAll: (() -> Unit)? = null,
 ) {
     if (entries.isEmpty()) return
     // Defensive dedupe: a duplicate Compose key would crash the whole row.
@@ -1428,6 +1432,52 @@ fun ContinueWatchingRow(
     val shown = remember(unique, nsfwOn) {
         if (nsfwOn) unique
         else unique.filter { !com.hikari.app.data.NsfwGate.isAdultText(it.title, emptyList()) }
+    }
+    if (TvMode.current()) {
+        // The reference Continue Watching header: bold title, the "Clear
+        // History" action and the two scroll chevrons over the same rail.
+        val tvRowState = androidx.compose.foundation.lazy.rememberLazyListState()
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 22.dp)
+        ) {
+            Cs3ShelfHeader(
+                title = tr("Continue Watching"),
+                itemCount = shown.size,
+                scroll = tvRowState,
+                onViewAll = null,
+                leadingExtra = if (onClearAll != null) {
+                    {
+                        androidx.compose.material3.TextButton(onClick = onClearAll) {
+                            Text(
+                                tr("Clear History"),
+                                color = com.hikari.app.tv.TvDesktop.TextMuted,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                } else null,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            LazyRow(
+                state = tvRowState,
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(shown, key = { it.uniqueKey }) { h ->
+                    ContinueWatchingCard(
+                        h = h,
+                        backdrop = backdropOf(h),
+                        removable = onRemove != null,
+                        onClick = { onClick(h) },
+                        onRemove = { onRemove?.invoke(h) },
+                    )
+                }
+            }
+        }
+        return
     }
     Column(Modifier.padding(top = 16.dp)) {
         Text(

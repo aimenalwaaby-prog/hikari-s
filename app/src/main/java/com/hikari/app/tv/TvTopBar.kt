@@ -157,7 +157,7 @@ fun TvProfilePill(
                 Modifier
                     .size(26.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
+                    .background(Cs3.accent),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -214,7 +214,7 @@ fun TvHomeHeaderBar(
     onSettings: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val accent = MaterialTheme.colorScheme.primary
+    val accent = Cs3.accent
     Row(
         modifier
             .fillMaxWidth()
@@ -315,14 +315,14 @@ fun TvProviderIcon(
             modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                .background(Cs3.accent.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 name?.trim()?.firstOrNull()?.uppercase() ?: "•",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = Cs3.accent,
             )
         }
     }
@@ -378,12 +378,12 @@ fun TvSelectProviderDialog(
                     Surface(
                         onClick = onPickAll,
                         shape = RoundedCornerShape(TvDesktop.CornerCard),
-                        color = if (allSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                        color = if (allSelected) Cs3.accent.copy(alpha = 0.28f)
                         else TvDesktop.SurfaceCard,
                         modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll)
                             .border(
                                 1.dp,
-                                if (allSelected) MaterialTheme.colorScheme.primary
+                                if (allSelected) Cs3.accent
                                 else TvDesktop.GlassEdge,
                                 RoundedCornerShape(TvDesktop.CornerCard),
                             ),
@@ -395,7 +395,7 @@ fun TvSelectProviderDialog(
                             Icon(
                                 Icons.Filled.Language,
                                 contentDescription = null,
-                                tint = if (allSelected) MaterialTheme.colorScheme.primary
+                                tint = if (allSelected) Cs3.accent
                                 else TvDesktop.TextMuted,
                                 modifier = Modifier.size(16.dp),
                             )
@@ -413,7 +413,7 @@ fun TvSelectProviderDialog(
                                 Icon(
                                     Icons.Filled.Check,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = Cs3.accent,
                                     modifier = Modifier.size(14.dp),
                                 )
                             }
@@ -550,7 +550,7 @@ fun TvManageFeedDialog(
                     tr("Active Providers Feed"),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = Cs3.accent,
                 )
                 Spacer(Modifier.height(6.dp))
                 if (active.isEmpty()) {
@@ -634,7 +634,7 @@ fun TvManageFeedDialog(
                                 Icon(
                                     Icons.Filled.Add,
                                     contentDescription = tr("Add"),
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = Cs3.accent,
                                     modifier = Modifier.size(20.dp),
                                 )
                             }
@@ -670,12 +670,12 @@ private fun TvProviderCard(
             .fillMaxWidth()
             .clip(shape)
             .background(
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                if (selected) Cs3.accent.copy(alpha = 0.22f)
                 else TvDesktop.SurfaceCard
             )
             .border(
                 1.5.dp,
-                if (selected) MaterialTheme.colorScheme.primary
+                if (selected) Cs3.accent
                 else TvDesktop.GlassEdge,
                 shape,
             )
@@ -714,7 +714,7 @@ private fun TvProviderCard(
             Icon(
                 Icons.Filled.Check,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Cs3.accent,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -748,7 +748,7 @@ fun TvProfileMenuDialog(
                 Text(
                     tr("Active Profile"),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = Cs3.accent,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(6.dp))
@@ -759,7 +759,7 @@ fun TvProfileMenuDialog(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(TvDesktop.CornerCard))
                             .background(
-                                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                if (active) Cs3.accent.copy(alpha = 0.16f)
                                 else Color.Transparent
                             )
                             .clickable(enabled = !active) { onSwitch(p.id) }
@@ -773,7 +773,7 @@ fun TvProfileMenuDialog(
                                 .size(30.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (active) MaterialTheme.colorScheme.primary
+                                    if (active) Cs3.accent
                                     else TvDesktop.SurfaceElevated
                                 ),
                             contentAlignment = Alignment.Center,
@@ -799,7 +799,7 @@ fun TvProfileMenuDialog(
                             Icon(
                                 Icons.Filled.Check,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = Cs3.accent,
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -849,7 +849,7 @@ fun TvProfileMenuDialog(
                         Icon(
                             Icons.Filled.Add,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = Cs3.accent,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(Modifier.width(10.dp))

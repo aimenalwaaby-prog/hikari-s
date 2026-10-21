@@ -44,9 +44,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -84,6 +88,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -182,10 +187,21 @@ import com.hikari.app.ui.theme.rememberGlassTokens
 import com.hikari.app.ui.components.HeroArtwork
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.tv.tvPress
-import com.hikari.app.tv.Cs3RatingBadges
-import com.hikari.app.tv.Cs3SectionHeader
+import com.hikari.app.tv.Cs3
+import com.hikari.app.tv.Cs3ActorCard
+import com.hikari.app.tv.Cs3AntiSpoilerPill
+import com.hikari.app.tv.Cs3CastHeader
+import com.hikari.app.tv.Cs3CountHeader
 import com.hikari.app.tv.Cs3EpisodeCard
 import com.hikari.app.tv.Cs3HeaderLink
+import com.hikari.app.tv.Cs3RatingBadges
+import com.hikari.app.tv.Cs3ScreenshotsMosaic
+import com.hikari.app.tv.Cs3SectionHeader
+import com.hikari.app.tv.Cs3ShelfHeader
+import com.hikari.app.tv.Cs3ShowDetails
+import com.hikari.app.tv.Cs3SortChip
+import com.hikari.app.tv.Cs3TrailerCard
+import com.hikari.app.tv.Cs3ViewAllCastCard
 import com.hikari.app.web.WebViewActivity
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CompletableDeferred
@@ -2191,6 +2207,10 @@ fun DetailScreen(
     // The mark sheet (the check button beside Play) — see the block below the
     // library picker.
     var markSheet by remember { mutableStateOf(false) }
+    // The full cast roster dialog on TV (the cast header's "View All"): the
+    // reference client's "View All Cast & Crew" opens the whole roster, and
+    // Hikari has no person page — a dialog grid over the detail page instead.
+    var showFullCast by remember { mutableStateOf(false) }
 
     var playerLaunched by remember { mutableStateOf(false) }
     // Resets the once-only launch guard the moment the player activity returns
@@ -4489,6 +4509,7 @@ fun DetailScreen(
                                         watchState = epWatchState(ep),
                                         progress = prog,
                                         hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                        isAnime = m?.rawType?.contains("anime", ignoreCase = true) == true,
                                         onPlay = { tryPlay(ep) },
                                         onDownload = { tryDownload(ep) },
                                         modifier = Modifier.fillMaxWidth(),
@@ -4517,36 +4538,13 @@ fun DetailScreen(
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxWidth(if (episodePosterStyle) 0.62f else 0.58f).heightIn(max = 108.dp))
                     } else {
-                        Text(artTitle, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(10.dp))
-                    // The watch state below the title, like the reference
-                    // layout's save row: one glance says Watching / Watch
-                    // later, and Change opens the same sheet as below.
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (markWatched) {
-                            MarkChip(tr("Watched"), active = true) { markSheet = true }
-                        }
-                        if (markWatching) {
-                            MarkChip(tr("Watching"), active = true) { markSheet = true }
-                        }
-                        if (markLater) {
-                            MarkChip(tr("Watch later"), active = true) { markSheet = true }
-                        }
-                        MarkChip(
-                            if (markAnything) tr("Change") else tr("Mark"),
-                            active = false,
-                        ) { markSheet = true }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    if (!detailIsSeries) tvPlayRow(12.dp)
 
-                    // Row 1: year, type, runtime — the reference's primary
-                    // meta line under the title.
+                    // Row 1: year, type, runtime + cert chip — the reference's
+                    // primary meta line (no production row, no extra badges).
                     val tvMeta = buildList {
                         m?.year?.let { add(it.toString()) }
                         when (m?.type) {
@@ -4557,48 +4555,54 @@ fun DetailScreen(
                         extras?.details?.runtimeMinutes?.takeIf { it > 0 }?.let { mins ->
                             add(if (mins >= 60) (mins / 60).toString()+"h "+(mins % 60).toString()+"m" else mins.toString()+"m")
                         }
-                    }.joinToString("  \u00b7  ")
-                    if (tvMeta.isNotBlank()) Text(tvMeta, style = MaterialTheme.typography.titleSmall,
-                        color = Color.White.copy(alpha = 0.92f), modifier = Modifier.padding(top = 8.dp))
-                    // Production, above the ratings: the reference layout's
-                    // studio row sits with the title block, not buried below.
-                    extras?.companies?.takeIf { it.isNotEmpty() }?.let { tvCompanies ->
-                        TvCompanyRow(tvCompanies) { c ->
-                            val spec = TmdbSpec(
-                                type = if (c.isNetwork) TmdbSourceType.NETWORK
-                                else TmdbSourceType.COMPANY,
-                                id = c.id,
-                                media = if (c.isNetwork) "tv" else "all",
-                                sort = "popularity.desc",
-                                title = c.name,
-                            )
-                            Routes.safeNavigate(nav, Routes.tmdbGridSpec(spec.encode(), c.name))
-                        }
-                    }
-                    // Row 2: the reference's ratings row — branded badges then
-                    // genres — with the content-rating chip at the end.
+                    }.joinToString("   •   ")
                     val tvCert = extras?.details?.certification?.trim()?.takeIf { it.isNotEmpty() }
-                    if (showDetailRating && (ratings.isNotEmpty() || !tvCert.isNullOrBlank())) {
+                    if (tvMeta.isNotBlank() || !tvCert.isNullOrBlank()) {
                         Row(
-                            Modifier.fillMaxWidth().padding(top = 10.dp),
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Cs3RatingBadges(ratings, tvCert, onRatingClick = { ratingInfo = it })
-                            if (!m?.genres.isNullOrEmpty()) {
-                                Text(
-                                    m!!.genres.take(4).joinToString(", "),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = Color.White.copy(alpha = 0.72f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                )
-                            }
+                            if (tvMeta.isNotBlank()) Text(
+                                tvMeta,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.88f),
+                            )
+                            if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
                         }
-                    } else if (!tvCert.isNullOrBlank()) {
-                        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            com.hikari.app.tv.TvCertChip(tvCert)
+                    }
+                    // Row 2: the reference's ratings row — IMDb + TMDB badges
+                    // only, then genres. Every other source is gone from TV.
+                    if (showDetailRating) {
+                        val tvBadges = ratings
+                            .filter {
+                                it.source == com.hikari.app.data.RatingSource.IMDB ||
+                                    it.source == com.hikari.app.data.RatingSource.TMDB
+                            }
+                            .sortedBy { if (it.source == com.hikari.app.data.RatingSource.IMDB) 0 else 1 }
+                        val tvGenres = m?.genres?.takeIf { it.isNotEmpty() }
+                        if (tvBadges.isNotEmpty() || !tvGenres.isNullOrEmpty()) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (tvBadges.isNotEmpty()) {
+                                    Cs3RatingBadges(tvBadges, null) { ratingInfo = it }
+                                }
+                                if (!tvGenres.isNullOrEmpty()) {
+                                    Text(
+                                        (if (tvBadges.isNotEmpty()) "•  " else "") + tvGenres.take(4).joinToString(", "),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                }
+                            }
                         }
                     }
                     if (!displayOverview.isNullOrBlank()) {
@@ -4608,14 +4612,20 @@ fun DetailScreen(
                         var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
                         Text(
                             displayOverview!! + if (!tvOverviewFull && displayOverview.length > 140) "  [more]" else "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.84f),
-                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else if (episodePosterStyle) 4 else 2,
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp,
+                            color = Color.White.copy(alpha = 0.88f),
+                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else 3,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
                                 .clickable { tvOverviewFull = !tvOverviewFull },
                         )
                     }
+                    // The reference's action row sits below the plot: white
+                    // Play/Resume pill + library, download and trailer
+                    // squares — for series as well as movies, so the next
+                    // episode is one tap away without scrolling.
+                    tvPlayRow(12.dp)
                 }
             }
         } else {
@@ -4726,22 +4736,90 @@ fun DetailScreen(
                                     )
                             ) {
                                 tvPlayRow(8.dp)
-                                // The reference season header: Season N, episode
-                                // count, sort + view actions pinned right.
-                                val seasonTitle = if (seasons.size > 1) tr("Season %s").replace("%s", activeSeason.toString()) + " \u00b7 " + tr("Episodes (%s)").replace("%s", shownEps.size.toString())
-                                else tr("Episodes (%s)").replace("%s", shownEps.size.toString())
-                                Cs3SectionHeader(
-                                    title = seasonTitle,
+                                // The reference season header, one-to-one:
+                                // Season N + episode count left; Mark Season
+                                // Watched, the anti-spoiler switch, Sort and
+                                // the view-mode button right.
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Cs3HeaderLink(
-                                            label = if (epsNewestFirst) tr("Newest first") else tr("Oldest first"),
-                                            onClick = { epsNewestFirst = !epsNewestFirst },
-                                        )
-                                        Cs3HeaderLink(
-                                            label = tr("List view"),
-                                            onClick = { episodeViewMode = 0 },
-                                        )
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    ) {
+                                        if (seasons.size > 1) {
+                                            Text(
+                                                text = tr("Season %s").replace("%s", activeSeason.toString()),
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                            )
+                                        } else {
+                                            Text(
+                                                text = tr("Episodes"),
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                            )
+                                        }
+                                        if (shownEps.isNotEmpty()) {
+                                            Text(
+                                                text = "•   ${shownEps.size} " + if (shownEps.size == 1) tr("Episode") else tr("Episodes"),
+                                                color = Color.White.copy(alpha = 0.55f),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                        }
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        if (shownEps.isNotEmpty()) {
+                                            val seasonWatched = markAllWatched
+                                            Surface(
+                                                onClick = { markSheet = true },
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (seasonWatched) Color(0xFF4ADE80).copy(alpha = 0.18f)
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                                border = androidx.compose.foundation.BorderStroke(
+                                                    1.dp,
+                                                    if (seasonWatched) Color(0xFF4ADE80) else Color.White.copy(alpha = 0.1f),
+                                                ),
+                                            ) {
+                                                Text(
+                                                    text = if (seasonWatched) "✓ " + tr("Season Watched") else tr("Mark Season Watched"),
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (seasonWatched) Color(0xFF4ADE80) else Cs3.TextPrimary,
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                )
+                                            }
+                                        }
+                                        Cs3AntiSpoilerPill(checked = antiSpoiler, onChange = { antiSpoiler = it })
+                                        Cs3SortChip(ascending = !epsNewestFirst, onClick = { epsNewestFirst = !epsNewestFirst })
+                                        Surface(
+                                            onClick = { cycleEpisodeView() },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                            modifier = Modifier.size(38.dp),
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                                Icon(
+                                                    imageVector = when (episodeViewMode) {
+                                                        0 -> Icons.Filled.GridView
+                                                        1 -> Icons.Filled.Dashboard
+                                                        else -> Icons.AutoMirrored.Filled.ViewList
+                                                    },
+                                                    contentDescription = null,
+                                                    tint = Cs3.TextPrimary,
+                                                    modifier = Modifier.size(20.dp),
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 Column(
@@ -4843,6 +4921,7 @@ fun DetailScreen(
                                                 watchState = epWatchState(ep),
                                                 progress = prog,
                                                 hideSpoilers = antiSpoiler && !isEpSeen(ep),
+                                                isAnime = m?.rawType?.contains("anime", ignoreCase = true) == true,
                                                 onPlay = { tryPlay(ep) },
                                                 onDownload = { tryDownload(ep) },
                                                 modifier = Modifier.width(((if (episodeBigStyle) 420f else 300f) * tvEpisodeScale).dp),
@@ -5186,18 +5265,55 @@ fun DetailScreen(
                 // the background TMDB lookup has landed.
                 extras?.details?.let { det ->
                     item {
-                        DetailsBlock(
-                            d = det,
-                            // TV already shows ratings + year/runtime/cert in
-                            // the hero (reference layout) — the block below
-                            // keeps only status/country/language/votes/
-                            // release/director/writers so nothing shows twice.
-                            ratings = if (showDetailRating && !isTvLayout) ratings else emptyList(),
-                            hideHeadline = isTvLayout,
-                            // The callback stays wired for when the strip
-                            // comes back (setting on, phone layout).
-                            onRatingClick = { ratingInfo = it },
-                        )
+                        if (isTvLayout) {
+                            // The reference client's Show Details block: two
+                            // columns of label/value rows plus the studio and
+                            // network logo rows. The hero already carries the
+                            // year/runtime/cert line and the rating badges, so
+                            // they stay out of this block.
+                            val detailRows = ArrayList<Pair<String, String>>(8)
+                            det.status?.let { detailRows.add(tr("Status") to trStatus(it)) }
+                            det.country?.let { detailRows.add(tr("Country") to it) }
+                            det.language?.let { detailRows.add(tr("Language") to it) }
+                            det.voteCount?.takeIf { it > 0 }?.let {
+                                detailRows.add(tr("Votes") to it.toString())
+                            }
+                            det.releaseDate?.takeIf { it.isNotBlank() }?.let { iso ->
+                                detailRows.add(tr("Release Info") to formatReleaseDate(iso))
+                            }
+                            det.director?.takeIf { it.isNotBlank() }?.let {
+                                detailRows.add(tr("Director") to it)
+                            }
+                            if (det.writers.isNotEmpty()) {
+                                detailRows.add(tr("Writers") to det.writers.joinToString(", "))
+                            }
+                            val allCompanies = extras?.companies.orEmpty()
+                            Cs3ShowDetails(
+                                rows = detailRows,
+                                studioLogos = allCompanies
+                                    .filter { !it.isNetwork }
+                                    .mapNotNull { it.logoUrl }
+                                    .distinct(),
+                                networkLogos = allCompanies
+                                    .filter { it.isNetwork }
+                                    .mapNotNull { it.logoUrl }
+                                    .distinct(),
+                                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp),
+                            )
+                        } else {
+                            DetailsBlock(
+                                d = det,
+                                // TV already shows ratings + year/runtime/cert in
+                                // the hero (reference layout) — the block below
+                                // keeps only status/country/language/votes/
+                                // release/director/writers so nothing shows twice.
+                                ratings = if (showDetailRating && !isTvLayout) ratings else emptyList(),
+                                hideHeadline = isTvLayout,
+                                // The callback stays wired for when the strip
+                                // comes back (setting on, phone layout).
+                                onRatingClick = { ratingInfo = it },
+                            )
+                        }
                     }
                 }
                 // Production companies / networks — one tap opens everything
@@ -5240,28 +5356,167 @@ fun DetailScreen(
                     // AnimeCast. The row says which one it is showing.
                     val cast = extrasNow.cast
                     val characters = extrasNow.castIsCharacters
-                    item {
-                        CastRow(cast, characters = characters) { member ->
-                            // A character cell searches their ACTOR (the
-                            // searchable name); a cast cell searches the actor
-                            // it already is.
-                            val query = if (characters) member.character ?: member.name else member.name
-                            Routes.safeNavigate(nav, Routes.searchQuery(query))
+                    if (isTvLayout) {
+                        // The reference client's cast rail: "Cast & Crew" (or
+                        // "Characters" for anime) with the purple View All
+                        // link, 140dp 2:3 actor cards, and the View All tile
+                        // closing the rail when the roster runs long.
+                        item {
+                            val showAll = cast.size > 8
+                            val visible = if (showAll) cast.take(8) else cast
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 20.dp, end = 20.dp, top = 18.dp)
+                            ) {
+                                Cs3CastHeader(
+                                    title = tr(if (characters) "Characters" else "Cast & Crew"),
+                                    showViewAll = showAll,
+                                    onViewAll = { showFullCast = true },
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                ) {
+                                    items(visible, key = { "tv-cast-" + it.name }) { member ->
+                                        // A character cell searches their ACTOR
+                                        // (the searchable name); a cast cell
+                                        // searches the actor it already is.
+                                        val query = if (characters) member.character ?: member.name else member.name
+                                        Cs3ActorCard(
+                                            imageUrl = member.profileUrl,
+                                            cornerUrl = null,
+                                            name = member.name,
+                                            sub = member.character?.let { role ->
+                                                if (characters) "\uD83C\uDF99 " + tr("Voice: %s").replace("%s", role) else tr(role)
+                                            },
+                                            roleBadge = null,
+                                            onClick = { Routes.safeNavigate(nav, Routes.searchQuery(query)) },
+                                            modifier = Modifier.width(140.dp),
+                                        )
+                                    }
+                                    if (showAll) {
+                                        item(key = "tv-cast-viewall") {
+                                            Cs3ViewAllCastCard(
+                                                onClick = { showFullCast = true },
+                                                modifier = Modifier.width(140.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (showFullCast) {
+                            // The whole roster in a dialog grid — the TV
+                            // equivalent of the reference's View All page.
+                            item(key = "tv-cast-dialog") {
+                                Dialog(onDismissRequest = { showFullCast = false }) {
+                                    com.hikari.app.tv.Cs3DialogPanel(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.85f)
+                                            .fillMaxHeight(0.85f)
+                                    ) {
+                                        Column(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .padding(20.dp)
+                                        ) {
+                                            Cs3CastHeader(
+                                                title = tr(if (characters) "Characters" else "Cast & Crew"),
+                                                showViewAll = false,
+                                                onViewAll = {},
+                                            )
+                                            Spacer(Modifier.height(12.dp))
+                                            LazyVerticalGrid(
+                                                columns = GridCells.Adaptive(140.dp),
+                                                modifier = Modifier.fillMaxSize(),
+                                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                            ) {
+                                                gridItems(cast, key = { "tv-castall-" + it.name }) { member ->
+                                                    val query = if (characters) member.character ?: member.name else member.name
+                                                    Cs3ActorCard(
+                                                        imageUrl = member.profileUrl,
+                                                        cornerUrl = null,
+                                                        name = member.name,
+                                                        sub = member.character?.let { role ->
+                                                            if (characters) "\uD83C\uDF99 " + tr("Voice: %s").replace("%s", role) else tr(role)
+                                                        },
+                                                        roleBadge = null,
+                                                        onClick = {
+                                                            showFullCast = false
+                                                            Routes.safeNavigate(nav, Routes.searchQuery(query))
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        item {
+                            CastRow(cast, characters = characters) { member ->
+                                // A character cell searches their ACTOR (the
+                                // searchable name); a cast cell searches the actor
+                                // it already is.
+                                val query = if (characters) member.character ?: member.name else member.name
+                                Routes.safeNavigate(nav, Routes.searchQuery(query))
+                            }
                         }
                     }
                 }
                 extras?.trailers?.takeIf { it.isNotEmpty() }?.let { trailers ->
-                    item {
-                        TrailerRow(trailers) { trailer ->
-                            // Trailers hand off to the YouTube app instead of
-                            // playing in Hikari's WebView: YouTube redirects to
-                            // m.youtube.com and the WebView's redirect
-                            // protection blocks that, leaving a black page.
-                            openYouTubeVideo(
-                                context,
-                                trailer.youtubeKey,
-                                (m?.title ?: title) + " — " + trailer.name
-                            )
+                    if (isTvLayout) {
+                        // The reference client's trailer rail: count header
+                        // plus 320dp 16:9 cards with OFFICIAL/type badges, the
+                        // center play button and the title below.
+                        item {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 20.dp, end = 20.dp, top = 18.dp)
+                            ) {
+                                Cs3CountHeader(title = tr("Trailers"), count = trailers.size)
+                                Spacer(Modifier.height(10.dp))
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    items(trailers, key = { "tv-trailer-" + it.youtubeKey }) { trailer ->
+                                        Cs3TrailerCard(
+                                            name = trailer.name,
+                                            type = trailer.type,
+                                            isOfficial = trailer.type.equals("Trailer", ignoreCase = true) ||
+                                                trailer.name.contains("official", ignoreCase = true),
+                                            thumbnailUrl = trailer.thumbnailUrl,
+                                            onClick = {
+                                                openYouTubeVideo(
+                                                    context,
+                                                    trailer.youtubeKey,
+                                                    (m?.title ?: title) + " — " + trailer.name
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        item {
+                            TrailerRow(trailers) { trailer ->
+                                // Trailers hand off to the YouTube app instead of
+                                // playing in Hikari's WebView: YouTube redirects to
+                                // m.youtube.com and the WebView's redirect
+                                // protection blocks that, leaving a black page.
+                                openYouTubeVideo(
+                                    context,
+                                    trailer.youtubeKey,
+                                    (m?.title ?: title) + " — " + trailer.name
+                                )
+                            }
                         }
                     }
                 }
@@ -5271,36 +5526,20 @@ fun DetailScreen(
                 // render when TMDB has no backdrops for the title.
                 if (isTvLayout && tvScreenshots.isNotEmpty()) {
                     item(key = "tv-screenshots") {
+                        // The reference client's Screenshots section: count
+                        // pill plus the mosaic — the featured shot at half
+                        // width, the 2x2 grid beside it, the +N-more cell.
                         Column(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(start = 20.dp, end = 20.dp, top = 18.dp)
                         ) {
-                            Cs3SectionHeader(title = tr("Screenshots"))
+                            Cs3CountHeader(title = tr("Screenshots"), count = tvScreenshots.size)
                             Spacer(Modifier.height(10.dp))
-                            LazyRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentPadding = PaddingValues(horizontal = 2.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                items(tvScreenshots, key = { "tv-shot-" + it }) { shot ->
-                                    AsyncImage(
-                                        model = PosterLoader.model(shot),
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .width(320.dp)
-                                            .aspectRatio(16f / 9f)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(com.hikari.app.tv.Cs3.SurfaceElevated)
-                                            .border(
-                                                0.5.dp,
-                                                com.hikari.app.tv.Cs3.Edge,
-                                                RoundedCornerShape(8.dp)
-                                            ),
-                                    )
-                                }
-                            }
+                            Cs3ScreenshotsMosaic(
+                                screenshots = tvScreenshots,
+                                onShotClick = { /* Still: no viewer yet, rail only. */ },
+                            )
                         }
                     }
                 }
@@ -5598,6 +5837,7 @@ fun DetailScreen(
                         ShelfRow(
                             heading = tr("More from this playlist"),
                             shelf = iptvSiblings,
+                            tv = isTvLayout,
                             onClick = { openShelfItem(it) },
                             onSearchHere = {
                                 Routes.safeNavigate(nav, Routes.searchInProvider(livePid, it.title))
@@ -5618,6 +5858,7 @@ fun DetailScreen(
                         ShelfRow(
                             heading = coll.name.ifBlank { tr("Collection") },
                             shelf = coll.items,
+                            tv = isTvLayout,
                             onClick = { openShelfItem(it) },
                             onSearchHere = {
                                 Routes.safeNavigate(nav, Routes.searchInProvider(livePid, it.title))
@@ -5637,6 +5878,7 @@ fun DetailScreen(
                         ShelfRow(
                             heading = tr("Related"),
                             shelf = related,
+                            tv = isTvLayout,
                             onClick = { openShelfItem(it) },
                             onSearchHere = {
                                 Routes.safeNavigate(nav, Routes.searchInProvider(livePid, it.title))
@@ -5652,6 +5894,7 @@ fun DetailScreen(
                         ShelfRow(
                             heading = tr("Similar"),
                             shelf = similar,
+                            tv = isTvLayout,
                             onClick = { openShelfItem(it) },
                             onSearchHere = {
                                 Routes.safeNavigate(nav, Routes.searchInProvider(livePid, it.title))
@@ -7460,7 +7703,40 @@ private fun ShelfRow(
     onClick: (MediaItem) -> Unit,
     onSearchHere: (MediaItem) -> Unit,
     onGlobalSearch: (MediaItem) -> Unit,
+    /** The TV branch: the reference shelf header (title + scroll chevrons)
+     *  over the same poster cells. Related/Similar have no grid destination
+     *  of their own, so the View All pill stays hidden here. */
+    tv: Boolean = false,
 ) {
+    if (tv) {
+        val rowState = remember { LazyListState() }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, top = 18.dp)
+        ) {
+            Cs3ShelfHeader(title = heading, itemCount = shelf.size, scroll = rowState)
+            Spacer(Modifier.height(10.dp))
+            LazyRow(
+                state = rowState,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // The shelf arrives from an extension; a repeated title would repeat
+                // its Lazy key, which Compose treats as a crash rather than a
+                // warning.
+                items(shelf.distinctBy { it.uniqueId }, key = { it.uniqueId }) { item ->
+                    ShelfCell(
+                        item = item,
+                        onClick = { onClick(item) },
+                        onSearchHere = { onSearchHere(item) },
+                        onGlobalSearch = { onGlobalSearch(item) },
+                    )
+                }
+            }
+        }
+        return
+    }
     Column(Modifier.padding(top = 12.dp)) {
         Text(
             heading,
@@ -8340,6 +8616,7 @@ private fun TvCs3EpisodeCard(
     watchState: Int,
     progress: Float,
     hideSpoilers: Boolean,
+    isAnime: Boolean = false,
     onPlay: () -> Unit,
     onDownload: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -8355,6 +8632,7 @@ private fun TvCs3EpisodeCard(
     }
     val mins = ep.runtime?.takeIf { it > 0 }
     val duration = mins?.let { if (it >= 60) (it / 60).toString() + "h " + (it % 60).toString() + "m" else it.toString() + "m" }
+    val dateText = ep.released?.trim()?.takeIf { it.isNotBlank() }?.take(10)
     Cs3EpisodeCard(
         art = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() }),
         fallbackBlur = PosterLoader.model(fallbackBlur),
@@ -8362,6 +8640,8 @@ private fun TvCs3EpisodeCard(
         title = title,
         desc = desc,
         duration = duration,
+        dateText = dateText,
+        siteLabel = if (isAnime) "MAL" else "TMDB",
         rating10 = ep.rating?.takeIf { it > 0.0 },
         progress = if (watchState == 1) progress else 0f,
         watched = watchState == 2,

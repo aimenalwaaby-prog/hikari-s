@@ -220,47 +220,16 @@ fun TvCinemaRow(
   else com.hikari.app.ui.components.keptListState(keeperKey, itemKeys = rowKeys)
   val rowScope = androidx.compose.runtime.rememberCoroutineScope()
   Column(Modifier.padding(top = 22.dp)) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-      Column(Modifier.weight(1f)) {
-        Text(tr(title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (providerName.isNotBlank()) Text(providerName.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      }
-      // Shelf arrows, in the reference shape: step the row by a page without
-      // stealing focus (the remote stays where it was — only the tiles move).
-      androidx.compose.material3.IconButton(
-        onClick = {
-          rowScope.launch {
-            val first = rowState.firstVisibleItemIndex
-            rowState.animateScrollToItem((first - 4).coerceAtLeast(0))
-          }
-        },
-        modifier = Modifier.tvPress(previewPass = true, onClick = {
-          rowScope.launch {
-            val first = rowState.firstVisibleItemIndex
-            rowState.animateScrollToItem((first - 4).coerceAtLeast(0))
-          }
-        })
-      ) {
-        Icon(Icons.Filled.ChevronLeft, contentDescription = tr("Scroll left"), tint = TvDesktop.TextMuted)
-      }
-      androidx.compose.material3.IconButton(
-        onClick = {
-          rowScope.launch {
-            val first = rowState.firstVisibleItemIndex
-            rowState.animateScrollToItem(first + 4)
-          }
-        },
-        modifier = Modifier.tvPress(previewPass = true, onClick = {
-          rowScope.launch {
-            val first = rowState.firstVisibleItemIndex
-            rowState.animateScrollToItem(first + 4)
-          }
-        })
-      ) {
-        Icon(Icons.Filled.ChevronRight, contentDescription = tr("Scroll right"), tint = TvDesktop.TextMuted)
-      }
-      if (onShowAll != null) TextButton(onClick = onShowAll, modifier = Modifier.tvPress(previewPass = true, onClick = onShowAll)) { Text(tr("Show All"), fontWeight = FontWeight.Bold) }
-    }
+    // The reference shelf header, one-to-one: bold title, the purple View
+    // All pill, the two scroll chevrons — over the same kept scroll state.
+    Cs3ShelfHeader(
+      title = tr(title),
+      itemCount = unique.size,
+      scroll = rowState,
+      onViewAll = onShowAll,
+      modifier = Modifier.padding(horizontal = 20.dp),
+    )
+    if (providerName.isNotBlank()) Text(providerName.uppercase(), style = MaterialTheme.typography.labelSmall, color = TvDesktop.accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
     Spacer(Modifier.height(10.dp))
     LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
       items(unique, key = { it.uniqueId }) { item ->

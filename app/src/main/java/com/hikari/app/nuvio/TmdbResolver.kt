@@ -297,7 +297,11 @@ object TmdbResolver {
         // language) still has to be looked up by the name TMDB indexes it under.
         val title = item.searchTitle
         if (title.isBlank()) return null
-        val variants = TmdbMeta.queryVariants(title)
+        // Every name the item is known by: the display title and the original
+        // can each be the one TMDB (or the site) spells differently — a
+        // franchise's English name on a site is often a different translation
+        // than TMDB's — so variants are built from both, display included.
+        val variants = item.allTitles.flatMap { TmdbMeta.queryVariants(it) }.distinct()
         if (variants.isEmpty()) return null
         val kinds = when (item.type) {
             MediaType.MOVIE -> listOf("movie")

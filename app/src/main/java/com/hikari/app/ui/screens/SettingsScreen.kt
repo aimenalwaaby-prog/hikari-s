@@ -1640,7 +1640,11 @@ private fun SettingsFolderRow(
                     tr(folder.title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (selected) MaterialTheme.colorScheme.primary
+                    color = if (selected) {
+                        // Reference purple on TV, the phone's own accent setting.
+                        if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.Cs3.accent
+                        else MaterialTheme.colorScheme.primary
+                    }
                     else if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextPrimary
                     else MaterialTheme.colorScheme.onSurface,
                 )
@@ -1658,7 +1662,10 @@ private fun SettingsFolderRow(
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = if (selected) MaterialTheme.colorScheme.primary
+                tint = if (selected) {
+                    if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.Cs3.accent
+                    else MaterialTheme.colorScheme.primary
+                }
                 else if (com.hikari.app.tv.TvMode.current()) com.hikari.app.tv.TvDesktop.TextMuted
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)

@@ -6321,6 +6321,49 @@ private fun LazyListScope.extensionsSearchItems(
     }
 
     if (pluginMatches.isNotEmpty()) {
+        if (com.hikari.app.tv.TvMode.current()) {
+            // TV: the same reference 2-per-row grid as the repo page. The
+            // repo name rides in each card's meta line, so no per-row repo
+            // button is needed; a Dart-only entry installs its JS twin, the
+            // same answer the phone row gives it.
+            item { SectionHeader("Repos · ${pluginMatches.size}") }
+            pluginMatches.chunked(2).forEachIndexed { gi, pair ->
+                item(key = "tvsearch-$gi-" + pair.joinToString("|") { it.first.url + "|" + it.second.url }) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        pair.forEach { (repo, p) ->
+                            Box(Modifier.weight(1f)) {
+                                val jsTwin = if (isDartOnlyPlugin(p)) pluginMatches.firstOrNull { m ->
+                                    m.second.url != p.url && !isDartOnlyPlugin(m.second) &&
+                                        m.second.name.equals(p.name, ignoreCase = true)
+                                } else null
+                                TvPluginCardEntry(
+                                    p = p,
+                                    repo = repo,
+                                    providers = providers,
+                                    installedUrls = installedUrls,
+                                    outdatedUrls = outdatedUrls,
+                                    onInstall = {
+                                        val twin = jsTwin
+                                        if (twin != null) onInstallPlugin(twin.second, twin.first.kind)
+                                        else onInstallPlugin(p, repo.kind)
+                                    },
+                                    onUninstall = { onUninstallPlugin(p, repo.kind) },
+                                    onUpdate = { onUpdatePlugin(p, repo.kind) },
+                                    onOpenSettings = onOpenSettings,
+                                    cs3SettingsIds = cs3SettingsIds,
+                                )
+                            }
+                        }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        } else {
         item { SectionHeader("Repos · ${pluginMatches.size}") }
         items(pluginMatches, key = { "plug-" + it.first.url + "|" + it.second.url }) { match ->
             val repo = match.first
@@ -6382,6 +6425,7 @@ private fun LazyListScope.extensionsSearchItems(
                     onInstallJs = jsTwin?.let { t -> { onInstallPlugin(t.second, t.first.kind) } },
                 )
             }
+        }
         }
     }
 
@@ -6882,7 +6926,68 @@ private fun RepoPluginsView(
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
                 }
-                else -> items(entries.distinctBy { it.key }, key = { it.key }) { entry ->
+                else -> {
+                    if (com.hikari.app.tv.TvMode.current()) {
+                        // TV: the reference 2-per-row plugin grid. Group
+                        // headers stay full-width; consecutive plugin entries
+                        // pair into one grid line (never across a header).
+                        val tvEntries = entries.distinctBy { it.key }
+                        var tvIndex = 0
+                        while (tvIndex < tvEntries.size) {
+                            val head = tvEntries[tvIndex] as? RepoListEntry.Head
+                            if (head != null) {
+                                item(key = head.key) { RepoGroupHeader(head.title, head.count) }
+                                tvIndex += 1
+                                continue
+                            }
+                            val first = tvEntries[tvIndex] as? RepoListEntry.Row
+                            if (first == null) { tvIndex += 1; continue }
+                            val second = tvEntries.getOrNull(tvIndex + 1) as? RepoListEntry.Row
+                            item(key = "tvplug-" + first.key + "|" + (second?.key ?: "single")) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Box(Modifier.weight(1f)) {
+                                        TvPluginCardEntry(
+                                            p = first.plugin,
+                                            repo = repo,
+                                            providers = providers,
+                                            installedUrls = installedUrls,
+                                            outdatedUrls = outdatedUrls,
+                                            onInstall = { onInstall(first.plugin) },
+                                            onUninstall = { onUninstall(first.plugin) },
+                                            onUpdate = { onUpdate(first.plugin) },
+                                            onOpenSettings = onOpenSettings,
+                                            cs3SettingsIds = cs3SettingsIds,
+                                        )
+                                    }
+                                    if (second != null) {
+                                        Box(Modifier.weight(1f)) {
+                                            TvPluginCardEntry(
+                                                p = second.plugin,
+                                                repo = repo,
+                                                providers = providers,
+                                                installedUrls = installedUrls,
+                                                outdatedUrls = outdatedUrls,
+                                                onInstall = { onInstall(second.plugin) },
+                                                onUninstall = { onUninstall(second.plugin) },
+                                                onUpdate = { onUpdate(second.plugin) },
+                                                onOpenSettings = onOpenSettings,
+                                                cs3SettingsIds = cs3SettingsIds,
+                                            )
+                                        }
+                                    } else {
+                                        Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                            tvIndex += if (second != null) 2 else 1
+                        }
+                    } else {
+                        items(entries.distinctBy { it.key }, key = { it.key }) { entry ->
                     when (entry) {
                         is RepoListEntry.Head -> RepoGroupHeader(entry.title, entry.count)
                         is RepoListEntry.Row -> {
@@ -6922,6 +7027,8 @@ private fun RepoPluginsView(
                         }
                     }
                 }
+                }
+            }
             }
         }
     }
@@ -7806,6 +7913,64 @@ private fun isDartOnlyPlugin(p: Cs3RepoPlugin): Boolean {    val u = p.url
 }
 
 @Composable
+/**
+ * The reference client's extension box over one repo entry: icon (resolved
+ * lazily exactly like [RepoPluginIcon] — most listings declare no icon),
+ * name + flag, version • repo line, description, type chips and the
+ * Install / Installed / Uninstall action. Built for the TV 2-per-row grid.
+ *
+ * An entry with an update pending shows the Install button wired to the
+ * update (the reference card has no separate update state — the action is
+ * what matters). The per-row probe line of [PluginRow] has no slot on the
+ * card; bulk testing still lives in the repo header.
+ */
+@Composable
+private fun TvPluginCardEntry(
+    p: Cs3RepoPlugin,
+    repo: Cs3Repo,
+    providers: List<ContentProvider>,
+    installedUrls: Set<String>,
+    outdatedUrls: Set<String>,
+    onInstall: () -> Unit,
+    onUninstall: () -> Unit,
+    onUpdate: () -> Unit,
+    onOpenSettings: (ContentProvider) -> Unit,
+    cs3SettingsIds: Set<String>,
+    modifier: Modifier = Modifier,
+) {
+    var icon by remember(p.url) { mutableStateOf(p.iconUrl) }
+    LaunchedEffect(p.url) {
+        if (icon.isNullOrBlank()) {
+            delay(ICON_SETTLE_MS)
+            icon = withContext(Dispatchers.IO) {
+                com.hikari.app.ui.ExtensionIcons.forRepoPlugin(p, repo.kind, repo.url)
+            }
+        }
+    }
+    val installed = SourceUrls.anyKeyIn(p.url, installedUrls)
+    val updateAvailable = SourceUrls.anyKeyIn(p.url, outdatedUrls)
+    val settingsTarget = repoPluginSettingsTarget(p, providers, cs3SettingsIds)
+    com.hikari.app.tv.Cs3PluginCard(
+        name = p.name,
+        version = p.version.toString(),
+        sizeLabel = null,
+        repoName = repo.name.ifBlank { repo.url },
+        onRepoClick = null,
+        flagCode = langCodeOf(p),
+        tvTypes = p.tvTypes,
+        iconUrl = icon,
+        description = p.description.ifBlank { null },
+        isInstalled = installed && !updateAvailable,
+        installStatus = if (updateAvailable && installed) "Update available" else "",
+        isInstalling = false,
+        onInstallClick = { if (updateAvailable) onUpdate() else onInstall() },
+        onUninstallClick = if (installed && !updateAvailable) onUninstall else null,
+        showSettings = settingsTarget != null,
+        onSettingsClick = { settingsTarget?.let(onOpenSettings) },
+        modifier = modifier,
+    )
+}
+
 private fun PluginRow(
     p: Cs3RepoPlugin,
     installed: Boolean,

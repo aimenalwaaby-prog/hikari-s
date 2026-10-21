@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -84,6 +86,18 @@ fun TvCinematicHero(
     val item = items[index.coerceIn(items.indices)]
     // The overview's [more] expansion resets per title, like the index does.
     var overviewExpanded by remember(item) { mutableStateOf(false) }
+    // The reference hero draws the title's transparent TMDB wordmark when one
+    // exists (see HeroMetadataLayer's logo branch) and the text title only
+    // otherwise. One lookup per hero title, cached for the hero's lifetime —
+    // a miss simply keeps the text title, so this can only ever add.
+    val heroLogos = remember(items) { mutableStateMapOf<String, String?>() }
+    val heroId = item.uniqueId
+    androidx.compose.runtime.LaunchedEffect(heroId) {
+        if (!heroLogos.containsKey(heroId)) {
+            heroLogos[heroId] = runCatching { com.hikari.app.data.TmdbMeta.logo(item) }.getOrNull()
+        }
+    }
+    val heroLogo = heroLogos[heroId]
     val scheme = MaterialTheme.colorScheme
     val bg = scheme.background
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
@@ -197,15 +211,27 @@ fun TvCinematicHero(
                     )
                 }
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    item.title,
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 40.sp,
-                )
+                if (!heroLogo.isNullOrBlank()) {
+                    PosterImage(
+                        model = heroLogo,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.BottomStart,
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .heightIn(max = 84.dp),
+                    )
+                } else {
+                    Text(
+                        item.title,
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 40.sp,
+                    )
+                }
                 if (item.overview?.isNotBlank() == true) {
                     Spacer(Modifier.height(6.dp))
                     Text(
@@ -245,7 +271,7 @@ fun TvCinematicHero(
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text(tr("Play"), fontWeight = FontWeight.Bold)
+                        Text(tr("Watch Now"), fontWeight = FontWeight.Bold)
                     }
                     if (onToggleBookmark != null) {
                         val saved = item.uniqueId in bookmarkedIds
