@@ -4589,7 +4589,7 @@ fun DetailScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 if (tvBadges.isNotEmpty()) {
-                                    Cs3RatingBadges(tvBadges, null) { ratingInfo = it }
+                                    Cs3RatingBadges(ratings = tvBadges, cert = null, onRatingClick = { ratingInfo = it })
                                 }
                                 if (!tvGenres.isNullOrEmpty()) {
                                     Text(

@@ -5678,6 +5678,9 @@ private fun RepoBrowserView(
     // repos that haven't loaded yet, so a fresh install still finds the
     // not-yet-installed entries instead of only the installed ones.
     var query by rememberSaveable { mutableStateOf("") }
+    // Captured once in composable scope for the lazy branches below: a
+    // LazyListScope (and the search-items helper) cannot call TvMode itself.
+    val tvBrowser = com.hikari.app.tv.TvMode.current()
     val cs3SettingsIds = rememberCs3SettingsIds(providers)
     LaunchedEffect(query) {
         if (query.isNotBlank()) onEnsureReposLoaded()
@@ -5958,6 +5961,7 @@ private fun RepoBrowserView(
                 testStatus = testStatus,
                 onTestInstalled = onTestInstalled,
                 onTestDownload = onTestDownload,
+                tv = tvBrowser,
             )
             return@LazyColumn
         }
@@ -6260,6 +6264,9 @@ private fun LazyListScope.extensionsSearchItems(
     testStatus: Map<String, ProviderTest> = emptyMap(),
     onTestInstalled: (String) -> Unit = {},
     onTestDownload: (Cs3RepoPlugin) -> Unit = {},
+    /** The reference 2-per-row grid instead of phone rows. Passed in (rather
+     *  than read here) because a LazyListScope cannot call TvMode itself. */
+    tv: Boolean = false,
 ) {
     val q = query.trim()
     val installedMatches = providers.filter { it.config.name.contains(q, ignoreCase = true) }
@@ -6321,7 +6328,7 @@ private fun LazyListScope.extensionsSearchItems(
     }
 
     if (pluginMatches.isNotEmpty()) {
-        if (com.hikari.app.tv.TvMode.current()) {
+        if (tv) {
             // TV: the same reference 2-per-row grid as the repo page. The
             // repo name rides in each card's meta line, so no per-row repo
             // button is needed; a Dart-only entry installs its JS twin, the
@@ -6599,7 +6606,9 @@ private fun RepoPluginsView(
     val cs3SettingsIds = rememberCs3SettingsIds(providers)
     // The repo's own search box. keiyoushi is 1396 entries: finding one by
     // scrolling is not a thing anyone can do, and this listing is the ONLY place
-    // an extension can be installed from.
+    // an extension can be installed from. The TV grid flag rides alongside:
+    // LazyListScope branches below cannot call TvMode themselves.
+    val tvRepoPage = com.hikari.app.tv.TvMode.current()
     var filter by rememberSaveable { mutableStateOf("") }
     // Which of the two kinds to show, when this repo holds both. "" = all.
     var kindFilter by rememberSaveable { mutableStateOf("") }
@@ -6927,7 +6936,7 @@ private fun RepoPluginsView(
                     )
                 }
                 else -> {
-                    if (com.hikari.app.tv.TvMode.current()) {
+                    if (tvRepoPage) {
                         // TV: the reference 2-per-row plugin grid. Group
                         // headers stay full-width; consecutive plugin entries
                         // pair into one grid line (never across a header).
