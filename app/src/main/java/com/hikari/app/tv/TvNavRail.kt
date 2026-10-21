@@ -270,8 +270,8 @@ private fun TvNavRailItem(
             .clip(shape)
             .background(
                 when {
-                    expanded -> primary.copy(alpha = 0.28f)
-                    selected -> primary.copy(alpha = 0.18f)
+                    expanded -> Cs3.accent.copy(alpha = 0.28f)
+                    selected -> Cs3.accent.copy(alpha = 0.18f)
                     else -> Color.Transparent
                 }
             )
@@ -280,8 +280,8 @@ private fun TvNavRailItem(
             .border(
                 1.dp,
                 when {
-                    expanded -> primary.copy(alpha = 0.55f)
-                    selected -> primary.copy(alpha = 0.35f)
+                    expanded -> Cs3.accent.copy(alpha = 0.55f)
+                    selected -> Cs3.accent.copy(alpha = 0.35f)
                     else -> Color.Transparent
                 },
                 shape,
@@ -316,7 +316,7 @@ private fun TvNavRailItem(
                     .width(3.dp)
                     .height(18.dp)
                     .clip(RoundedCornerShape(1.5.dp))
-                    .background(primary),
+                    .background(Cs3.accent),
             )
         }
         Row(
@@ -330,7 +330,7 @@ private fun TvNavRailItem(
                 Icon(
                     tab.icon,
                     contentDescription = tr(tab.label),
-                    tint = if (selected || expanded) primary else scheme.onSurfaceVariant,
+                    tint = if (selected || expanded) Cs3.accent else scheme.onSurfaceVariant,
                     modifier = Modifier.size(if (compact) 22.dp else 26.dp),
                 )
             }
@@ -341,7 +341,7 @@ private fun TvNavRailItem(
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (selected) primary else scheme.onSurface,
+                    color = if (selected) Cs3.accent else scheme.onSurface,
                     modifier = Modifier.padding(end = 12.dp),
                 )
             }
