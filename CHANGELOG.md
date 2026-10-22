@@ -1,3 +1,10 @@
+## 0.11.89 (continuous build only)
+
+### Changed (batch: TMDB phone header, reference server screen, wide provider card)
+- Phone detail header now paints the plural TMDB (/images) backdrop art — the same list TV's banner rotates — instead of provider art; single backdrop_path is often null while /images has art. Dead art falls back to the normal hero, never black. Same image feeds the loading card and the Play intent (serverArt/bannerBackdrop), so the player cover and server screen match the header
+- Player server screen rebuilt to the reference: full-bleed title art with readable gradient scrim (was blacked out), title wordmark (or uppercase title), episode pill (S1:E + name), live "Found N sources" + SOURCES pill, progress line while searching, glass server rows unchanged (chips kept), Skip Loading + Cancel footer — phone and TV. Cancel abandons without fallback play; Skip plays the best server found
+- TV Select Provider is now the wide reference card (92% width, max 960dp): title + All Plugins (Global) pill on one line with no truncation, full-width filter, 2-column grid showing ~4 rows. Same dialog in Home and Search; tap = pick + close, hold = multi, Close saves
+
 ## 0.11.88 (continuous build only)
 
 ### Changed (batch: big TV provider card, phone art, unstuck downloads+servers, art server screen)

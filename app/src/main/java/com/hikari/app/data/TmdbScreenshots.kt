@@ -22,6 +22,17 @@ object TmdbScreenshots {
 
     private val mem = ConcurrentHashMap<String, List<String>>()
 
+    /** First header-sized art per title id, filled whenever [backdropsFor]
+     *  succeeds — the Play intent reads this synchronously (it cannot suspend)
+     *  so the player's cover and server screen paint the same TMDB image the
+     *  detail header settled on, instead of the single backdrop_path that is
+     *  often null while /images has art. */
+    private val firstByKey = ConcurrentHashMap<String, String>()
+
+    /** Synchronous read of the header art [backdropsFor] resolved for this
+     *  title id (null until it has loaded once). Never throws. */
+    fun firstCached(uniqueId: String): String? = firstByKey[uniqueId]
+
     suspend fun backdropsFor(item: MediaItem): List<String> =
         runCatching {
             if (item.type != MediaType.SERIES && item.type != MediaType.MOVIE) return emptyList()
@@ -29,8 +40,12 @@ object TmdbScreenshots {
             // URLs — never TMDB's mistranslated backdrops. Unprefixed, like
             // every non-TMDB art source.
             when (val pick = DonghuaDetails.pick(item)) {
-                is DonghuaDetails.Pick.Anime ->
-                    return listOfNotNull(pick.info.banner, pick.info.cover).distinct()
+                is DonghuaDetails.Pick.Anime -> {
+                    val list = listOfNotNull(pick.info.banner, pick.info.cover).distinct()
+                    if (list.isNotEmpty()) firstByKey[item.uniqueId] = list.first()
+                    else firstByKey.remove(item.uniqueId)
+                    return list
+                }
                 else -> {}
             }
             val resolved = TmdbResolver.resolve(item) ?: return emptyList()
@@ -38,7 +53,10 @@ object TmdbScreenshots {
             // endpoint is the same one. Resolving any other way 404s every
             // anime/donghua title.
             val seg = if (resolved.mediaType == "movie") "movie" else "tv"
-            mem[seg + "/" + resolved.tmdbId]?.let { return it }
+            mem[seg + "/" + resolved.tmdbId]?.let {
+                if (it.isNotEmpty()) firstByKey[item.uniqueId] = it.first()
+                return it
+            }
             val out = withContext(Dispatchers.IO) {
                 // No language filter (desktop parity): a zh-tagged donghua
                 // backdrop beats a provider thumbnail stretched over the
@@ -63,7 +81,12 @@ object TmdbScreenshots {
                     .take(8).map { IMG_BACKDROP + it.second }
             }
             if (mem.size >= 200) mem.clear()
-            if (out.isNotEmpty()) mem[seg + "/" + resolved.tmdbId] = out
+            if (out.isNotEmpty()) {
+                mem[seg + "/" + resolved.tmdbId] = out
+                firstByKey[item.uniqueId] = out.first()
+            } else {
+                firstByKey.remove(item.uniqueId)
+            }
             out
         }.getOrDefault(emptyList())
 }

@@ -6570,6 +6570,11 @@ class PlayerActivity : ComponentActivity() {
          *  client's look): a scrim keeps the rows readable. Null = no art,
          *  every other panel unchanged. */
         artUrl: String? = null,
+        /** Reference Sources header (logo/title, episode pill, found-count,
+         *  progress) drawn above the panel, over the art. Null = no header. */
+        headerView: View? = null,
+        /** Reference footer (Skip Loading + Cancel) drawn below the panel. */
+        footerView: View? = null,
     ): TextView? {
         val density = resources.displayMetrics.density
         // The halo is where the curved pane's neon blooms. A flat panel (every
@@ -6725,6 +6730,12 @@ class PlayerActivity : ComponentActivity() {
         root.addView(headerRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+        // Reference Sources header: over the art, above the glass panel.
+        headerView?.let {
+            root.addView(it, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
 
         // A permanent thin scrollbar makes it obvious the panel scrolls — the
         // old fixed-height panel hid its last rows with no affordance at all.
@@ -6893,6 +6904,12 @@ class PlayerActivity : ComponentActivity() {
         root.addView(panel, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, panelH + 2 * halo
         ))
+        // Reference footer (Skip Loading + Cancel) below the glass panel.
+        footerView?.let {
+            root.addView(it, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
 
         dialog.setContentView(
             if (artUrl.isNullOrBlank()) root else android.widget.FrameLayout(this).apply {
@@ -6904,7 +6921,13 @@ class PlayerActivity : ComponentActivity() {
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT
                 ))
                 addView(android.view.View(this@PlayerActivity).apply {
-                    setBackgroundColor(0x99000000.toInt())
+                    // Readable scrim, not a blackout: dark edges for the
+                    // rows to sit on, clearer middle so the title art reads
+                    // through like the reference client.
+                    background = GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        intArrayOf(0xD9000000.toInt(), 0x55000000.toInt(), 0xD9000000.toInt())
+                    )
                 }, android.widget.FrameLayout.LayoutParams(
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT
@@ -7829,6 +7852,9 @@ class PlayerActivity : ComponentActivity() {
         val dialog = Dialog(this, android.R.style.Theme_Translucent_NoTitleBar)
         serverChooserDialog = dialog
         var chip = "All"
+        // Cancel (footer) abandons without fallback: the onDismiss reopen
+        // below must not fire for it.
+        var cancelLoad = false
 
         /**
          * Pulls the live session straight into this chooser — the same dedup as
@@ -8655,8 +8681,9 @@ class PlayerActivity : ComponentActivity() {
                     // Backed out of the chooser before ANY server had landed —
                     // there was nothing to pick. Don't fail the play; let the
                     // live search keep running and re-open the chooser (once)
-                    // when the first server actually arrives.
-                    startChooserShown = false
+                    // when the first server actually arrives — unless Cancel
+                    // abandoned the play (see [cancelLoad]).
+                    if (!cancelLoad) startChooserShown = false
                 }
             }
             // Backed out of the DOWNLOAD chooser without picking a server: there
@@ -8683,6 +8710,174 @@ class PlayerActivity : ComponentActivity() {
         } else {
             "Your provider first, then every engine that found a server."
         }
+        // ── Reference Sources header/footer (desktop look, phone + TV) ──
+        // Logo/title, episode pill, live found-count + SOURCES pill and a
+        // progress line over the title art; Skip Loading + Cancel below.
+        val serverTitle = intent.getStringExtra("title").orEmpty().ifBlank { "Sources" }
+        val epS = intent.getIntExtra("histEpisodeSeason", 0)
+        val epN = intent.getIntExtra("histEpisodeNumber", 0)
+        val epNm = intent.getStringExtra("histEpisodeName").orEmpty()
+        val epPillText = when {
+            epS > 1 && epN > 0 -> "S${epS}:E${epN}" + (if (epNm.isNotBlank()) " • $epNm" else "")
+            epN > 0 -> "Episode $epN" + (if (epNm.isNotBlank()) " • $epNm" else "")
+            else -> epNm
+        }
+        val logoModel = PosterLoader.model(intent.getStringExtra("titleLogo")?.takeIf { it.isNotBlank() })
+        var foundLine: TextView? = null
+        var sourcesPill: TextView? = null
+        var searchBar: ProgressBar? = null
+        val serverHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            val hp = (14 * density).toInt()
+            setPadding(hp, (12 * density).toInt(), hp, (4 * density).toInt())
+        }
+        if (logoModel != null) {
+            serverHeader.addView(ImageView(this).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+                runCatching { load(logoModel) }
+            }, LinearLayout.LayoutParams(
+                (resources.displayMetrics.widthPixels * 0.72f).toInt()
+                    .coerceAtMost((560 * density).toInt()),
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = (10 * density).toInt()
+            })
+        } else {
+            serverHeader.addView(TextView(this).apply {
+                text = serverTitle.uppercase()
+                dpText(22f)
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt())
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = (8 * density).toInt() })
+        }
+        if (epPillText.isNotBlank()) {
+            serverHeader.addView(TextView(this).apply {
+                text = epPillText
+                dpText(11f)
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+                maxWidth = (resources.displayMetrics.widthPixels * 0.92f).toInt()
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(0xFFFFFFFF.toInt())
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(withAlpha(accentStartColor, 0.55f), withAlpha(accentEndColor, 0.6f))
+                ).apply { cornerRadius = 999f }
+                val px = (14 * density).toInt()
+                setPadding(px, (6 * density).toInt(), px, (6 * density).toInt())
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = (8 * density).toInt()
+            })
+        }
+        val foundRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        foundLine = TextView(this).apply {
+            text = baseHint
+            dpText(10f)
+            includeFontPadding = false
+            setTextColor(0xFFD5DCE8.toInt())
+        }
+        sourcesPill = TextView(this)
+        styleChipPill(sourcesPill!!, "0 SOURCES", true)
+        foundRow.addView(foundLine, LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+        ))
+        foundRow.addView(sourcesPill, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        serverHeader.addView(foundRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = (6 * density).toInt() })
+        searchBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(withAlpha(accentMidColor, 0.95f))
+        }
+        serverHeader.addView(searchBar, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt()
+        ))
+        fun footerBtn(label: String, primary: Boolean, onClick: () -> Unit): TextView {
+            return TextView(this).apply {
+                text = label
+                dpText(12.5f)
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                isSingleLine = true
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(0xFFFFFFFF.toInt())
+                background = RippleDrawable(
+                    ColorStateList.valueOf(0x33FFFFFF),
+                    (if (primary) GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT,
+                        intArrayOf(withAlpha(accentStartColor, 0.9f), withAlpha(accentEndColor, 0.95f))
+                    ).apply { cornerRadius = 999f }
+                    else GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = 999f
+                        setColor(0x14FFFFFF.toInt())
+                        setStroke(
+                            (1.2f * density).roundToInt().coerceAtLeast(1),
+                            withAlpha(accentMidColor, 0.8f)
+                        )
+                    }),
+                    null
+                )
+                val px = (22 * density).toInt()
+                setPadding(px, (11 * density).toInt(), px, (11 * density).toInt())
+                isClickable = true
+                if (playerTvRemote()) {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    if (foreground == null) foreground = tvFocusRing()
+                }
+                setOnClickListener { onClick() }
+            }
+        }
+        val serverFooter = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, (10 * density).toInt(), 0, (12 * density).toInt())
+        }
+        serverFooter.addView(footerBtn(I18n.t("Skip Loading")) { dialog.dismiss() },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (10 * density).toInt() })
+        serverFooter.addView(footerBtn(I18n.t("Cancel")) {
+            // Abandon, never fall back to a server: the player leaves
+            // instead of starting something the user just cancelled.
+            startChoicePending = false
+            if (forDownload) {
+                dialog.dismiss()
+            } else if (startMode && !playbackCommitted) {
+                cancelLoad = true
+                startChooserShown = true
+                dialog.dismiss()
+                if (!isFinishing) finish()
+            } else {
+                dialog.dismiss()
+            }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
         val hintView = presentGlass(
             dialog,
             if (forDownload) I18n.t("Download from") else "Sources",
@@ -8714,6 +8909,10 @@ class PlayerActivity : ComponentActivity() {
             // the detail screen passes in), the desktop client's look. Null
             // keeps the plain dimmed-video background.
             artUrl = intent?.getStringExtra("serverArt")?.takeIf { it.isNotBlank() },
+            // Lighter window dim so the title art reads through the scrim.
+            dimAmount = 0.30f,
+            headerView = serverHeader,
+            footerView = serverFooter,
         )
         // The dialog is on screen from here: converge the list on the live
         // session one more time, on the window's own message queue. The open
@@ -8771,11 +8970,40 @@ class PlayerActivity : ComponentActivity() {
             // the user waited for — used to leave no trace at all in this sheet.
             hintTicker = lifecycleScope.launch {
                 var shown = ""
+                var shownFound = ""
+                var shownPill = ""
+                var shownSearching: Boolean? = null
                 while (dialog.isShowing) {
                     val text = crossSearchHint() ?: baseHint
                     if (text != shown) {
                         shown = text
                         hintView.text = text
+                    }
+                    // Reference header live counts (same 1.5s cadence, only
+                    // on change so the header never remeasures for nothing).
+                    val n = sources.size
+                    val tally = ContentRepository.crossTally
+                    val searchingNow = tally.running.size + tally.primaryRunning.size > 0
+                    val foundText = if (n > 0) {
+                        "Found $n source" + (if (n != 1) "s" else "") +
+                            (if (searchingNow) " • Finding more…" else "")
+                    } else if (searchingNow) {
+                        "Finding servers…"
+                    } else {
+                        baseHint
+                    }
+                    if (foundText != shownFound) {
+                        shownFound = foundText
+                        foundLine?.text = foundText
+                    }
+                    val pillText = "$n SOURCES"
+                    if (pillText != shownPill) {
+                        shownPill = pillText
+                        sourcesPill?.let { styleChipPill(it, pillText, true) }
+                    }
+                    if (searchingNow != shownSearching) {
+                        shownSearching = searchingNow
+                        searchBar?.visibility = if (searchingNow) View.VISIBLE else View.GONE
                     }
                     // Blank-sheet backstop (the stuck-empty report: the list
                     // showing nothing while servers are already in hand). The

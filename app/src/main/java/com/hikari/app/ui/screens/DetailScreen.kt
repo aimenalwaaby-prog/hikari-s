@@ -2288,13 +2288,15 @@ fun DetailScreen(
                 putExtra("histPoster", PosterLoader.tokenize((m?.posterUrl ?: posterUrl).orEmpty()).orEmpty())
                 // Backdrop (poster fallback) for the player's own title card —
                 // passed as a disk-cache token so the intent never carries a
-                // multi-MB base64 string. TMDB (AniList/Bangumi for anime)
-                // first, like the detail heroes — the provider's own backdrop
-                // is frequently a low-res thumb.
+                // multi-MB base64 string. The plural TMDB (/images) art the
+                // header settled on first (via its cache — the intent cannot
+                // suspend), then the single backdrop_path, then the provider
+                // art, which is frequently a low-res thumb.
                 putExtra(
                     "bannerBackdrop",
                     PosterLoader.tokenize(
-                        (if (m != null) Artwork.backdrop(m) else null)?.takeIf { it.isNotBlank() }
+                        (if (m != null) TmdbScreenshots.firstCached(m.uniqueId) else null)?.takeIf { it.isNotBlank() }
+                            ?: (if (m != null) Artwork.backdrop(m) else null)?.takeIf { it.isNotBlank() }
                             ?: m?.backdropUrl?.takeIf { it.isNotBlank() }
                             ?: posterUrl.orEmpty()
                     ).orEmpty()
@@ -2304,7 +2306,8 @@ fun DetailScreen(
                 // desktop client's look). Coil loads it there directly.
                 putExtra(
                     "serverArt",
-                    (if (m != null) Artwork.backdrop(m) else null)?.takeIf { it.isNotBlank() }
+                    (if (m != null) TmdbScreenshots.firstCached(m.uniqueId) else null)?.takeIf { it.isNotBlank() }
+                        ?: (if (m != null) Artwork.backdrop(m) else null)?.takeIf { it.isNotBlank() }
                         ?: m?.backdropUrl?.takeIf { it.isNotBlank() }
                         ?: posterUrl.orEmpty()
                 )
@@ -6093,6 +6096,10 @@ fun DetailScreen(
         )
     }
 
+    // The plural TMDB header art for the loading card: the same image the
+    // header settled on (first /images backdrop), so the hand-off into the
+    // player never swaps the design the user was just looking at.
+    val loadingTmdb = rememberHeaderTmdbArt(m)
     if (showLoadingBanner) {
         PlayLoadingBanner(
             title = artTitle,
@@ -6101,10 +6108,10 @@ fun DetailScreen(
                 else tr("Episode %s").replace("%s", it.number.toString())
             },
             detail = selectedEp?.name?.takeIf { it.isNotBlank() },
-            // TMDB (AniList/Bangumi for anime) first, like every hero — the
-            // provider backdrop alone left this card black for titles whose
-            // extension ships no art.
-            image = (m?.let { Artwork.backdrop(it) })?.takeIf { it.isNotBlank() }
+            // Plural TMDB (/images) first — the header's own image — then the
+            // single backdrop_path, then the provider art.
+            image = loadingTmdb?.takeIf { it.isNotBlank() }
+                ?: (m?.let { Artwork.backdrop(it) })?.takeIf { it.isNotBlank() }
                 ?: (m?.backdropUrl?.takeIf { it.isNotBlank() }) ?: posterUrl,
             // The title's own wordmark, drawn instead of the text title when the
             // setting is on and this title has one (see LoadingTitleBlock).
@@ -7329,6 +7336,22 @@ object DetailHeroStyles {
     }
 }
 
+/** The plural TMDB header art for a title (the same /images backdrops list
+ *  TV's banner rotates): loads once per title, null while loading or when
+ *  TMDB has nothing. Callers paint it first and fall back to their normal
+ *  model — the single backdrop_path is often null while /images has art. */
+@Composable
+private fun rememberHeaderTmdbArt(item: MediaItem?): String? {
+    var url by remember(item?.uniqueId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(item?.uniqueId) {
+        url = null
+        val it = item ?: return@LaunchedEffect
+        if (it.type != MediaType.SERIES && it.type != MediaType.MOVIE) return@LaunchedEffect
+        url = runCatching { TmdbScreenshots.backdropsFor(it).firstOrNull() }.getOrNull()
+    }
+    return url
+}
+
 /** The page's header art, in whichever shape [style] asks for. */
 @Composable
 private fun Hero(
@@ -7345,8 +7368,16 @@ private fun Hero(
     // falls back to the looked-up art once Coil proves it dead, instead of
     // sitting black for the whole visit (see [onImageError]).
     var heroBackdropDead by remember(meta?.uniqueId) { mutableStateOf(false) }
-    val image = meta?.let { Artwork.heroModel(it, skipExtensionBackdrop = heroBackdropDead) }
-        ?: (PosterLoader.model(fallbackPoster) to false)
+    // The plural TMDB backdrops first (what TV's banner shows): a dead
+    // override falls back to the normal model below, never black.
+    var tmdbHeaderDead by remember(meta?.uniqueId) { mutableStateOf(false) }
+    val tmdbHeader = rememberHeaderTmdbArt(meta)
+    val image = if (!tmdbHeaderDead && !tmdbHeader.isNullOrBlank()) {
+        PosterLoader.model(tmdbHeader) to true
+    } else {
+        meta?.let { Artwork.heroModel(it, skipExtensionBackdrop = heroBackdropDead) }
+            ?: (PosterLoader.model(fallbackPoster) to false)
+    }
     val posterModel = PosterLoader.model(fallbackPoster)
     // Adaptive: WIDE with only a portrait poster can never fill 16:9 without
     // cropping it, so it becomes the SIDE layout on its own — poster intact
@@ -7452,7 +7483,7 @@ private fun Hero(
                 contentScale = ContentScale.Crop,
                 imageAlignment = if (image.second) Artwork.CINEMA_ALIGNMENT else Alignment.TopCenter,
                 modifier = Modifier.fillMaxSize(),
-                onImageError = { heroBackdropDead = true },
+                onImageError = { heroBackdropDead = true; tmdbHeaderDead = true },
             )
             Box(
                 Modifier
@@ -7496,7 +7527,7 @@ private fun Hero(
                 model = image.first,
                 wide = image.second,
                 modifier = Modifier.fillMaxSize(),
-                onFinalError = { heroBackdropDead = true },
+                onFinalError = { heroBackdropDead = true; tmdbHeaderDead = true },
             )
             Box(
                 Modifier

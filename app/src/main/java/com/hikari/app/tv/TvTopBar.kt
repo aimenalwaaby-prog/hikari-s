@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -364,15 +367,26 @@ fun TvSelectProviderDialog(
         if (q.isBlank()) collections
         else collections.filter { it.name.contains(q, ignoreCase = true) }
     }
-    AlertDialog(
+    // Wide reference card (desktop Select Provider): the platform-default
+    // AlertDialog width is what truncated the title to "Select ..." and
+    // clipped the All Plugins pill on TV.
+    Dialog(
         onDismissRequest = onDismiss,
-        // Dark glass box with tight chrome: the header is one compact block so
-        // the provider grid owns the dialog (the "R on the next line + big
-        // blank header" report).
-        shape = RoundedCornerShape(TvDesktop.CornerLarge),
-        containerColor = TvDesktop.SurfaceElevated,
-        tonalElevation = 0.dp,
-        title = {
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(TvDesktop.CornerLarge),
+            color = TvDesktop.SurfaceElevated,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .widthIn(max = 960.dp),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+            ) {
             Column(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -440,9 +454,7 @@ fun TvSelectProviderDialog(
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-        },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -485,7 +497,7 @@ fun TvSelectProviderDialog(
                     contentPadding = PaddingValues(vertical = 2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 360.dp),
+                        .heightIn(max = 440.dp),
                 ) {
                     items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(2) }) { col ->
                     val key = com.hikari.app.ui.navigation.Routes.COLLECTION_PROVIDER_PREFIX + col.id
@@ -523,22 +535,20 @@ fun TvSelectProviderDialog(
                         )
                     }
                 }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (onManage != null) {
-                    TextButton(onClick = onManage) { Text(tr("Manage feed")) }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (onManage != null) {
+                        TextButton(onClick = onManage) { Text(tr("Manage feed")) }
+                    }
+                    TextButton(onClick = onDismiss) { Text(tr("Close")) }
                 }
-                TextButton(onClick = onDismiss) { Text(tr("Close")) }
             }
-        },
-    )
+        }
+    }
 }
 
 /**
