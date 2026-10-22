@@ -8813,7 +8813,7 @@ class PlayerActivity : ComponentActivity() {
         serverHeader.addView(searchBar, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt()
         ))
-        fun footerBtn(label: String, primary: Boolean, onClick: () -> Unit): TextView {
+        fun footerBtn(label: String, primary: Boolean = true, onClick: () -> Unit): TextView {
             return TextView(this).apply {
                 text = label
                 dpText(12.5f)
@@ -8860,7 +8860,7 @@ class PlayerActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = (10 * density).toInt() })
-        serverFooter.addView(footerBtn(I18n.t("Cancel")) {
+        serverFooter.addView(footerBtn(I18n.t("Cancel"), false) {
             // Abandon, never fall back to a server: the player leaves
             // instead of starting something the user just cancelled.
             startChoicePending = false
