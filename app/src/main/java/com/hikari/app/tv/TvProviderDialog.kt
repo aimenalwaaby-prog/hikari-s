@@ -1,5 +1,6 @@
 package com.hikari.app.tv
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -47,7 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.hikari.app.data.Collection
-import com.hikari.app.data.ContentProvider
+import com.hikari.app.providers.ContentProvider
 import com.hikari.app.i18n.tr
 import com.hikari.app.ui.components.PosterImage
 
@@ -257,6 +258,7 @@ fun TvProviderDialog(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TvProviderRow(
     name: String,
