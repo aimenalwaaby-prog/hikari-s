@@ -6565,6 +6565,11 @@ class PlayerActivity : ComponentActivity() {
         /** How much the video behind the panel is dimmed (the custom-preset
          *  editor passes a light one so the live picture stays judgeable). */
         dimAmount: Float = 0.65f,
+        /** Full-bleed title art painted behind the panel (the server screen
+         *  passes the title's TMDB/AniList/Bangumi backdrop, the desktop
+         *  client's look): a scrim keeps the rows readable. Null = no art,
+         *  every other panel unchanged. */
+        artUrl: String? = null,
     ): TextView? {
         val density = resources.displayMetrics.density
         // The halo is where the curved pane's neon blooms. A flat panel (every
@@ -6890,7 +6895,25 @@ class PlayerActivity : ComponentActivity() {
         ))
 
         dialog.setContentView(
-            root,
+            if (artUrl.isNullOrBlank()) root else android.widget.FrameLayout(this).apply {
+                addView(android.widget.ImageView(this@PlayerActivity).apply {
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    runCatching { load(artUrl) }
+                }, android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+                addView(android.view.View(this@PlayerActivity).apply {
+                    setBackgroundColor(0x99000000.toInt())
+                }, android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+                addView(root, android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                ))
+            },
             ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             )
@@ -8671,10 +8694,8 @@ class PlayerActivity : ComponentActivity() {
             // The server chooser is a live, unknown-length list. Keep it tall
             // enough to show several servers immediately instead of fitting to
             // the first two rows, while remaining relative to the current window.
-            // The server list is a full-page Sources screen (like the reference):
-            // servers are a full-width result list, not a narrow side sheet.
-            // Full-window on both phone and TV so the list reads as its own page.
-            fillFractionX = 1.0f,
+            // The dialog is on screen from here: converge the list on the live
+            // session one more time, on the window's own message queue. The open
             // Full-page length (the red-marked report asked for the box to run
             // the marked length): the panel already spans edge-to-edge in
             // width — this makes it use the full room in height too, so the
@@ -8685,6 +8706,14 @@ class PlayerActivity : ComponentActivity() {
             // the vertical box reads big.
             edgeToEdge = true,
             tightHalo = true,
+            // The server list is a full-page Sources screen (like the reference):
+            // servers are a full-width result list, not a narrow side sheet.
+            // Full-window on both phone and TV so the list reads as its own page.
+            fillFractionX = 1.0f,
+            // Title art behind the panel (the TMDB/AniList/Bangumi backdrop
+            // the detail screen passes in), the desktop client's look. Null
+            // keeps the plain dimmed-video background.
+            artUrl = intent?.getStringExtra("serverArt")?.takeIf { it.isNotBlank() },
         )
         // The dialog is on screen from here: converge the list on the live
         // session one more time, on the window's own message queue. The open

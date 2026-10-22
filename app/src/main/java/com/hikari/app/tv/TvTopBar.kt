@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.hikari.app.data.Collection
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.data.Profiles
 import com.hikari.app.ui.FlagIcon
@@ -346,12 +348,21 @@ fun TvSelectProviderDialog(
     onDismiss: () -> Unit,
     onToggleMulti: ((String) -> Unit)? = null,
     onManage: (() -> Unit)? = null,
+    /** The user's own collections (search callers pass theirs; Home passes
+     *  none). Rendered as full-width cards above the provider grid, picked
+     *  by their provider key like anything else. */
+    collections: List<Collection> = emptyList(),
 ) {
     var query by remember { mutableStateOf("") }
     val shown = remember(providers, query) {
         val q = query.trim()
         if (q.isBlank()) providers
         else providers.filter { it.config.name.contains(q, ignoreCase = true) }
+    }
+    val shownCollections = remember(collections, query) {
+        val q = query.trim()
+        if (q.isBlank()) collections
+        else collections.filter { it.name.contains(q, ignoreCase = true) }
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -476,7 +487,24 @@ fun TvSelectProviderDialog(
                         .fillMaxWidth()
                         .heightIn(max = 360.dp),
                 ) {
-                    items(shown, key = { "tv-sel-" + it.config.id }) { p ->
+                    items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(2) }) { col ->
+                    val key = com.hikari.app.ui.navigation.Routes.COLLECTION_PROVIDER_PREFIX + col.id
+                    TvProviderCard(
+                        name = col.name,
+                        supporting = tr("Collection"),
+                        selected = key in selection,
+                        icon = {
+                            TvProviderIcon(
+                                iconUrl = null,
+                                name = col.name,
+                                size = 34.dp,
+                            )
+                        },
+                        onClick = { onPick(key) },
+                        onHold = onToggleMulti?.let { toggle -> { toggle(key) } },
+                    )
+                }
+                items(shown, key = { "tv-sel-" + it.config.id }) { p ->
                         val id = p.config.id
                         TvProviderCard(
                             name = p.config.name,

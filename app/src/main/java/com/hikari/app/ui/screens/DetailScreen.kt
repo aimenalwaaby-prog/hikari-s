@@ -233,7 +233,14 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
         val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
         val playable = origin.filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
         if (playable.isNotEmpty()) return playable
-        return runCatching { repo.streamsFor(item, episode) }.getOrDefault(emptyList()).filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
+        // The cross-extension fallback has its own hard ceiling: without one
+        // a single hung provider parks this lookup forever — the batch's
+        // "Finding servers (i/N)…" line then never advances, Cancel is the
+        // only way out, and the queue behind it (download-all) silently
+        // stops after the episodes that already resolved.
+        return withTimeoutOrNull(30_000L) {
+            runCatching { repo.streamsFor(item, episode) }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList()).filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
     }
     suspend fun enqueueBatch(ctx: android.content.Context, item: MediaItem, episodes: List<Episode>, chosen: StreamSource): Int {
         var done = 0
@@ -2281,13 +2288,25 @@ fun DetailScreen(
                 putExtra("histPoster", PosterLoader.tokenize((m?.posterUrl ?: posterUrl).orEmpty()).orEmpty())
                 // Backdrop (poster fallback) for the player's own title card —
                 // passed as a disk-cache token so the intent never carries a
-                // multi-MB base64 string.
+                // multi-MB base64 string. TMDB (AniList/Bangumi for anime)
+                // first, like the detail heroes — the provider's own backdrop
+                // is frequently a low-res thumb.
                 putExtra(
                     "bannerBackdrop",
                     PosterLoader.tokenize(
-                        if (isTvLayout) m?.backdropUrl.orEmpty()
-                        else (m?.backdropUrl ?: posterUrl).orEmpty()
+                        (if (m != null) Artwork.backdrop(m) else null)?.takeIf { it.isNotBlank() }
+                            ?: m?.backdropUrl?.takeIf { it.isNotBlank() }
+                            ?: posterUrl.orEmpty()
                     ).orEmpty()
+                )
+                // The same art as a plain URL for the player's server screen,
+                // which paints it full-bleed behind its glass rows (the
+                // desktop client's look). Coil loads it there directly.
+                putExtra(
+                    "serverArt",
+                    (if (m != null) Artwork.backdrop(m) else null)?.takeIf { it.isNotBlank() }
+                        ?: m?.backdropUrl?.takeIf { it.isNotBlank() }
+                        ?: posterUrl.orEmpty()
                 )
                 putExtra("showLoadingBanner", showLoadingCoverSetting)
                 putExtra("loadingStyle", loadingStyleSetting)
@@ -2304,8 +2323,11 @@ fun DetailScreen(
                 putExtra("loadingAuraColor", loadingAuraArgb)
                 putExtra("startAfterServers", startAfterServers)
                 // Ask before playing: the player shows every server it found,
-                // grouped by engine, instead of starting one by itself.
-                putExtra("askServer", askServerOnPlay)
+                // grouped by engine, instead of starting one by itself. The
+                // television always asks: on the big screen a tap shows the
+                // server list (over the title's art, like the desktop client)
+                // instead of playing directly.
+                putExtra("askServer", askServerOnPlay || isTvLayout)
                 // NO origin hold, in either playback mode. These two extras used
                 // to carry the window in which the player waited for the
                 // extension the title was opened FROM; the servers that decide
@@ -3412,10 +3434,10 @@ fun DetailScreen(
     // Artwork.tvHeroModel): kick that lookup off the moment the title opens,
     // from nav args alone, instead of waiting for the provider's own detail
     // response — so the high-quality backdrop is already in flight (usually
-    // already cached) when the page paints.
-    if (isTvLayout) {
-        LaunchedEffect(savedItem) { Artwork.prefetch(savedItem); Artwork.retryMiss(savedItem) }
-    }
+    // already cached) when the page paints. The phone does the same for its
+    // own header art (see Hero): a donghua the matcher knows gets its
+    // TMDB/AniList/Bangumi art even when the provider shipped nothing.
+    LaunchedEffect(savedItem) { Artwork.prefetch(savedItem); Artwork.retryMiss(savedItem) }
     val isSaved = favorites.any { it.uniqueId == savedItem.uniqueId }
     // A title joins the Library THROUGH a category, so the button opens the
     // picker rather than saving blind: "Add to library" asks which categories
@@ -3546,6 +3568,15 @@ fun DetailScreen(
     // episode has a downloadable server. The episode picker stays open
     // underneath with a live "(i/N)…" progress line, and Cancel there bumps
     // [dlGen] so a stale search can never pop the picker after backing out.
+    // Cancels an in-flight batch server search (the "Finding servers…"
+    // phase) and drops the stuck state with it: the progress line clears
+    // and every button gated on the search lights up again. Backing out of
+    // either dialog, or its own Cancel button, lands here.
+    fun cancelDlLookup() {
+        dlGen++
+        dlBusy = false
+        dlMsg = null
+    }
     fun resolveFirstServer(eps: List<Episode>) {
         if (eps.isEmpty() || dlBusy) return
         dlTargets = eps
@@ -3553,27 +3584,36 @@ fun DetailScreen(
         dlGen = gen
         scope.launch {
             dlBusy = true
-            val seen = LinkedHashSet<String>()
-            val union = ArrayList<StreamSource>()
-            for ((i, ep) in eps.withIndex()) {
-                if (gen != dlGen) return@launch
-                dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
-                val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
-                for (s in servers) {
-                    if (seen.add(s.providerId + "|" + s.name)) union.add(s)
+            try {
+                val seen = LinkedHashSet<String>()
+                val union = ArrayList<StreamSource>()
+                for ((i, ep) in eps.withIndex()) {
+                    if (gen != dlGen) return@launch
+                    dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
+                    // Bounded per episode (see serversForBatch): a hung
+                    // provider costs seconds here, never the whole batch.
+                    val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                    for (s in servers) {
+                        if (seen.add(s.providerId + "|" + s.name)) union.add(s)
+                    }
                 }
-            }
-            if (gen != dlGen) return@launch
-            dlBusy = false
-            if (union.isEmpty()) {
-                dlMsg = null
-                runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
-            } else {
-                dlMsg = null
-                dlServers = union
-                showDlChoice = false
-                showDlSelect = false
-                showDlServer = true
+                if (gen != dlGen) return@launch
+                if (union.isEmpty()) {
+                    dlMsg = null
+                    runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
+                } else {
+                    dlMsg = null
+                    dlServers = union
+                    showDlChoice = false
+                    showDlSelect = false
+                    showDlServer = true
+                }
+            } finally {
+                // A cancelled search must never leave the busy flag (and its
+                // progress line) behind: that stuck state is what froze both
+                // dialogs with greyed-out buttons on a stale "(i/N)…" line.
+                dlBusy = false
+                if (gen != dlGen) dlMsg = null
             }
         }
     }
@@ -3604,7 +3644,9 @@ fun DetailScreen(
         runCatching { android.widget.Toast.makeText(context, "Queueing " + eps.size + " episodes… see Downloads to manage them.", android.widget.Toast.LENGTH_SHORT).show() }
         scope.launch {
             dlBusy = true
-            val done = runCatching {
+            var done = 0
+            try {
+            done = runCatching {
                 var n = 0
                 for (ep in eps) {
                     val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
@@ -3636,7 +3678,12 @@ fun DetailScreen(
                 }
                 n
             }.getOrDefault(0)
-            dlBusy = false
+            } finally {
+                // The queueing pass must never strand the busy flag (a throw
+                // or a cancelled screen had the same freezing effect as the
+                // lookup's stuck state above).
+                dlBusy = false
+            }
             runCatching { android.widget.Toast.makeText(context, if (done > 0) "Queued " + done + " download" + (if (done == 1) "" else "s") + " from " + srv.name + " — see Downloads." else "No episodes could be queued.", android.widget.Toast.LENGTH_LONG).show() }
         }
     }
@@ -3680,7 +3727,7 @@ fun DetailScreen(
     }
     if (showDlChoice) {
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!dlBusy) { dlGen++; showDlChoice = false } },
+            onDismissRequest = { cancelDlLookup(); showDlChoice = false },
             title = { androidx.compose.material3.Text("Download episodes") },
             text = {
                 Column(Modifier.fillMaxWidth()) {
@@ -3689,6 +3736,14 @@ fun DetailScreen(
                     if (msg != null) {
                         Spacer(Modifier.height(6.dp))
                         androidx.compose.material3.Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(2.dp))
+                        // The finding phase used to have no way out: a tap that
+                        // only meant to peek at the episode list left the
+                        // dialog counting with every button greyed. This ends
+                        // the search and leaves the dialog open to re-tap.
+                        androidx.compose.material3.TextButton(onClick = { cancelDlLookup() }) {
+                            androidx.compose.material3.Text("Cancel search")
+                        }
                     }
                 }
             },
@@ -3702,13 +3757,16 @@ fun DetailScreen(
     }
     if (showDlSelect) {
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!dlBusy) { dlGen++; showDlSelect = false } },
+            onDismissRequest = { cancelDlLookup(); showDlSelect = false },
             title = { androidx.compose.material3.Text("Select episodes") },
             text = {
                 Column(Modifier.heightIn(max = 420.dp)) {
                     val msg = dlMsg
                     if (msg != null) {
                         androidx.compose.material3.Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        androidx.compose.material3.TextButton(onClick = { cancelDlLookup() }) {
+                            androidx.compose.material3.Text("Cancel search")
+                        }
                         Spacer(Modifier.height(4.dp))
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -3739,7 +3797,7 @@ fun DetailScreen(
                 ) { androidx.compose.material3.Text("Download (" + dlChecked.size + ")") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { dlGen++; showDlSelect = false }, enabled = !dlBusy) { androidx.compose.material3.Text("Cancel") }
+                androidx.compose.material3.TextButton(onClick = { cancelDlLookup(); showDlSelect = false }) { androidx.compose.material3.Text("Cancel") }
             }
         )
     }
@@ -6043,7 +6101,11 @@ fun DetailScreen(
                 else tr("Episode %s").replace("%s", it.number.toString())
             },
             detail = selectedEp?.name?.takeIf { it.isNotBlank() },
-            image = (m?.backdropUrl?.takeIf { it.isNotBlank() }) ?: posterUrl,
+            // TMDB (AniList/Bangumi for anime) first, like every hero — the
+            // provider backdrop alone left this card black for titles whose
+            // extension ships no art.
+            image = (if (meta != null) Artwork.backdrop(meta) else null)?.takeIf { it.isNotBlank() }
+                ?: (m?.backdropUrl?.takeIf { it.isNotBlank() }) ?: posterUrl,
             // The title's own wordmark, drawn instead of the text title when the
             // setting is on and this title has one (see LoadingTitleBlock).
             logo = if (loadingLogoOn) heroLogo else null,

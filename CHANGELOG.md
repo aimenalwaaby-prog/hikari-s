@@ -1,3 +1,11 @@
+## 0.11.88 (continuous build only)
+
+### Changed (batch: big TV provider card, phone art, unstuck downloads+servers, art server screen)
+- TV provider box is now the big reference card in BOTH search and home: title + All Plugins (Global) pill, subtitle, full-width filter, 2-column provider grid showing ~4 at once, tap = pick and close, hold = multi, Close saves; search keeps its own collections as full-width cards on top
+- Phone detail prefetches the title's artwork on open (TMDB first, AniList/Bangumi for anime) and retries stale misses, like TV — headers and the loading card stop sitting on black when the provider ships no art; the loading card also prefers the looked-up art now
+- Download-all can never wedge again: the cross-extension fallback has a 30s ceiling per episode, the "Finding servers" phase always has a Cancel (in-dialog + dialog dismiss), cancellation clears the busy flag and progress line (the stuck greyed-out dialogs), and the queueing pass resets its flag even if the screen goes away — so all picked episodes queue, not just the first
+- TV always opens the server list on play (toggle on by default); the player's server screen paints the title's TMDB/AniList/Bangumi backdrop full-bleed behind its glass rows on both TV and phone, keeping the All/engine chips and live-growing list
+
 ## 0.11.87 (continuous build only)
 
 ### Changed (TV batch: cards, search, repos, rail, adaptive type, anime honesty — phone UI untouched)

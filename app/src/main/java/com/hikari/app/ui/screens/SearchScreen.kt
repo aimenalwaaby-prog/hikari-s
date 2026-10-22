@@ -1,5 +1,6 @@
 package com.hikari.app.ui.screens
 import com.hikari.app.tv.TvMode
+import com.hikari.app.tv.TvSelectProviderDialog
 import com.hikari.app.tv.TvUi
 import com.hikari.app.i18n.tr
 import com.hikari.app.i18n.trTag
@@ -672,20 +673,24 @@ fun SearchScreen(
             )
             if (showProviders) {
                 if (searchIsTv) {
-                    // Television gets the reference-style Select Provider
-                    // dialog (title + All Plugins (Global) + filter + rows)
-                    // instead of the shared bottom sheet.
-                    com.hikari.app.tv.TvProviderDialog(
+                    // Television gets the same big reference-style Select
+                    // Provider card as Home (title + All Plugins (Global)
+                    // + filter + 2-column grid), with this screen's own
+                    // collections on top. A tap picks and closes; Close
+                    // saves the set.
+                    TvSelectProviderDialog(
                         providers = providers,
                         collections = collections,
                         selection = selected.toList(),
-                        onPick = { key ->
-                            showProviders = false
-                            if (key == null) vm.selectAll() else vm.selectProvider(key)
+                        onPickAll = { showProviders = false; vm.selectAll() },
+                        onPick = { key -> showProviders = false; vm.selectProvider(key) },
+                        onToggleMulti = { key ->
+                            val next = if (key in selected) selected - key else selected + key
+                            vm.setProviders(next.toList())
                         },
-                        onDone = { keys ->
+                        onManage = {
                             showProviders = false
-                            vm.setProviders(keys)
+                            Routes.safeNavigate(nav, Routes.COLLECTIONS)
                         },
                         onDismiss = { showProviders = false },
                     )
