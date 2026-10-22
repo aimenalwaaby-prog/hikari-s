@@ -29,6 +29,9 @@ fun TvScreenHeader(
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    // Adaptive TV type (see TvUi.scale): 1.0 on phones, so the phone header
+    // never moves.
+    val ts = TvUi.scale()
     Row(
         modifier
             .fillMaxWidth()
@@ -40,6 +43,7 @@ fun TvScreenHeader(
             Text(
                 title,
                 style = MaterialTheme.typography.headlineSmall,
+                fontSize = MaterialTheme.typography.headlineSmall.fontSize * ts,
                 fontWeight = FontWeight.Bold,
                 color = TvDesktop.TextPrimary,
                 maxLines = 1,

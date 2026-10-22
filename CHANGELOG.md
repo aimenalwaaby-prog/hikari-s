@@ -1,3 +1,13 @@
+## 0.11.87 (continuous build only)
+
+### Changed (TV batch: cards, search, repos, rail, adaptive type, anime honesty — phone UI untouched)
+- TV episode cards are true 16:9 and fall back to TMDB's own episode title/overview whenever the provider shipped none, so cards stop reading "Episode 12" + "No description available"
+- TV search is provider selection + the search box only: recent searches and the kind/year/genre chip strips are hidden, and the provider button opens a reference-style Select Provider dialog (title, subtitle, All Plugins (Global), filter field, tap = pick one, hold = multi-select with Done)
+- Extension repo-folder lists (per-engine folders, group page, all-repos page) pair RepoCards 2-per-row on TV like the repo plugin grids; plugin cards themselves were already the reference boxes
+- Anime/donghua honesty port: AniList → Bangumi now wins outright for anime candidates TMDB mistranslates (artwork, overview, banner/cover, episode stills off, TMDB shelves/logos off, ratings = the AniList score only), with the animation-genre gate so titles TMDB itself files as Animation keep the normal path — a Hollywood "Big Brother" can never overwrite the donghua again
+- The nav rail expands to its full labelled panel while the D-pad sits on it and collapses to the icon strip when focus leaves (overlaying the content, like the reference)
+- Adaptive TV type: rail, hero, detail and episode text sizes ride the viewport width (1.0 on a 1080p panel, smaller on dense sticks, larger on 4K); episode card widths fold the same scale in
+
 ## 0.11.86 (continuous build only)
 
 ### Fixed (TV detail + home art, desktop parity — phone UI untouched)

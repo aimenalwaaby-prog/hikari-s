@@ -25,6 +25,14 @@ object TmdbScreenshots {
     suspend fun backdropsFor(item: MediaItem): List<String> =
         runCatching {
             if (item.type != MediaType.SERIES && item.type != MediaType.MOVIE) return emptyList()
+            // Anime pick: the anime's own banner/cover, which are absolute
+            // URLs — never TMDB's mistranslated backdrops. Unprefixed, like
+            // every non-TMDB art source.
+            when (val pick = DonghuaDetails.pick(item)) {
+                is DonghuaDetails.Pick.Anime ->
+                    return listOfNotNull(pick.info.banner, pick.info.cover).distinct()
+                else -> {}
+            }
             val resolved = TmdbResolver.resolve(item) ?: return emptyList()
             // "anime" is TMDB's tv namespace (see TmdbResolver): the images
             // endpoint is the same one. Resolving any other way 404s every

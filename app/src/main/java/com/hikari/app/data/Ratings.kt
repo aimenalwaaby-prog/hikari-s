@@ -58,7 +58,7 @@ import kotlin.math.roundToInt
  * fast), which also keeps the request count to the sites at one per title —
  * the slug guesses below are cheap but they are still network round-trips.
  */
-enum class RatingSource { IMDB, TOMATOMETER, POPCORN, METACRITIC, LETTERBOXD, TMDB }
+enum class RatingSource { IMDB, TOMATOMETER, POPCORN, METACRITIC, LETTERBOXD, TMDB, ANILIST }
 
 /** The word a site itself uses for a score band. The label is the English UI
  *  key that `tr()` translates; the bands are applied by [Ratings] so the UI
@@ -192,6 +192,17 @@ object Ratings {
         tmdbVotes: Int?,
         onUpdate: ((List<TitleRating>) -> Unit)? = null,
     ): List<TitleRating> = withContext(Dispatchers.IO) {
+        // AniList/Bangumi knew this title (see DonghuaDetails): its score is
+        // the ONLY badge. The title-based scrapers below (RT, Metacritic,
+        // Letterboxd, Cinemeta, IMDb's suggestion endpoint) would all chase the
+        // live-action mistranslation TMDB resolves these titles to, and TMDB's
+        // own average belongs to that same wrong title — so none of them run.
+        animeBadges(item)?.let { anime ->
+            val key = cacheKey(item)
+            memory[key] = anime
+            writeDisk(key, anime)
+            return@withContext anime
+        }
         val tmdb = tmdbBadge(tmdbScore, tmdbVotes, item)
         val key = cacheKey(item)
         memory[key]?.let { cached ->
@@ -257,6 +268,9 @@ object Ratings {
         // "8.3/10" → "8.3": the badge prints a bare number, like the IMDb one.
         return list.firstOrNull { it.source == RatingSource.TMDB }
             ?.average?.substringBefore('/')?.trim()?.takeIf { it.isNotBlank() }
+            // An anime AniList/Bangumi scored: its average reads the same way.
+            ?: list.firstOrNull { it.source == RatingSource.ANILIST }
+                ?.average?.substringBefore('/')?.trim()?.takeIf { it.isNotBlank() }
     }
 
     /** How many quick TMDB resolutions may run at once. Every poster on screen
@@ -354,6 +368,14 @@ object Ratings {
      */
     private suspend fun warmUp(key: String, item: MediaItem) {
         try {
+            // Anime first: the quick half below would publish TMDB's average
+            // for the mistranslated live-action title (see [load]).
+            animeBadges(item)?.let { anime ->
+                memory[key] = anime
+                writeDisk(key, anime)
+                bumpRevision(key)
+                return
+            }
             val side = quickSlots.withPermit { tmdbSide(item, null) }
             if (side.badge != null) {
                 val quick = finish(memory[key].orEmpty(), side.badge)
@@ -483,6 +505,9 @@ object Ratings {
         tmdb: TitleRating?,
         onUpdate: ((List<TitleRating>) -> Unit)?,
     ) {
+        // An anime AniList/Bangumi scored: its badge is complete, and the
+        // re-ask below would chase the live-action mistranslation (see [load]).
+        if (cached.any { it.source == RatingSource.ANILIST }) return
         val missing = missingSources(key, item, cached)
         if (missing.isEmpty()) return
         // One re-ask per title at a time: the detail screen can be re-opened (or
@@ -669,6 +694,7 @@ object Ratings {
                         "metacritic" -> RatingSource.METACRITIC
                         "letterboxd" -> RatingSource.LETTERBOXD
                         "tmdb" -> RatingSource.TMDB
+                        "anilist" -> RatingSource.ANILIST
                         else -> null
                     } ?: continue
                     val providerEnabled = when (mapped) {
@@ -678,6 +704,7 @@ object Ratings {
                         RatingSource.METACRITIC -> "metacritic"
                         RatingSource.LETTERBOXD -> "letterboxd"
                         RatingSource.TMDB -> "tmdb"
+                        RatingSource.ANILIST -> "anilist"
                     }
                     if (!runCatching { HikariApp.instance.store.mdbProvider(providerEnabled) }.getOrDefault(true)) continue
                     val text = when (mapped) {
@@ -710,6 +737,41 @@ object Ratings {
         val id = raw.substringAfterLast(':').takeIf { it.all { c -> c.isDigit() } } ?: return null
         val kind = if (item.type == MediaType.SERIES) "tv" else "movie"
         return "https://www.themoviedb.org/$kind/$id"
+    }
+
+    /**
+     * The badges for a title AniList or Bangumi knew (see [DonghuaDetails]):
+     * the anime score and nothing else. Null for every other title — the
+     * normal lookup runs unchanged. An anime pick with no score still returns
+     * an (empty) list rather than null, so the callers never fall through to
+     * the TMDB path for it.
+     */
+    private suspend fun animeBadges(item: MediaItem): List<TitleRating>? {
+        val pick = runCatching { DonghuaDetails.pick(item) }.getOrNull() ?: return null
+        if (pick !is DonghuaDetails.Pick.Anime) return null
+        return listOfNotNull(anilistBadge(pick.info))
+    }
+
+    /** The anime badge: a percent like TMDB's, plus the "8.5/10" average the
+     *  poster cells and the detail strip print, with the source page to open. */
+    private fun anilistBadge(info: DonghuaDetails.AnimeInfo): TitleRating? {
+        if (info.score10 <= 0.0) return null
+        val percent = (info.score10 * 10).roundToInt()
+        val url = when {
+            info.source.startsWith("anilist:") ->
+                "https://anilist.co/anime/" + info.source.substringAfter(':')
+            info.source.startsWith("bangumi:") ->
+                "https://bgm.tv/subject/" + info.source.substringAfter(':')
+            else -> null
+        }
+        return TitleRating(
+            source = RatingSource.ANILIST,
+            value = "$percent%",
+            votes = info.votes.takeIf { it > 0 }?.toLong(),
+            verdict = percentVerdict(percent),
+            average = String.format(Locale.US, "%.1f/10", info.score10),
+            url = url,
+        )
     }
 
     private fun cacheKey(item: MediaItem): String =

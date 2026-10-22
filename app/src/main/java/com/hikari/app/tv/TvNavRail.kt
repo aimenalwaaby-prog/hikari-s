@@ -141,10 +141,21 @@ fun TvNavRail(
 
     val primary = Cs3.accent
     val scheme = MaterialTheme.colorScheme
+    // Rail-level expansion: the whole strip becomes the full labelled panel
+    // while the D-pad sits ANYWHERE on it, and collapses to the icon strip
+    // when focus leaves for the page. `hasFocus` covers the node and all of
+    // its children, so moving between rows never flickers the panel — and the
+    // container deliberately has NO clip, so the panel reads as an overlay.
+    var railFocused by remember { mutableStateOf(false) }
+    val s = TvUi.scale()
+    val railWidth by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (railFocused) TvUi.RAIL_EXPANDED_WIDTH else TvUi.RAIL_WIDTH,
+        label = "rail-width",
+    )
 
     BoxWithConstraints(
         modifier = modifier
-            .width(TvUi.RAIL_WIDTH)
+            .width(railWidth)
             .fillMaxHeight()
             // The reference client's floating glass pill: a dark frosted bar
             // with a hairline edge, standing off the backdrop — not a
@@ -162,7 +173,8 @@ fun TvNavRail(
                 RoundedCornerShape(28.dp),
             )
             .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(28.dp))
-            .padding(vertical = 18.dp),
+            .padding(vertical = 18.dp)
+            .onFocusChanged { railFocused = it.hasFocus },
     ) {
         // How much height each tab may have: what is left after the wordmark,
         // split evenly. A roomy screen gives every tab its comfortable ~74dp
@@ -220,6 +232,8 @@ fun TvNavRail(
                         requester = requesters[index],
                         slot = slot,
                         compact = compact,
+                        showLabel = railFocused,
+                        labelScale = s,
                         onClick = { onNavigate(tab.route) },
                         onFocus = { bringIntoView(index) },
                     )
@@ -230,11 +244,12 @@ fun TvNavRail(
 }
 
 /**
- * One rail destination. Compact icon-only by default; the row the D-pad sits on
- * expands into a labelled pill while every other row stays a compact icon —
- * exactly the streaming-box convention. It is a plain `clickable` row on
- * purpose: that is what makes it focusable for the D-pad and what makes it
- * pick up the focus ring from [TvFocusProvider].
+ * One rail destination. Icon-only while the rail is collapsed; the row the
+ * D-pad sits on expands into a labelled pill, and while the whole rail has
+ * focus every row shows its label (the reference's full panel over the
+ * content). It is a plain `clickable` row on purpose: that is what makes it
+ * focusable for the D-pad and what makes it pick up the focus ring from
+ * [TvFocusProvider].
  *
  * [slot] is the height the rail could give this row including the gap below it;
  * the row itself is sized a few dp under that so the stack keeps its rhythm at
@@ -247,6 +262,11 @@ private fun TvNavRailItem(
     requester: FocusRequester,
     slot: Dp,
     compact: Boolean,
+    /** The whole rail has D-pad focus: every row shows its label, so the
+     *  strip reads as the reference's full panel, not just the walked row. */
+    showLabel: Boolean = false,
+    /** Adaptive type scale (see TvUi.scale). */
+    labelScale: Float = 1f,
     onClick: () -> Unit,
     onFocus: () -> Unit,
 ) {
@@ -259,7 +279,11 @@ private fun TvNavRailItem(
     // the expansion that belongs to the D-pad position.
     val expanded = focused
     val rowWidth by androidx.compose.animation.core.animateDpAsState(
-        targetValue = if (expanded) TvUi.RAIL_ITEM_WIDTH + 76.dp else 64.dp,
+        targetValue = when {
+            expanded -> TvUi.RAIL_ITEM_WIDTH + 76.dp
+            showLabel -> TvUi.RAIL_EXPANDED_WIDTH - 38.dp
+            else -> 64.dp
+        },
         label = "rail-expand",
     )
     Box(
@@ -334,10 +358,11 @@ private fun TvNavRailItem(
                     modifier = Modifier.size(if (compact) 22.dp else 26.dp),
                 )
             }
-            if (expanded) {
+            if (expanded || showLabel) {
                 Text(
                     tr(tab.label),
                     style = MaterialTheme.typography.labelLarge,
+                    fontSize = MaterialTheme.typography.labelLarge.fontSize * labelScale,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

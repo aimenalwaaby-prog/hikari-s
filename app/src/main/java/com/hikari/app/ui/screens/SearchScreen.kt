@@ -599,7 +599,9 @@ fun SearchScreen(
         // above them is chrome to scroll past. With an empty box it is exactly
         // what the empty state below is for — the answer to "what do I search
         // for?" — so the two live together, and a chip re-runs the search.
-        if (query.isBlank() && history.isNotEmpty()) {
+        // Television hides the strip entirely: the TV screen is provider
+        // selection + the search box only.
+        if (!searchIsTv && query.isBlank() && history.isNotEmpty()) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -669,29 +671,49 @@ fun SearchScreen(
                 onClick = { showProviders = true },
             )
             if (showProviders) {
-                ProviderPickerSheet(
-                    providers = providers,
-                    collections = collections,
-                    selection = selected.toList(),
-                    filter = providerKind,
-                    onFilter = { providerKind = it },
-                    onManageCollections = {
-                        showProviders = false
-                        Routes.safeNavigate(nav, Routes.COLLECTIONS)
-                    },
-                    // A plain tap picks exactly one source (the usual case: "search
-                    // inside this extension"); the sheet's hold-for-multi mode and
-                    // its Done button save the whole set.
-                    onPick = { key ->
-                        showProviders = false
-                        if (key == null) vm.selectAll() else vm.selectProvider(key)
-                    },
-                    onDone = { keys ->
-                        showProviders = false
-                        vm.setProviders(keys)
-                    },
-                    onDismiss = { showProviders = false },
-                )
+                if (searchIsTv) {
+                    // Television gets the reference-style Select Provider
+                    // dialog (title + All Plugins (Global) + filter + rows)
+                    // instead of the shared bottom sheet.
+                    com.hikari.app.tv.TvProviderDialog(
+                        providers = providers,
+                        collections = collections,
+                        selection = selected.toList(),
+                        onPick = { key ->
+                            showProviders = false
+                            if (key == null) vm.selectAll() else vm.selectProvider(key)
+                        },
+                        onDone = { keys ->
+                            showProviders = false
+                            vm.setProviders(keys)
+                        },
+                        onDismiss = { showProviders = false },
+                    )
+                } else {
+                    ProviderPickerSheet(
+                        providers = providers,
+                        collections = collections,
+                        selection = selected.toList(),
+                        filter = providerKind,
+                        onFilter = { providerKind = it },
+                        onManageCollections = {
+                            showProviders = false
+                            Routes.safeNavigate(nav, Routes.COLLECTIONS)
+                        },
+                        // A plain tap picks exactly one source (the usual case: "search
+                        // inside this extension"); the sheet's hold-for-multi mode and
+                        // its Done button save the whole set.
+                        onPick = { key ->
+                            showProviders = false
+                            if (key == null) vm.selectAll() else vm.selectProvider(key)
+                        },
+                        onDone = { keys ->
+                            showProviders = false
+                            vm.setProviders(keys)
+                        },
+                        onDismiss = { showProviders = false },
+                    )
+                }
             }
         }
         // ---- Result filters: kind + year (see the state at the top) ---------
@@ -701,7 +723,10 @@ fun SearchScreen(
         // strip are shown from the moment the screen is up — NOT only once
         // results exist — because the filter is meant to be chosen BEFORE (or
         // while) the scan runs.
-        run {
+        //
+        // Television hides the whole block: the TV screen is provider
+        // selection + the search box only.
+        if (!searchIsTv) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

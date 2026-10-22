@@ -120,6 +120,9 @@ fun TvCinematicHero(
     val heroLogo = heroLogos[heroId]
     val scheme = MaterialTheme.colorScheme
     val bg = scheme.background
+    // Adaptive TV type (see TvUi.scale): 1.0 on phones, so the phone hero
+    // never moves.
+    val ts = TvUi.scale()
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         // A television banner, not a cinema screen: about a third of the
         // viewport (capped well below fullscreen) so shelves stay visible
@@ -213,7 +216,7 @@ fun TvCinematicHero(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth(0.62f)
-                    .padding(start = 28.dp, end = 12.dp, bottom = 22.dp),
+                    .padding(start = (28.dp * ts), end = (12.dp * ts), bottom = (22.dp * ts)),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -225,6 +228,7 @@ fun TvCinematicHero(
                     Text(
                         tvHeroMeta(item),
                         style = MaterialTheme.typography.labelLarge,
+                        fontSize = MaterialTheme.typography.labelLarge.fontSize * ts,
                         color = Color.White.copy(alpha = 0.85f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -245,11 +249,12 @@ fun TvCinematicHero(
                     Text(
                         item.title,
                         style = MaterialTheme.typography.displaySmall,
+                        fontSize = MaterialTheme.typography.displaySmall.fontSize * ts,
+                        lineHeight = 40.sp * ts,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        lineHeight = 40.sp,
                     )
                 }
                 if (item.overview?.isNotBlank() == true) {
@@ -257,6 +262,7 @@ fun TvCinematicHero(
                     Text(
                         item.overview,
                         style = MaterialTheme.typography.bodyLarge,
+                        fontSize = MaterialTheme.typography.bodyLarge.fontSize * ts,
                         color = Color.White.copy(alpha = 0.8f),
                         maxLines = if (overviewExpanded) Int.MAX_VALUE else 3,
                         overflow = TextOverflow.Ellipsis,

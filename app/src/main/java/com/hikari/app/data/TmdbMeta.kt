@@ -61,6 +61,17 @@ object TmdbMeta {
     suspend fun artwork(item: MediaItem): Pair<String?, String?>? {
         if (!runCatching { HikariApp.instance.store.tmdbEnabled() }.getOrDefault(true) ||
             !runCatching { HikariApp.instance.store.tmdbModule("artwork") }.getOrDefault(true)) return null
+        // An anime AniList/Bangumi knew: its art wins outright, and TMDB is
+        // never consulted — TMDB's mistranslation (the Hollywood sitcom for a
+        // donghua called "Big Brother") must never overwrite the anime.
+        when (val pick = runCatching { DonghuaDetails.pick(item) }.getOrNull()) {
+            is DonghuaDetails.Pick.Anime -> {
+                val a = pick.info
+                if (a.cover == null && a.banner == null) return null
+                return a.cover to a.banner
+            }
+            else -> {}
+        }
         val resolved = runCatching { TmdbResolver.resolve(item) }.getOrNull()
         if (resolved != null) {
             val seg = segment(resolved.mediaType)
@@ -95,6 +106,8 @@ object TmdbMeta {
     suspend fun logo(item: MediaItem): String? {
         if (!runCatching { HikariApp.instance.store.tmdbEnabled() }.getOrDefault(true) ||
             !runCatching { HikariApp.instance.store.tmdbModule("artwork") }.getOrDefault(true)) return null
+        // Anime pick: TMDB's logo would be the mistranslated title's wordmark.
+        if (runCatching { DonghuaDetails.pick(item) }.getOrNull() is DonghuaDetails.Pick.Anime) return null
         val resolved = runCatching { TmdbResolver.resolve(item) }.getOrNull() ?: return null
         val key = resolved.mediaType + "/" + resolved.tmdbId
         logoCache[key]?.let { return it.takeIf { cached -> cached.isNotBlank() } }
@@ -352,6 +365,9 @@ object TmdbMeta {
         if (runCatching { HikariApp.instance.store.tmdbModule("more_like") }.getOrDefault(true)) shelf(item, "recommendations", limit) else emptyList()
 
     private suspend fun shelf(item: MediaItem, kind: String, limit: Int): List<MediaItem> {
+        // Anime pick: TMDB's shelves would list the mistranslated title's
+        // neighbours (other sitcoms for a donghua), not anime.
+        if (runCatching { DonghuaDetails.pick(item) }.getOrNull() is DonghuaDetails.Pick.Anime) return emptyList()
         val resolved = runCatching { TmdbResolver.resolve(item) }.getOrNull() ?: return emptyList()
         val seg = segment(resolved.mediaType)
         val data = TmdbResolver.apiGet("/$seg/${resolved.tmdbId}/$kind", emptyMap())
@@ -421,6 +437,25 @@ object TmdbMeta {
         val useProductions = runCatching { HikariApp.instance.store.tmdbModule("productions") }.getOrDefault(true)
         val useNetworks = runCatching { HikariApp.instance.store.tmdbModule("networks") }.getOrDefault(true)
         val useCollections = runCatching { HikariApp.instance.store.tmdbModule("collections") }.getOrDefault(true)
+        // Anime pick: the detail page gets the anime's own overview, score
+        // and title (see displayOverview) instead of the mistranslated TMDB
+        // entry's credits, trailers and collections. Everything else stays
+        // default — an anime answers no TMDB extras.
+        when (val pick = runCatching { DonghuaDetails.pick(item) }.getOrNull()) {
+            is DonghuaDetails.Pick.Anime -> {
+                val a = pick.info
+                return TitleExtras(
+                    details = TitleDetails(
+                        year = item.year,
+                        rating = a.score10.takeIf { it > 0.0 },
+                        voteCount = a.votes.takeIf { it > 0 },
+                    ),
+                    localizedTitle = a.title,
+                    overview = a.overview.takeIf { it.isNotBlank() },
+                )
+            }
+            else -> {}
+        }
         val resolved = runCatching { TmdbResolver.resolve(item) }.getOrNull() ?: return null
         val seg = segment(resolved.mediaType)
         val certKey = if (seg == "movie") "release_dates" else "content_ratings"

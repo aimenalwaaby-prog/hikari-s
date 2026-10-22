@@ -8574,6 +8574,9 @@ private fun SourceFolderView(
         runCatching { kotlinx.coroutines.delay(120) }
         runCatching { backFocus.requestFocus() }
     }
+    // TV pairs the repo cards two-per-row (see repoPairItems); hoisted here
+    // because the LazyColumn below cannot call TvMode itself.
+    val tvFolder = com.hikari.app.tv.TvMode.current()
 
     val kind = when (folder) {
         SourceFolder.CLOUDSTREAM -> RepoKind.CS3
@@ -8879,16 +8882,16 @@ private fun SourceFolderView(
                         }
                     }
                 }
-                items(scriptRepos, key = { "repo-" + it.url }) { repo ->
-                    RepoCard(
-                        repo = repo,
-                        pluginCount = (pluginsByRepo[repo.url] ?: emptyList()).size,
-                        state = repoState[repo.url],
-                        onClick = { onOpenRepo(repo) },
-                        onRefresh = { onRefreshRepo(repo) },
-                        onRemoveRepo = { onRemoveRepo(repo.url) }
-                    )
-                }
+                repoPairItems(
+                    keyPrefix = "scriptrepos",
+                    tv = tvFolder,
+                    repos = scriptRepos,
+                    pluginsByRepo = pluginsByRepo,
+                    repoState = repoState,
+                    onOpenRepo = onOpenRepo,
+                    onRefreshRepo = onRefreshRepo,
+                    onRemoveRepo = onRemoveRepo,
+                )
                 items(scriptProviders, key = { "script-" + it.config.id }) { p ->
                     ProviderCard(
                         p = p,
@@ -8910,16 +8913,16 @@ private fun SourceFolderView(
                         )
                     }
                 }
-                items(folderRepos, key = { "repo-" + it.url }) { repo ->
-                    RepoCard(
-                        repo = repo,
-                        pluginCount = (pluginsByRepo[repo.url] ?: emptyList()).size,
-                        state = repoState[repo.url],
-                        onClick = { onOpenRepo(repo) },
-                        onRefresh = { onRefreshRepo(repo) },
-                        onRemoveRepo = { onRemoveRepo(repo.url) }
-                    )
-                }
+                repoPairItems(
+                    keyPrefix = "folderrepos",
+                    tv = tvFolder,
+                    repos = folderRepos,
+                    pluginsByRepo = pluginsByRepo,
+                    repoState = repoState,
+                    onOpenRepo = onOpenRepo,
+                    onRefreshRepo = onRefreshRepo,
+                    onRemoveRepo = onRemoveRepo,
+                )
                 // Installed extensions live ONLY outside the repo folders (the
                 // global "Installed extensions" page) — a repo folder lists
                 // repos, never installs (like the Nuvio folder already did).
@@ -9121,6 +9124,9 @@ private fun SourcesOverviewView(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
+        // TV pairs the repo cards two-per-row (see repoPairItems); hoisted
+        // here because the LazyColumn below cannot call TvMode itself.
+        val tvGroups = com.hikari.app.tv.TvMode.current()
         LazyColumn(
             // Repo-group position held across visits (see ScrollKeeper).
             state = com.hikari.app.ui.components.keptListState("extRepoGroups"),
@@ -9141,6 +9147,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = hikiGroupTitle,
@@ -9151,6 +9158,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = nuvioGroupTitle,
@@ -9161,6 +9169,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = skyGroupTitle,
@@ -9171,6 +9180,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = aniyomiGroupTitle,
@@ -9181,6 +9191,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = vegaGroupTitle,
@@ -9191,6 +9202,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = zangetsuGroupTitle,
@@ -9201,6 +9213,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = lnreaderGroupTitle,
@@ -9211,6 +9224,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = soraGroupTitle,
@@ -9221,6 +9235,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             repoGroup(
                 title = anymexGroupTitle,
@@ -9231,6 +9246,7 @@ private fun SourcesOverviewView(
                 onOpenRepo = onOpenRepo,
                 onRefreshRepo = onRefreshRepo,
                 onRemoveRepo = onRemoveRepo,
+                tv = tvGroups,
             )
             item {
                 Row(
@@ -9334,6 +9350,61 @@ private fun SourcesOverviewView(
     }
 }
 
+/** RepoCards two-per-row for television (the reference repo grid): the same
+ *  pairing the search results and the repo page's plugin grid already use.
+ *  [tv] is passed in (rather than read here) because a LazyListScope cannot
+ *  call TvMode itself. The Row carries no horizontal padding — RepoCard paints
+ *  its own 20dp TV margins, so the pair's outer edges line up exactly like the
+ *  single column does. */
+private fun LazyListScope.repoPairItems(
+    keyPrefix: String,
+    tv: Boolean,
+    repos: List<Cs3Repo>,
+    pluginsByRepo: Map<String, List<Cs3RepoPlugin>>,
+    repoState: Map<String, RepoLoadState>,
+    onOpenRepo: (Cs3Repo) -> Unit,
+    onRefreshRepo: (Cs3Repo) -> Unit,
+    onRemoveRepo: (String) -> Unit,
+) {
+    if (!tv) {
+        items(repos, key = { "repo-" + it.url }) { repo ->
+            RepoCard(
+                repo = repo,
+                pluginCount = (pluginsByRepo[repo.url] ?: emptyList()).size,
+                state = repoState[repo.url],
+                onClick = { onOpenRepo(repo) },
+                onRefresh = { onRefreshRepo(repo) },
+                onRemoveRepo = { onRemoveRepo(repo.url) }
+            )
+        }
+        return
+    }
+    repos.chunked(2).forEachIndexed { gi, pair ->
+        item(key = keyPrefix + "-" + gi + "-" + pair.joinToString("|") { it.url }) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 0.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                pair.forEach { repo ->
+                    Box(Modifier.weight(1f)) {
+                        RepoCard(
+                            repo = repo,
+                            pluginCount = (pluginsByRepo[repo.url] ?: emptyList()).size,
+                            state = repoState[repo.url],
+                            onClick = { onOpenRepo(repo) },
+                            onRefresh = { onRefreshRepo(repo) },
+                            onRemoveRepo = { onRemoveRepo(repo.url) }
+                        )
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
 private fun LazyListScope.repoGroup(
     title: String,
     groupRepos: List<Cs3Repo>,
@@ -9343,6 +9414,9 @@ private fun LazyListScope.repoGroup(
     onOpenRepo: (Cs3Repo) -> Unit,
     onRefreshRepo: (Cs3Repo) -> Unit,
     onRemoveRepo: (String) -> Unit,
+    /** The reference 2-per-row grid instead of phone rows. Passed in (rather
+     *  than read here) because a LazyListScope cannot call TvMode itself. */
+    tv: Boolean = false,
 ) {
     item {
         Row(
@@ -9376,16 +9450,16 @@ private fun LazyListScope.repoGroup(
             )
         }
     }
-    items(groupRepos, key = { "repo-" + it.url }) { repo ->
-        RepoCard(
-            repo = repo,
-            pluginCount = (pluginsByRepo[repo.url] ?: emptyList()).size,
-            state = repoState[repo.url],
-            onClick = { onOpenRepo(repo) },
-            onRefresh = { onRefreshRepo(repo) },
-            onRemoveRepo = { onRemoveRepo(repo.url) }
-        )
-    }
+    repoPairItems(
+        keyPrefix = "repogroup-" + title,
+        tv = tv,
+        repos = groupRepos,
+        pluginsByRepo = pluginsByRepo,
+        repoState = repoState,
+        onOpenRepo = onOpenRepo,
+        onRefreshRepo = onRefreshRepo,
+        onRemoveRepo = onRemoveRepo,
+    )
 }
 
 @Composable
@@ -9523,6 +9597,9 @@ private fun AllReposView(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
+        // TV pairs the repo cards two-per-row (see repoPairItems); hoisted
+        // here because the LazyColumn below cannot call TvMode itself.
+        val tvAllRepos = com.hikari.app.tv.TvMode.current()
         LazyColumn(
             // Installed-repos position held across visits (see ScrollKeeper).
             state = com.hikari.app.ui.components.keptListState("extReposInstalled"),
@@ -9544,16 +9621,16 @@ private fun AllReposView(
                     )
                 }
             }
-            items(repos, key = { "repo-" + it.url }) { repo ->
-                RepoCard(
-                    repo = repo,
-                    pluginCount = (pluginsByRepo[repo.url] ?: emptyList()).size,
-                    state = repoState[repo.url],
-                    onClick = { onOpenRepo(repo) },
-                    onRefresh = { onRefreshRepo(repo) },
-                    onRemoveRepo = { onRemoveRepo(repo.url) }
-                )
-            }
+            repoPairItems(
+                keyPrefix = "allrepos",
+                tv = tvAllRepos,
+                repos = repos,
+                pluginsByRepo = pluginsByRepo,
+                repoState = repoState,
+                onOpenRepo = onOpenRepo,
+                onRefreshRepo = onRefreshRepo,
+                onRemoveRepo = onRemoveRepo,
+            )
         }
         AddRepoButton(label = tr("Add repo"), onClick = onAddRepo)
     }

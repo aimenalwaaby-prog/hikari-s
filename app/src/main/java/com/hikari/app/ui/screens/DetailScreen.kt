@@ -1895,7 +1895,15 @@ fun DetailScreen(
     val tvBlurDetail by tvBlurFlow.collectAsState(initial = false)
     val tvEpisodeSizeFlow = remember { detailApp.store.tvEpisodeSizeFlow() }
     val tvEpisodeSize by tvEpisodeSizeFlow.collectAsState(initial = 100)
-    val tvEpisodeScale = (tvEpisodeSize / 100f).coerceIn(0.8f, 1.6f)
+    // The viewport scale rides along (see TvUi.scale): a 4K panel gets bigger
+    // episode cards AND bigger card text (EpisodeBigCard/EpisodePosterCard read
+    // this as their sizeScale), a dense stick screen smaller ones. 1.0 on
+    // phones (TvUi.scale answers 1 there), so the phone layout never moves.
+    val tvEpisodeScale =
+        ((tvEpisodeSize / 100f) * com.hikari.app.tv.TvUi.scale()).coerceIn(0.8f, 1.6f)
+    // The hero/detail type scale (see TvUi.scale): 1.0 on phones, so every
+    // use below is a phone no-op and the phone layout never moves.
+    val tvTypeScale = com.hikari.app.tv.TvUi.scale()
     val heroStyle =
         // Big TV detail: SIDE puts poster left + info/episodes right (matches
         // the living-room layout users expect). TALL was full-width art only.
@@ -3456,6 +3464,10 @@ fun DetailScreen(
     // TMDB has nothing. Loaded once the episode list for the shown
     // season is known, so switching seasons re-asks for the new range.
     val tvEpStills = remember { mutableStateMapOf<Pair<Int, Int>, String>() }
+    // TMDB episode titles/overviews keyed the same way, so a card whose
+    // provider shipped no name or synopsis still prints something true (see
+    // TvCs3EpisodeCard) instead of "Episode 12" + "No description available".
+    val tvEpMeta = remember { mutableStateMapOf<Pair<Int, Int>, Pair<String?, String?>>() }
     // Television screenshots strip, straight from TMDB (see TmdbScreenshots):
     // the reference client's own Screenshots section. Backdrops only, capped
     // at 8 — a title with no backdrops simply shows no section.
@@ -3468,11 +3480,15 @@ fun DetailScreen(
     if (isTvLayout) {
         LaunchedEffect(m?.uniqueId, sortedEps) {
             tvEpStills.clear()
+            tvEpMeta.clear()
             if (!detailIsSeries || sortedEps.isEmpty()) return@LaunchedEffect
             val data = TmdbStills.stillsDataFor(batchItem, sortedEps.map { it.season }.toSet())
             for ((season, ss) in data) {
-                for ((num, url) in ss.byNumber) {
-                    if (url.isNotBlank()) tvEpStills[season to num] = url
+                for ((num, rec) in ss.byNumber) {
+                    if (rec.still?.isNotBlank() == true) tvEpStills[season to num] = rec.still
+                    if (rec.name != null || rec.overview != null) {
+                        tvEpMeta[season to num] = rec.name to rec.overview
+                    }
                 }
             }
             // Absolute-numbered seasons (a 300-episode donghua "season 1"
@@ -3484,8 +3500,12 @@ fun DetailScreen(
                 val ordered = data[season]?.ordered ?: continue
                 eps.forEachIndexed { idx, ep ->
                     val key = season to ep.number
+                    val rec = ordered.getOrNull(idx)
                     if (!tvEpStills.containsKey(key)) {
-                        ordered.getOrNull(idx)?.takeIf { it.isNotBlank() }?.let { tvEpStills[key] = it }
+                        rec?.still?.takeIf { it.isNotBlank() }?.let { tvEpStills[key] = it }
+                    }
+                    if (!tvEpMeta.containsKey(key) && (rec?.name != null || rec?.overview != null)) {
+                        tvEpMeta[key] = rec?.name to rec?.overview
                     }
                 }
             }
@@ -4525,6 +4545,8 @@ fun DetailScreen(
                                     TvCs3EpisodeCard(
                                         ep = ep,
                                         tmdbStill = tvEpStills[ep.season to ep.number],
+                                        tmdbName = tvEpMeta[ep.season to ep.number]?.first,
+                                        tmdbOverview = tvEpMeta[ep.season to ep.number]?.second,
                                         fallbackBlur = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
                                         watchState = epWatchState(ep),
                                         progress = prog,
@@ -4558,7 +4580,7 @@ fun DetailScreen(
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxWidth(if (episodePosterStyle) 0.62f else 0.58f).heightIn(max = 108.dp))
                     } else {
-                        Text(artTitle, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 34.sp * tvTypeScale, lineHeight = 40.sp * tvTypeScale, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(10.dp))
@@ -4585,7 +4607,7 @@ fun DetailScreen(
                         ) {
                             if (tvMeta.isNotBlank()) Text(
                                 tvMeta,
-                                fontSize = 15.sp,
+                                fontSize = 15.sp * tvTypeScale,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.88f),
                             )
@@ -4593,14 +4615,22 @@ fun DetailScreen(
                         }
                     }
                     // Row 2: the reference's ratings row — IMDb + TMDB badges
-                    // only, then genres. Every other source is gone from TV.
+                    // only (plus the AniList badge for anime), then genres.
+                    // Every other source is gone from TV.
                     if (showDetailRating) {
                         val tvBadges = ratings
                             .filter {
                                 it.source == com.hikari.app.data.RatingSource.IMDB ||
-                                    it.source == com.hikari.app.data.RatingSource.TMDB
+                                    it.source == com.hikari.app.data.RatingSource.TMDB ||
+                                    it.source == com.hikari.app.data.RatingSource.ANILIST
                             }
-                            .sortedBy { if (it.source == com.hikari.app.data.RatingSource.IMDB) 0 else 1 }
+                            .sortedBy {
+                                when (it.source) {
+                                    com.hikari.app.data.RatingSource.IMDB -> 0
+                                    com.hikari.app.data.RatingSource.TMDB -> 1
+                                    else -> 2
+                                }
+                            }
                         val tvGenres = m?.genres?.takeIf { it.isNotEmpty() }
                         if (tvBadges.isNotEmpty() || !tvGenres.isNullOrEmpty()) {
                             Row(
@@ -4614,7 +4644,7 @@ fun DetailScreen(
                                 if (!tvGenres.isNullOrEmpty()) {
                                     Text(
                                         (if (tvBadges.isNotEmpty()) "•  " else "") + tvGenres.take(4).joinToString(", "),
-                                        fontSize = 15.sp,
+                                        fontSize = 15.sp * tvTypeScale,
                                         fontWeight = FontWeight.Medium,
                                         color = Color.White.copy(alpha = 0.72f),
                                         maxLines = 1,
@@ -4632,8 +4662,8 @@ fun DetailScreen(
                         var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
                         Text(
                             displayOverview!! + if (!tvOverviewFull && displayOverview.length > 140) "  [more]" else "",
-                            fontSize = 16.sp,
-                            lineHeight = 24.sp,
+                            fontSize = 16.sp * tvTypeScale,
+                            lineHeight = 24.sp * tvTypeScale,
                             color = Color.White.copy(alpha = 0.88f),
                             maxLines = if (tvOverviewFull) Int.MAX_VALUE else 3,
                             overflow = TextOverflow.Ellipsis,
@@ -4788,14 +4818,14 @@ fun DetailScreen(
                                         if (seasons.size > 1) {
                                             Text(
                                                 text = tr("Season %s").replace("%s", activeSeason.toString()),
-                                                fontSize = 18.sp,
+                                                fontSize = 18.sp * tvTypeScale,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White,
                                             )
                                         } else {
                                             Text(
                                                 text = tr("Episodes"),
-                                                fontSize = 18.sp,
+                                                fontSize = 18.sp * tvTypeScale,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White,
                                             )
@@ -4804,7 +4834,7 @@ fun DetailScreen(
                                             Text(
                                                 text = "•   ${shownEps.size} " + if (shownEps.size == 1) tr("Episode") else tr("Episodes"),
                                                 color = Color.White.copy(alpha = 0.55f),
-                                                fontSize = 14.sp,
+                                                fontSize = 14.sp * tvTypeScale,
                                                 fontWeight = FontWeight.Medium,
                                             )
                                         }
@@ -4953,6 +4983,8 @@ fun DetailScreen(
                                             TvCs3EpisodeCard(
                                                 ep = ep,
                                                 tmdbStill = tvEpStills[ep.season to ep.number],
+                                                tmdbName = tvEpMeta[ep.season to ep.number]?.first,
+                                                tmdbOverview = tvEpMeta[ep.season to ep.number]?.second,
                                                 fallbackBlur = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
                                                 watchState = epWatchState(ep),
                                                 progress = prog,
@@ -8096,6 +8128,7 @@ private val MetacriticGreen = Color(0xFF00CE7A)
 private val MetacriticYellow = Color(0xFFFFBD3F)
 private val MetacriticRed = Color(0xFFFF6871)
 private val LetterboxdGreen = Color(0xFF00C030)
+private val AnilistBlue = Color(0xFF02A9FF)
 
 // The age-rating chip's four bands. Not brand colours: the point is that the
 // chip says the same thing on every title, whatever board issued the rating
@@ -8153,6 +8186,7 @@ private fun isRotten(r: TitleRating): Boolean = when (r.verdict) {
 private fun ratingTint(r: TitleRating): Color = when (r.source) {
     RatingSource.IMDB -> IMDbYellow
     RatingSource.TMDB -> TmdbCyan
+    RatingSource.ANILIST -> AnilistBlue
     RatingSource.TOMATOMETER -> if (isRotten(r)) TomatoGreen else TomatoRed
     RatingSource.POPCORN -> TomatoRed
     RatingSource.LETTERBOXD -> LetterboxdGreen
@@ -8225,6 +8259,13 @@ private fun RatingMark(source: RatingSource, tint: Color) {
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
+        RatingSource.ANILIST -> Text(
+            "AniList",
+            color = AnilistBlue,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
         RatingSource.TOMATOMETER -> Box(Modifier.size(width = 11.dp, height = 12.dp)) {
             Box(
                 Modifier
@@ -8291,6 +8332,7 @@ private fun ratingTitle(source: RatingSource): String = when (source) {
     RatingSource.METACRITIC -> "Metacritic Metascore"
     RatingSource.LETTERBOXD -> "Letterboxd rating"
     RatingSource.TMDB -> "TMDB score"
+    RatingSource.ANILIST -> "AniList score"
 }
 
 /** The site itself, for the "open the source" action. Brand names, so they are
@@ -8301,6 +8343,7 @@ private fun ratingSite(source: RatingSource): String = when (source) {
     RatingSource.METACRITIC -> "Metacritic"
     RatingSource.LETTERBOXD -> "Letterboxd"
     RatingSource.TMDB -> "TMDB"
+    RatingSource.ANILIST -> "AniList"
 }
 
 /** What the number actually measures, in the site's own terms. */
@@ -8317,6 +8360,8 @@ private fun ratingExplain(source: RatingSource): String = when (source) {
         "The average of Letterboxd members' ratings, out of 5."
     RatingSource.TMDB ->
         "The average user score on TMDB, shown as a percentage."
+    RatingSource.ANILIST ->
+        "The average user score on AniList, out of 10."
 }
 
 /** The scale the number is on, printed small next to it ("8.3 /10"). */
@@ -8653,6 +8698,10 @@ private fun TvCs3EpisodeCard(
     progress: Float,
     hideSpoilers: Boolean,
     isAnime: Boolean = false,
+    /** TMDB's episode title/overview (see tvEpMeta): used ONLY when the
+     *  provider shipped none of its own — never over provider text. */
+    tmdbName: String? = null,
+    tmdbOverview: String? = null,
     onPlay: () -> Unit,
     onDownload: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -8660,10 +8709,13 @@ private fun TvCs3EpisodeCard(
     val epNum = ep.number
     val code = if (ep.season != null && ep.season > 0) "S" + ep.season + " \u00b7 " + tr("Episode %s").replace("%s", epNum.toString()).uppercase()
     else tr("Episode %s").replace("%s", epNum.toString()).uppercase()
-    val title = ep.name?.takeIf { it.isNotBlank() } ?: tr("Episode %s").replace("%s", epNum.toString())
+    val title = ep.name?.takeIf { it.isNotBlank() }
+        ?: tmdbName?.takeIf { it.isNotBlank() }
+        ?: tr("Episode %s").replace("%s", epNum.toString())
     val desc = when {
         isEpisodeUnaired(ep.released) -> tr("Not released yet")
         !ep.overview.isNullOrBlank() -> ep.overview.trim()
+        !tmdbOverview.isNullOrBlank() -> tmdbOverview.trim()
         else -> ""
     }
     val mins = ep.runtime?.takeIf { it > 0 }

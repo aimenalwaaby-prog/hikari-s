@@ -205,6 +205,27 @@ object TvUi {
      *  into its labelled pill over the content. */
     val RAIL_WIDTH = 84.dp
 
+    /** The rail's EXPANDED width: the full labelled panel the rail becomes
+     *  while the D-pad sits on it (see TvNavRail). Content keeps the collapsed
+     *  inset (see [railWidth]) — the panel overlays it, like the reference. */
+    val RAIL_EXPANDED_WIDTH = 232.dp
+
+    /** Adaptive TV type scale, from the viewport width: 1.0 on a 1080p panel
+     *  (960dp wide), smaller on short/dense screens, larger on 4K — clamped to
+     *  a range that still reads from a sofa without blowing the layout apart.
+     *  Rail, hero, detail and episode text sizes all ride this one number. */
+    @Composable
+    fun scale(): Float {
+        if (!TvMode.current()) return 1f
+        val w = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+        return (w / 960f).coerceIn(0.8f, 1.3f)
+    }
+
+    /** The left inset a page keeps clear of the rail: the collapsed width
+     *  always (the expanded panel overlays the content, like the reference). */
+    @Composable
+    fun railWidth(): androidx.compose.ui.unit.Dp = RAIL_WIDTH
+
     /** One tab's touch/D-pad target on the rail. */
     val RAIL_ITEM_WIDTH = 96.dp
 

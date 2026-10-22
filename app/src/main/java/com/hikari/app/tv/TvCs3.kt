@@ -214,6 +214,7 @@ fun Cs3BackdropArt(
 private fun ratingSiteColor(source: RatingSource): Color = when (source) {
     RatingSource.IMDB -> Color(0xFFF5C518)
     RatingSource.TMDB -> Color(0xFF01B4E4)
+    RatingSource.ANILIST -> Color(0xFF02A9FF)
     RatingSource.TOMATOMETER -> Color(0xFFFA320A)
     RatingSource.POPCORN -> Color(0xFFFFB300)
     RatingSource.METACRITIC -> Color(0xFF66CC33)
@@ -223,6 +224,7 @@ private fun ratingSiteColor(source: RatingSource): Color = when (source) {
 private fun ratingSiteLabel(source: RatingSource): String = when (source) {
     RatingSource.IMDB -> "IMDb"
     RatingSource.TMDB -> "TMDB"
+    RatingSource.ANILIST -> "AL"
     RatingSource.TOMATOMETER -> "RT"
     RatingSource.POPCORN -> "RT"
     RatingSource.METACRITIC -> "MC"
@@ -243,6 +245,7 @@ fun Cs3RatingBadges(
     modifier: Modifier = Modifier,
 ) {
     if (ratings.isEmpty() && cert.isNullOrBlank()) return
+    val ts = TvUi.scale()
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -261,13 +264,13 @@ fun Cs3RatingBadges(
             ) {
                 Text(
                     text = ratingSiteLabel(r.source),
-                    fontSize = 11.sp,
+                    fontSize = 11.sp * ts,
                     fontWeight = FontWeight.ExtraBold,
                     color = ratingSiteColor(r.source),
                 )
                 Text(
                     text = r.value,
-                    fontSize = 12.sp,
+                    fontSize = 12.sp * ts,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
@@ -283,7 +286,7 @@ fun Cs3RatingBadges(
             ) {
                 Text(
                     text = cert,
-                    fontSize = 11.sp,
+                    fontSize = 11.sp * ts,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
@@ -447,7 +450,7 @@ fun Cs3HeroDots(
  * is no still at all (desktop parity) — a card never wears a blank box.
  */
 /**
- * The reference's episode card, one-to-one: a single 16:13.5 art box with
+ * The reference's episode card, one-to-one: a single 16:9 art box with
  * 16dp corners and a hairline edge, art full-bleed, the site rating badge
  * top-start, the watched check top-end, and the code / title / two-line
  * synopsis / duration-plus-date block overlaid on the art's bottom safe
@@ -472,9 +475,13 @@ fun Cs3EpisodeCard(
     modifier: Modifier = Modifier,
 ) {
     val accent = Cs3.accent
+    // Adaptive TV type: the card's text rides the viewport scale (see
+    // TvUi.scale) so a dense stick screen doesn't set 19sp titles into a
+    // card half the height, and a 4K panel doesn't whisper.
+    val ts = TvUi.scale()
     Box(
         modifier = modifier
-            .aspectRatio(16f / 13.5f)
+            .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF141518))
             .border(0.5.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(16.dp))
@@ -545,14 +552,14 @@ fun Cs3EpisodeCard(
                     if (!siteLabel.isNullOrBlank()) {
                         Text(
                             text = siteLabel,
-                            fontSize = 11.5.sp,
+                            fontSize = 11.5.sp * ts,
                             fontWeight = FontWeight.Bold,
                             color = siteColor,
                         )
                     }
                     Text(
                         text = String.format(java.util.Locale.US, "%.1f", rating10),
-                        fontSize = 11.5.sp,
+                        fontSize = 11.5.sp * ts,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                     )
@@ -593,16 +600,16 @@ fun Cs3EpisodeCard(
         ) {
             Text(
                 text = code,
-                fontSize = 12.5.sp,
+                fontSize = 12.5.sp * ts,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.8.sp,
+                letterSpacing = 0.8.sp * ts,
                 color = Color(0xFFE2E8F0).copy(alpha = 0.80f),
                 maxLines = 1,
             )
             Text(
                 text = if (hideSpoilers) "Episode title hidden" else title,
-                fontSize = 19.5.sp,
-                lineHeight = 24.sp,
+                fontSize = 19.5.sp * ts,
+                lineHeight = 24.sp * ts,
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -617,8 +624,8 @@ fun Cs3EpisodeCard(
                     desc.isNotBlank() -> desc
                     else -> "No description available."
                 },
-                fontSize = 14.5.sp,
-                lineHeight = 20.sp,
+                fontSize = 14.5.sp * ts,
+                lineHeight = 20.sp * ts,
                 color = Color(0xFFD1D5DB).copy(alpha = if (desc.isNotBlank() && !hideSpoilers) 0.88f else 0.45f),
                 minLines = 2,
                 maxLines = 2,
@@ -635,7 +642,7 @@ fun Cs3EpisodeCard(
                 if (duration != null) {
                     Text(
                         text = duration,
-                        fontSize = 12.5.sp,
+                        fontSize = 12.5.sp * ts,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.65f),
                     )
@@ -645,7 +652,7 @@ fun Cs3EpisodeCard(
                 if (dateText != null) {
                     Text(
                         text = dateText,
-                        fontSize = 12.5.sp,
+                        fontSize = 12.5.sp * ts,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.55f),
                     )
