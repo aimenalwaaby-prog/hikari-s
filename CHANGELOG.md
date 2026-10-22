@@ -1,3 +1,10 @@
+## 0.11.86 (continuous build only)
+
+### Fixed (TV detail + home art, desktop parity — phone UI untouched)
+- TV detail banner is now the desktop rule: the title's own TMDB backdrops rotate behind the whole page (full resolution, crossfading every 9s) and every section scrolls over that one image — the hero no longer paints a second copy, and provider art only fills in when TMDB has nothing, never flashing first
+- One Play/Resume row per TV detail page (was showing the same row twice); TMDB stills now win on every TV episode card with the position fallback for absolute-numbered donghua seasons, and the show-art fallback paints sharp instead of a blurred copy of the banner
+- TV home hero paints TMDB backdrops sharp (full file, top-anchored) instead of the blurred fill; stale artwork misses now re-resolve on open so healed titles pick up their TMDB art by itself
+
 ## 0.11.85 (continuous build only)
 
 ### Changed (TV layout one-to-one with the desktop client — phone UI untouched)

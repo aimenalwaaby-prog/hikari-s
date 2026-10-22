@@ -882,7 +882,7 @@ fun HomeScreen(nav: NavHostController) {
     // high-quality art instead of waiting for a scroll to trigger each cell.
     if (TvMode.current()) {
         LaunchedEffect(featured) {
-            featured.take(8).forEach { Artwork.prefetch(it) }
+            featured.take(8).forEach { Artwork.prefetch(it); Artwork.retryMiss(it) }
         }
     }
     val openGlobalSearch: () -> Unit = {

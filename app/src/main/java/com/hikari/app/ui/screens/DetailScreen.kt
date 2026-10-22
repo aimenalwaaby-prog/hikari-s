@@ -3406,7 +3406,7 @@ fun DetailScreen(
     // response — so the high-quality backdrop is already in flight (usually
     // already cached) when the page paints.
     if (isTvLayout) {
-        LaunchedEffect(savedItem) { Artwork.prefetch(savedItem) }
+        LaunchedEffect(savedItem) { Artwork.prefetch(savedItem); Artwork.retryMiss(savedItem) }
     }
     val isSaved = favorites.any { it.uniqueId == savedItem.uniqueId }
     // A title joins the Library THROUGH a category, so the button opens the
@@ -3450,22 +3450,61 @@ fun DetailScreen(
     var dlMsg by remember { mutableStateOf<String?>(null) }
     val batchItem = m ?: savedItem
     // Television episode stills, straight from TMDB (see TmdbStills): the
-    // provider's own thumbnail wins wherever it has one — this map only fills
-    // the blanks, keyed by (season, episode), and the shelf keeps its old art
-    // when TMDB has nothing. Loaded once the episode list for the shown
+    // TMDB still wins (desktop parity), the provider's own thumbnail is the
+    // fallback, keyed by (season, episode) with a position fallback for
+    // absolute-numbered donghua seasons. The shelf keeps its old art when
+    // TMDB has nothing. Loaded once the episode list for the shown
     // season is known, so switching seasons re-asks for the new range.
     val tvEpStills = remember { mutableStateMapOf<Pair<Int, Int>, String>() }
     // Television screenshots strip, straight from TMDB (see TmdbScreenshots):
     // the reference client's own Screenshots section. Backdrops only, capped
     // at 8 — a title with no backdrops simply shows no section.
     val tvScreenshots = remember { mutableStateListOf<String>() }
+    // Television banner owns the desktop rule: the title's own TMDB
+    // backdrops (plural) rotate behind the page; provider art only when
+    // TMDB has nothing, and never flashing before TMDB lands.
+    val tvBgUrls = remember { mutableStateListOf<String>() }
+    var tvBgIndex by remember { mutableStateOf(0) }
     if (isTvLayout) {
         LaunchedEffect(m?.uniqueId, sortedEps) {
             tvEpStills.clear()
             if (!detailIsSeries || sortedEps.isEmpty()) return@LaunchedEffect
-            val map = TmdbStills.stillsFor(batchItem, sortedEps.map { it.season }.toSet())
-            for ((k, v) in map) {
-                if (v.isNotBlank()) tvEpStills[k] = v
+            val data = TmdbStills.stillsDataFor(batchItem, sortedEps.map { it.season }.toSet())
+            for ((season, ss) in data) {
+                for ((num, url) in ss.byNumber) {
+                    if (url.isNotBlank()) tvEpStills[season to num] = url
+                }
+            }
+            // Absolute-numbered seasons (a 300-episode donghua "season 1"
+            // that TMDB splits into seasons of ~100) run past TMDB's
+            // per-season count: fall back to the episode's POSITION in the
+            // season, like the desktop client.
+            val bySeason = sortedEps.groupBy { it.season }
+            for ((season, eps) in bySeason) {
+                val ordered = data[season]?.ordered ?: continue
+                eps.forEachIndexed { idx, ep ->
+                    val key = season to ep.number
+                    if (!tvEpStills.containsKey(key)) {
+                        ordered.getOrNull(idx)?.takeIf { it.isNotBlank() }?.let { tvEpStills[key] = it }
+                    }
+                }
+            }
+        }
+        // The banner resolves with the title, not the episode list: a movie
+        // has no seasons but still gets its rotating backdrop.
+        LaunchedEffect(m?.uniqueId) {
+            tvBgUrls.clear()
+            tvBgIndex = 0
+            val item = batchItem ?: return@LaunchedEffect
+            Artwork.retryMiss(item)
+            tvBgUrls.addAll(
+                TmdbScreenshots.backdropsFor(item).map { it.replace("/w1280/", "/original/") }
+            )
+        }
+        LaunchedEffect(m?.uniqueId, tvBgUrls.size) {
+            while (tvBgUrls.size > 1) {
+                delay(9_000L)
+                tvBgIndex = (tvBgIndex + 1) % tvBgUrls.size
             }
         }
         // Screenshots ride the same title trigger, not the episode list: a
@@ -4231,33 +4270,11 @@ fun DetailScreen(
                     
                     .onSizeChanged { headerPx = it.height }
             ) {
-                // The sharp art paints HERE only when it is genuinely wide
-                // (a TMDB 16:9 backdrop). A portrait poster sharp-cropped
-                // full-bleed is the beheaded-subject bug from the TV photos,
-                // so poster-only titles leave the hero transparent and read
-                // over the fixed blurred backdrop.
-                if (tvBlurDetail && tvHeroImage.second) {
-                    AsyncImage(
-                        model = tvHeroImage.first,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    // Melt the header's bottom edge into the blur behind it
-                    // instead of ending in a seam: the melt runs to fully
-                    // opaque black at the hero boundary, so only black meets
-                    // the darkened blur below — no sharp-vs-blur colour line.
-                    Box(
-                        Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(
-                                0.45f to Color.Transparent,
-                                0.75f to Color.Black.copy(alpha = 0.55f),
-                                1.0f to Color.Black,
-                            )
-                        )
-                    )
-                }
+                // The fixed cinematic backdrop behind the LazyColumn owns ALL
+                // hero art (see the page Box below): painting it here too put
+                // the same image on screen twice with different treatments —
+                // the duplicate-image seam from the TV photos. The hero stays
+                // transparent so the one backdrop shows through everywhere.
                 // The TV hero artwork is rendered once by the fixed backdrop
                 // behind the LazyColumn. Keeping a second HeroArtwork here caused
                 // the exact duplicate-image seam visible when the episode shelf
@@ -4293,7 +4310,8 @@ fun DetailScreen(
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                                 .verticalScroll(com.hikari.app.ui.components.keptScrollState("detail:$providerId|${mediaId}:tv"))
                         ) {
-                            tvPlayRow(0.dp)
+                            // One action row per page (desktop parity): the
+                            // hero's own row below owns Play/Download/Save.
                             Spacer(Modifier.height(6.dp))
                             Row(
                                 Modifier.fillMaxWidth(),
@@ -4465,6 +4483,7 @@ fun DetailScreen(
                                             ep = ep,
                                             fallbackImage = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
                                             tmdbStill = tvEpStills[ep.season to ep.number],
+                                            tmdbFirst = true,
                                             onClick = { tryPlay(ep) },
                                             onDownload = { tryDownload(ep) },
                                             modifier = Modifier.width((150f * tvEpisodeScale).dp),
@@ -4489,6 +4508,7 @@ fun DetailScreen(
                                         EpisodeBigCard(
                                             ep = ep,
                                             fallbackImage = m?.backdropUrl ?: m?.posterUrl ?: posterUrl,
+                                            tmdbStill = tvEpStills[ep.season to ep.number],
                                             onClick = { tryPlay(ep) },
                                             onDownload = { tryDownload(ep) },
                                             modifier = Modifier.width((300f * tvEpisodeScale).dp),
@@ -4688,15 +4708,29 @@ fun DetailScreen(
 
     Box(Modifier.fillMaxSize()) {
         if (isTvLayout) {
-            // The reference client's header contract, aspect-safe: genuinely
-            // wide art (a TMDB 16:9 backdrop) paints sharp with the triple
-            // gradient; a poster-only title fills blurred. A portrait poster
-            // sharp-cropped full-bleed is what the TV photos proved broken.
-            com.hikari.app.tv.Cs3BackdropArt(
-                model = tvHeroImage.first,
-                wide = tvHeroImage.second,
-                modifier = Modifier.fillMaxSize(),
-            )
+            // ONE image behind the whole page, like the desktop client: the
+            // title's own TMDB backdrops rotate behind every section as the
+            // page scrolls over them. Provider art only when TMDB has
+            // nothing — and it never flashes first: the banner starts on the
+            // background colour and the TMDB art crossfades in.
+            if (tvBgUrls.isNotEmpty()) {
+                androidx.compose.animation.Crossfade(
+                    targetState = tvBgIndex.coerceIn(tvBgUrls.indices),
+                    label = "tvDetailBg",
+                ) { idx ->
+                    com.hikari.app.tv.Cs3BackdropArt(
+                        model = PosterLoader.model(tvBgUrls[idx]),
+                        wide = true,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            } else {
+                com.hikari.app.tv.Cs3BackdropArt(
+                    model = tvHeroImage.first,
+                    wide = tvHeroImage.second && !tvBlurDetail,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
     // The status bar's height, in dp (a composable read, so it is taken here
@@ -4735,7 +4769,9 @@ fun DetailScreen(
                                         bottom = 10.dp,
                                     )
                             ) {
-                                tvPlayRow(8.dp)
+                                // One action row per page (desktop parity):
+                                // the hero's row owns Play/Download/Save, so
+                                // this section starts at the season header.
                                 // The reference season header, one-to-one:
                                 // Season N + episode count left; Mark Season
                                 // Watched, the anti-spoiler switch, Sort and
@@ -8634,7 +8670,9 @@ private fun TvCs3EpisodeCard(
     val duration = mins?.let { if (it >= 60) (it / 60).toString() + "h " + (it % 60).toString() + "m" else it.toString() + "m" }
     val dateText = ep.released?.trim()?.takeIf { it.isNotBlank() }?.take(10)
     Cs3EpisodeCard(
-        art = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() }),
+        // The desktop order: the TMDB still first, the episode's own
+        // provider thumbnail only as the fallback.
+        art = PosterLoader.model(tmdbStill?.takeIf { it.isNotBlank() } ?: ep.image?.takeIf { it.isNotBlank() }),
         fallbackBlur = PosterLoader.model(fallbackBlur),
         code = code,
         title = title,
@@ -8659,6 +8697,9 @@ private fun EpisodePosterCard(
     /** TMDB still for this episode (TV only): fills the frame when the
      *  provider shipped no thumbnail of its own. Null keeps the old art. */
     tmdbStill: String? = null,
+    /** Television: the TMDB still wins over the provider thumbnail (desktop
+     *  parity). Phones keep the old provider-first order. */
+    tmdbFirst: Boolean = false,
     onClick: () -> Unit,
     onDownload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -8707,7 +8748,10 @@ private fun EpisodePosterCard(
                     ) else Modifier
                 )
         ) {
-            val thumb = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() } ?: fallbackImage)
+            val thumb = PosterLoader.model(
+                if (tmdbFirst) tmdbStill?.takeIf { it.isNotBlank() } ?: ep.image?.takeIf { it.isNotBlank() } ?: fallbackImage
+                else ep.image?.takeIf { it.isNotBlank() } ?: tmdbStill?.takeIf { it.isNotBlank() } ?: fallbackImage
+            )
             if (thumb != null) {
                 AsyncImage(
                     model = thumb,
@@ -8857,6 +8901,9 @@ private fun isEpisodeUnaired(released: String?): Boolean {
 private fun EpisodeBigCard(
     ep: Episode,
     fallbackImage: String? = null,
+    /** TMDB still for this episode (TV only; desktop parity puts the still
+     *  first). Null keeps the old provider-first art. */
+    tmdbStill: String? = null,
     onClick: () -> Unit,
     onDownload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -8891,7 +8938,7 @@ private fun EpisodeBigCard(
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            val thumb = PosterLoader.model(ep.image?.takeIf { it.isNotBlank() } ?: fallbackImage)
+            val thumb = PosterLoader.model(tmdbStill?.takeIf { it.isNotBlank() } ?: ep.image?.takeIf { it.isNotBlank() } ?: fallbackImage)
             if (thumb != null) {
                 AsyncImage(
                     model = thumb,

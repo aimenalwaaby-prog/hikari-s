@@ -442,9 +442,9 @@ fun Cs3HeroDots(
  * the bold title, a two-line synopsis and duration — over a dark card with a
  * hairline edge. Anti-spoiler blurs the still and masks the text.
  *
- * [art] is the episode's own thumbnail (provider) or its TMDB still, both
- * landscape; [fallbackBlur] is the show art that fills blurred when there is
- * no still at all — a card never wears a sharp-cropped poster.
+ * [art] is the episode's TMDB still first, then its own thumbnail (provider),
+ * both landscape; [fallbackBlur] is the show art that fills sharp when there
+ * is no still at all (desktop parity) — a card never wears a blank box.
  */
 /**
  * The reference's episode card, one-to-one: a single 16:13.5 art box with
@@ -492,18 +492,14 @@ fun Cs3EpisodeCard(
                     .then(if (hideSpoilers) Modifier.blur(14.dp) else Modifier),
             )
         } else if (fallbackBlur != null) {
+            // The show's own art as a last resort, painted SHARP like the
+            // desktop client — a blurred copy of the detail banner behind
+            // every card is what read as the same image repeating itself.
             PosterImage(
                 model = fallbackBlur,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(18.dp, BlurredEdgeTreatment.Unbounded),
-            )
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f))
+                modifier = Modifier.fillMaxSize(),
             )
         }
         // Anti-spoiler veil + pill.

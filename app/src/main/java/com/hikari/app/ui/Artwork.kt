@@ -166,6 +166,36 @@ object Artwork {
      */
     fun tvHeroModel(item: MediaItem): Pair<Any?, Boolean> = heroModel(item)
 
+    /**
+     * Re-runs the artwork lookup for [item] when the cached answer is a MISS.
+     *
+     * A miss is cached for days (see [MISS_TTL_MS]), so a title the matcher
+     * could not resolve in an older build keeps showing provider art long
+     * after the matcher learned it — the television detail page proved it:
+     * TMDB ratings and overview (resolved fresh on every open) showed while
+     * the banner stayed on the provider image (a stale miss). Television
+     * calls this on open so a healed title picks up its TMDB art by itself.
+     *
+     * Only a FULL miss retries: a title with a real poster but no backdrop
+     * keeps its answer, otherwise every open would re-ask the API for titles
+     * TMDB genuinely has no backdrop for. And a miss fresher than a minute
+     * stays cached (a dead network on open must not re-fire on every
+     * recompose) — anything older re-asks once, single-flighted like the
+     * normal lookup.
+     */
+    fun retryMiss(item: MediaItem) {
+        val key = keyOf(item) ?: return
+        loadOnce()
+        val e = memory[key]
+        if (e != null) {
+            if (!e.poster.isNullOrBlank() || !e.backdrop.isNullOrBlank()) return
+            if (System.currentTimeMillis() - e.at < 60_000L) return
+            enqueue(key, item)
+            return
+        }
+        enqueue(key, item)
+    }
+
     private fun lookup(item: MediaItem, pick: (Entry) -> String?): String? {
         // Snapshot read: repaints the calling cell when a lookup completes.
         revision.value

@@ -40,8 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -54,6 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import com.hikari.app.data.MediaItem
 import com.hikari.app.i18n.tr
 import com.hikari.app.ui.Artwork
@@ -91,6 +91,26 @@ fun TvCinematicHero(
     // otherwise. One lookup per hero title, cached for the hero's lifetime —
     // a miss simply keeps the text title, so this can only ever add.
     val heroLogos = remember(items) { mutableStateMapOf<String, String?>() }
+    // TMDB owns the hero art (desktop parity): the title's own backdrop at full
+    // file resolution, warmed for the whole rotation up front so stepping to
+    // the next title paints high-quality art instead of flashing provider
+    // art first. A title TMDB has nothing for keeps its provider art. A miss
+    // is retried on the next rotation (see Artwork.retryMiss): a null entry
+    // simply stays resolvable.
+    val heroTmdb = remember(items) { mutableStateMapOf<String, String>() }
+    androidx.compose.runtime.LaunchedEffect(items) {
+        items.take(8).map { heroItem ->
+            async {
+                if (!heroTmdb.containsKey(heroItem.uniqueId)) {
+                    runCatching {
+                        com.hikari.app.data.TmdbScreenshots.backdropsFor(heroItem).firstOrNull()
+                    }.getOrNull()?.takeIf { it.isNotBlank() }?.let {
+                        heroTmdb[heroItem.uniqueId] = it
+                    }
+                }
+            }
+        }.awaitAll()
+    }
     val heroId = item.uniqueId
     androidx.compose.runtime.LaunchedEffect(heroId) {
         if (!heroLogos.containsKey(heroId)) {
@@ -146,26 +166,26 @@ fun TvCinematicHero(
                 targetState = item.uniqueId,
                 label = "tvHeroArt",
             ) { id ->
-                // TMDB first, like the TV detail page (see Artwork.tvHeroModel):
-                // the hero wears high-quality TMDB backdrops. Aspect-safe like
-                // the reference: genuinely wide art paints sharp; a
-                // poster-only title fills BLURRED (a sharp-cropped poster is
-                // what beheaded subjects on the TV hero).
-                val fadeArt = remember(id) {
-                    Artwork.tvHeroModel(items.firstOrNull { it.uniqueId == id } ?: item)
+                // TMDB owns the hero (desktop parity): the title's own
+                // backdrop, full file, painted SHARP — never blurred. The old
+                // blurred fill is what read as low quality on every TV photo.
+                // A title TMDB has nothing for keeps its provider art, sharp
+                // and top-anchored like the desktop banner.
+                val tmdbArt = heroTmdb[id]?.replace("/w1280/", "/original/")
+                val fadeArt = if (tmdbArt != null) {
+                    com.hikari.app.ui.PosterLoader.model(tmdbArt) to true
+                } else {
+                    remember(id) {
+                        Artwork.tvHeroModel(items.firstOrNull { it.uniqueId == id } ?: item)
+                    }
                 }
                 PosterImage(
                     model = fadeArt.first,
                     contentDescription = item.title,
-                    modifier = Modifier.fillMaxSize().then(
-                        if (!fadeArt.second) Modifier.blur(20.dp, BlurredEdgeTreatment.Unbounded) else Modifier
-                    ),
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                     alignment = com.hikari.app.ui.Artwork.CINEMA_ALIGNMENT,
                 )
-                if (!fadeArt.second && fadeArt.first != null) {
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.32f)))
-                }
             }
             Box(
                 Modifier
