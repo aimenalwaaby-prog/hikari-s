@@ -238,9 +238,9 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
         // "Finding servers (i/N)…" line then never advances, Cancel is the
         // only way out, and the queue behind it (download-all) silently
         // stops after the episodes that already resolved.
-        return withTimeoutOrNull(30_000L) {
+        return (withTimeoutOrNull(30_000L) {
             runCatching { repo.streamsFor(item, episode) }.getOrDefault(emptyList())
-        }.getOrDefault(emptyList()).filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
+        } ?: emptyList()).filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
     }
     suspend fun enqueueBatch(ctx: android.content.Context, item: MediaItem, episodes: List<Episode>, chosen: StreamSource): Int {
         var done = 0
@@ -6104,7 +6104,7 @@ fun DetailScreen(
             // TMDB (AniList/Bangumi for anime) first, like every hero — the
             // provider backdrop alone left this card black for titles whose
             // extension ships no art.
-            image = (if (meta != null) Artwork.backdrop(meta) else null)?.takeIf { it.isNotBlank() }
+            image = (m?.let { Artwork.backdrop(it) })?.takeIf { it.isNotBlank() }
                 ?: (m?.backdropUrl?.takeIf { it.isNotBlank() }) ?: posterUrl,
             // The title's own wordmark, drawn instead of the text title when the
             // setting is on and this title has one (see LoadingTitleBlock).
