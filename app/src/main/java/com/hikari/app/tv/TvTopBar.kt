@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
@@ -43,7 +42,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -66,7 +67,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Switch
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import com.hikari.app.data.ProviderType
 import com.hikari.app.data.Collection
 import com.hikari.app.providers.ContentProvider
@@ -322,20 +326,20 @@ fun TvProviderIcon(
             modifier = modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(Color.White),
         )
     } else {
         Box(
             modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(Cs3.accent.copy(alpha = 0.18f)),
+                .background(Cs3.accent.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 name?.trim()?.firstOrNull()?.uppercase() ?: "•",
-                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
                 color = Cs3.accent,
             )
         }
@@ -389,7 +393,7 @@ fun TvSelectProviderDialog(
             tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .widthIn(max = 960.dp),
+                .widthIn(max = 760.dp),
         ) {
             Column(
                 Modifier
@@ -411,7 +415,7 @@ fun TvSelectProviderDialog(
                     val allSelected = selection.isEmpty()
                     Surface(
                         onClick = onPickAll,
-                        shape = RoundedCornerShape(TvDesktop.CornerCard),
+                        shape = RoundedCornerShape(10.dp),
                         color = if (allSelected) Cs3.accent.copy(alpha = 0.28f)
                         else TvDesktop.SurfaceCard,
                         modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll)
@@ -419,39 +423,20 @@ fun TvSelectProviderDialog(
                                 1.dp,
                                 if (allSelected) Cs3.accent
                                 else TvDesktop.GlassEdge,
-                                RoundedCornerShape(TvDesktop.CornerCard),
+                                RoundedCornerShape(10.dp),
                             ),
                     ) {
-                        Row(
-                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Filled.Language,
-                                contentDescription = null,
-                                tint = if (allSelected) Cs3.accent
-                                else TvDesktop.TextMuted,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                tr("All Plugins (Global)"),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TvDesktop.TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (allSelected) {
-                                Spacer(Modifier.width(4.dp))
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = null,
-                                    tint = Cs3.accent,
-                                    modifier = Modifier.size(14.dp),
-                                )
-                            }
-                        }
+                        // Reference pill: the label alone, no icons.
+                        Text(
+                            tr("All Plugins (Global)"),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (allSelected) Cs3.accent
+                            else TvDesktop.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
                     }
                 }
                 Text(
@@ -495,8 +480,10 @@ fun TvSelectProviderDialog(
                             }
                         }
                     } else null,
-                    shape = RoundedCornerShape(TvDesktop.CornerCard),
-                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
                 )
                 Spacer(Modifier.height(8.dp))
                 LazyVerticalGrid(
@@ -581,13 +568,34 @@ fun TvManageFeedDialog(
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
     var typeFilter by remember { mutableStateOf(setOf<String>()) }
+    // Per-provider catalog counts for the "N catalogs" subtitles (reference
+    // rows name the count, not the engine). Loaded concurrently off the tap
+    // path; a provider that does not answer in time keeps its type subtitle.
+    val catalogCounts = remember { mutableStateMapOf<String, Int>() }
+    LaunchedEffect(providers) {
+        providers.forEach { p ->
+            launch {
+                val n = withTimeoutOrNull(8_000L) {
+                    runCatching { p.catalogs().size }.getOrDefault(0)
+                }
+                if (n != null) catalogCounts[p.config.id] = n
+            }
+        }
+    }
     fun matches(p: ContentProvider): Boolean {
         if (typeFilter.isEmpty()) return true
         return tvFeedCats(p.config.type).any { it in typeFilter }
     }
     val feedCats = listOf("Movies", "Series", "Anime", "Docs", "Live")
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            // Reference guard: closing the single screen while several are
+            // active keeps the top one rather than the multi set.
+            if (!isAdvancedMode && working.value.size > 1) {
+                val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
+                if (top != null) onSave(listOf(top)) else onDismiss()
+            } else onDismiss()
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
@@ -711,8 +719,11 @@ fun TvManageFeedDialog(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
+                                        // Reference names the catalog count, not the engine.
+                                        val singleCount = catalogCounts[p.config.id]
                                         Text(
-                                            tvProviderSubtitle(p),
+                                            if (singleCount != null) "$singleCount catalogs"
+                                            else tvProviderSubtitle(p),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = TvDesktop.TextMuted,
                                             maxLines = 1,
@@ -763,7 +774,12 @@ fun TvManageFeedDialog(
                                                     Spacer(modifier = Modifier.width(16.dp))
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(p.config.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                        Text(tvProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                        val activeCount = catalogCounts[id]
+                                                        Text(
+                                                            if (activeCount != null) "Catalogs: $activeCount active"
+                                                            else tvProviderSubtitle(p),
+                                                            style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis
+                                                        )
                                                     }
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
@@ -839,10 +855,15 @@ fun TvManageFeedDialog(
                                                 Spacer(modifier = Modifier.width(12.dp))
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(p.config.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                    Text(tvProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    val availCount = catalogCounts[p.config.id]
+                                                    Text(
+                                                        if (availCount != null) "$availCount catalogs available"
+                                                        else tvProviderSubtitle(p),
+                                                        style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
-                                                IconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }) {
-                                                    Icon(Icons.Filled.Add, contentDescription = tr("Add"), tint = Cs3.accent, modifier = Modifier.size(20.dp))
+                                                FilledTonalIconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }) {
+                                                    Icon(Icons.Filled.Add, contentDescription = tr("Add"))
                                                 }
                                             }
                                         }
@@ -887,7 +908,7 @@ private fun tvProviderSubtitle(p: ContentProvider): String {
 }
 
 @Composable
-private fun TvProviderCard(
+fun TvProviderCard(
     name: String,
     supporting: String?,
     selected: Boolean,
@@ -896,18 +917,20 @@ private fun TvProviderCard(
     onHold: (() -> Unit)? = null,
     /** Duplicate-name tag ("(repo)") — the reference disambiguates twins. */
     tag: String? = null,
+    /** Phone picker actions (pin, pack caret) — null on TV, which has none. */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    val shape = RoundedCornerShape(TvDesktop.CornerLarge)
+    val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(
-                if (selected) Cs3.accent.copy(alpha = 0.22f)
-                else TvDesktop.SurfaceCard
+                if (selected) Cs3.accent.copy(alpha = 0.28f)
+                else TvDesktop.SurfaceCard.copy(alpha = 0.45f)
             )
             .border(
-                1.5.dp,
+                1.dp,
                 if (selected) Cs3.accent
                 else TvDesktop.GlassEdge,
                 shape,
@@ -953,6 +976,10 @@ private fun TvProviderCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(2.dp))
+            trailing()
         }
     }
 }

@@ -128,6 +128,15 @@ fun MangaDetailScreen(
 
     val rev = rememberMangaRevision()
     val progress = remember(rev) { MangaStore.progressFor(key) }
+    // Per-chapter read marks for the rows below + the manga-level badge:
+    // recomputed with the chapters, so marks landed by the reader (which
+    // pings the store and bumps rev) redraw without a reload.
+    val readMarks = remember(rev, chapters) {
+        chapters.associate { it.url to MangaStore.chapterReadState(key, it.url) }
+    }
+    val mangaRead = remember(readMarks) {
+        MangaStore.mangaReadState(key, chapters.map { it.url })
+    }
     LaunchedEffect(rev) { followed = MangaStore.isFollowed(key) }
 
     // ---- Verification, right where the chapters are -------------------------
@@ -363,6 +372,25 @@ fun MangaDetailScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp),
                         )
+                        // Manga-level read mark: Reading while any chapter is
+                        // open-or-done, Completed when every chapter is done.
+                        if (mangaRead != com.hikari.app.manga.MangaReadState.NONE) {
+                            Spacer(Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (mangaRead == com.hikari.app.manga.MangaReadState.COMPLETED)
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                            ) {
+                                Text(
+                                    if (mangaRead == com.hikari.app.manga.MangaReadState.COMPLETED) tr("Completed") else tr("Reading"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilledTonalButton(onClick = {
@@ -516,6 +544,7 @@ fun MangaDetailScreen(
                     chapter = chapter,
                     isCurrent = progress?.chapterUrl == chapter.url,
                     pageLabel = progress?.takeIf { it.chapterUrl == chapter.url }?.pageLabel,
+                    readState = readMarks[chapter.url],
                     onClick = {
                         openChapter(nav, providerId, mangaUrl, title, posterUrl, chapter)
                     },
@@ -603,12 +632,13 @@ private fun GenreChip(
     }
 }
 
-/** One chapter: its name, its scanlator/date, and where the reader is in it. */
+/** One chapter: its name, its scanlator/date, where the reader is in it, and its read mark. */
 @Composable
 private fun ChapterRow(
     chapter: MangaChapter,
     isCurrent: Boolean,
     pageLabel: String?,
+    readState: com.hikari.app.manga.MangaChapterRead?,
     onClick: () -> Unit,
 ) {
     Row(
@@ -652,6 +682,26 @@ private fun ChapterRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // The chapter's own read mark, like the video rows' Watched/Watching
+        // pills: finished chapters read Completed, opened ones Reading.
+        if (readState != null) {
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (readState.finished)
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            ) {
+                Text(
+                    if (readState.finished) tr("Completed") else tr("Reading"),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
         }

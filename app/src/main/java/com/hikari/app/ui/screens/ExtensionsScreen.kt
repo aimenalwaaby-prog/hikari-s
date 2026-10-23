@@ -3759,6 +3759,152 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Repairs every installed extension whose file went missing — the state a
+     * backup restore leaves behind (the registry is restored, the files are
+     * not downloaded until the background fetch finishes, and a dead host
+     * never finishes). Each missing provider is matched back to its repo
+     * entry by source URL and re-installed through the same per-kind path
+     * the repo's own Install button uses, with progress and a named summary.
+     */
+    fun repairMissingExtensions() {
+        if (_installRunning.value) return
+        val gen = ++installGeneration
+        installJob = startBackground {
+            installCancelled = false
+            _installRunning.value = true
+            try {
+                clearStatus()
+                val missing = manager.providers.value.filter { isMissingFile(it) }
+                if (missing.isEmpty()) {
+                    setSuccess("No missing extension files — everything is installed")
+                    return@startBackground
+                }
+                var ok = 0
+                val failed = mutableListOf<String>()
+                for ((i, p) in missing.withIndex()) {
+                    if (installCancelled) break
+                    _busyMsg.value = I18n.t("Repairing %s (%s/%s)…")
+                        .replaceFirst("%s", p.config.name)
+                        .replaceFirst("%s", (i + 1).toString())
+                        .replaceFirst("%s", missing.size.toString())
+                    val src = providerSourceUrl(p)
+                    val plugin = src?.let { matchRepoPlugin(it) }
+                    val r = if (plugin == null) null
+                    else runCatching { installMatched(p, plugin) }.getOrNull()
+                    if (r != null && r.isSuccess) ok++ else failed.add(p.config.name)
+                }
+                // The burst has settled: rebuild once, here, so the list the
+                // user is looking at is right the moment the run reports done.
+                refreshProvidersNow()
+                val n = missing.size
+                when {
+                    installCancelled ->
+                        setSuccess("Stopped — repaired $ok of $n")
+                    failed.isEmpty() -> setSuccess("Repaired $ok of $n extensions")
+                    else -> setSuccess(
+                        "Repaired $ok of $n — still missing: " +
+                            failed.take(3).joinToString(", ") +
+                            (if (failed.size > 3) "…" else "") +
+                            " (their repos may be unreachable)"
+                    )
+                }
+            } finally {
+                if (installGeneration == gen) {
+                    _installRunning.value = false
+                    _installStopping.value = false
+                }
+            }
+        }
+    }
+
+    /** Re-installs one missing-file extension from its repo entry. */
+    fun reinstallProvider(p: ContentProvider) {
+        if (_installRunning.value) return
+        installJob = startBackground {
+            installCancelled = false
+            _busyMsg.value = I18n.t("Reinstalling %s…").replace("%s", p.config.name)
+            clearStatus()
+            try {
+                val src = providerSourceUrl(p)
+                val plugin = src?.let { matchRepoPlugin(it) }
+                if (plugin == null) {
+                    setError(
+                        I18n.t("No download link for %s — add its repo again, then reinstall.")
+                            .replace("%s", p.config.name)
+                    )
+                    return@startBackground
+                }
+                val r = runCatching {
+                    withTimeoutOrNull(300_000) { installMatched(p, plugin) }
+                }.getOrNull()
+                if (r != null && r.isSuccess) {
+                    refreshProvidersNow()
+                    setSuccess(I18n.t("Reinstalled %s").replace("%s", p.config.name))
+                } else {
+                    setError(I18n.t("Reinstall failed — check your connection and try again."))
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                setError(e.message ?: "Reinstall failed")
+            }
+        }
+    }
+
+    /** True when this installed provider's file is gone (see [pluginStatus]). */
+    fun isMissing(p: ContentProvider): Boolean = isMissingFile(p)
+
+    private fun missingFileProviders(): List<ContentProvider> =
+        manager.providers.value.filter { isMissingFile(it) }
+
+    /** The install source URL recorded for this provider (see [reloadInstalled]). */
+    private fun providerSourceUrl(p: ContentProvider): String? {
+        val c = p.config
+        val raw = when (c.type) {
+            ProviderType.HIKARI -> c.extra?.substringBeforeLast('|')
+            ProviderType.CS3, ProviderType.NUVIO, ProviderType.SKYSTREAM,
+            ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.ANYMEX_MANGA,
+            ProviderType.VEGA, ProviderType.ZANGETSU, ProviderType.SORA,
+            ProviderType.ANYMEX, ProviderType.KOTATSU -> c.extra ?: c.url
+            else -> null
+        }.orEmpty()
+        return raw.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+    }
+
+    /** The repo entry this installed source came from, by URL spelling. */
+    private fun matchRepoPlugin(sourceUrl: String): Cs3RepoPlugin? {
+        val want = SourceUrls.matchKeys(sourceUrl)
+        if (want.isEmpty()) return null
+        for (plugins in pluginsByRepo.value.values) {
+            for (pl in plugins) {
+                if (isDartOnlyPlugin(pl)) continue
+                if (SourceUrls.matchKeys(pl.url).any { it in want }) return pl
+            }
+        }
+        return null
+    }
+
+    private suspend fun installMatched(p: ContentProvider, plugin: Cs3RepoPlugin): Result<Int> {
+        return withTimeoutOrNull(300_000) {
+            when (p.config.type) {
+                ProviderType.NUVIO -> installNuvioPlugin(plugin)
+                ProviderType.HIKARI -> installHikiPlugin(plugin)
+                ProviderType.CS3 -> installCs3Plugin(plugin)
+                ProviderType.SKYSTREAM -> installSkyStreamPlugin(plugin)
+                ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.ANYMEX_MANGA ->
+                    installAniyomiPlugin(plugin)
+                ProviderType.VEGA -> installVegaPlugin(plugin)
+                ProviderType.ZANGETSU -> installZangetsuPlugin(plugin)
+                ProviderType.LNREADER -> installLnReaderPlugin(plugin)
+                ProviderType.SORA -> installScriptPlugin(plugin, RepoKind.SORA)
+                ProviderType.ANYMEX -> installScriptPlugin(plugin, RepoKind.ANYMEX)
+                ProviderType.KOTATSU -> installKotatsuPlugin(plugin)
+                else -> Result.failure(Exception("Unsupported extension type"))
+            }
+        } ?: Result.failure(Exception("Timed out"))
+    }
+
+    /**
      * Writes the 18+ flags the loaded repo listings declare onto the rows that
      * were installed from them, and rebuilds the provider list if anything
      * changed.
@@ -4552,6 +4698,8 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             onToggleProvider = { id, enabled -> scope.launch { vm.toggle(id, enabled) } },
             onDeleteProvider = { id -> scope.launch { vm.remove(id) } },
             onOpenSettings = { prov -> openProviderSettings(prov) },
+            reinstallFor = { p -> vm.reinstallProvider(p) },
+            onRepairAllMissing = { vm.repairMissingExtensions() },
         )
         sourcesOpen -> SourcesOverviewView(
             repos = repos,
@@ -4591,6 +4739,8 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                 vm.runUninstall("Removing repo…", "Removed repo") { vm.removeCs3Repo(url) }
             },
             onOpenSettings = { openProviderSettings(it) },
+            reinstallFor = { p -> vm.reinstallProvider(p) },
+            onRepairAllMissing = { vm.repairMissingExtensions() },
             nav = nav,
         )
         else -> RepoBrowserView(
@@ -4693,6 +4843,8 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             onDeleteProvider = { id -> scope.launch { vm.remove(id) } },
             onToggleProvider = { id, enabled -> scope.launch { vm.toggle(id, enabled) } },
             onOpenSettings = { openProviderSettings(it) },
+            reinstallFor = { p -> vm.reinstallProvider(p) },
+            onRepairAllMissing = { vm.repairMissingExtensions() },
         )
     }
     }
@@ -5553,6 +5705,47 @@ private fun SectionHeader(title: String) {
     )
 }
 
+/**
+ * A section header that also offers "Repair all" when extensions with missing
+ * files are on screen — the one-tap answer to a restore that left every row
+ * saying "reinstall this extension". Hidden entirely when there is nothing
+ * missing or no repair action was supplied.
+ */
+@Composable
+private fun RepairSectionHeader(
+    title: String,
+    missingCount: Int,
+    onRepairAll: (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (com.hikari.app.tv.TvMode.current()) title else title.uppercase(),
+            style = if (com.hikari.app.tv.TvMode.current()) MaterialTheme.typography.titleLarge
+            else MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.2.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (onRepairAll != null && missingCount > 0) {
+            TextButton(onClick = onRepairAll) {
+                Icon(
+                    Icons.Filled.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(tr("Repair all"))
+            }
+        }
+    }
+}
+
 @Composable
 private fun SourceDivider() {
     HorizontalDivider(
@@ -5670,6 +5863,10 @@ private fun RepoBrowserView(
     testStatus: Map<String, ProviderTest> = emptyMap(),
     onTestInstalled: (String) -> Unit = {},
     onTestDownload: (Cs3RepoPlugin) -> Unit = {},
+    /** Re-installs one missing-file extension (repair). Null hides the button. */
+    reinstallFor: ((ContentProvider) -> Unit)? = null,
+    /** Repairs every missing-file extension at once. Null hides the button. */
+    onRepairAllMissing: (() -> Unit)? = null,
 ) {
     // Search across EVERYTHING on this screen: installed extensions (with
     // uninstall/toggle) and every added repo's plugin list (with instant
@@ -5961,6 +6158,8 @@ private fun RepoBrowserView(
                 testStatus = testStatus,
                 onTestInstalled = onTestInstalled,
                 onTestDownload = onTestDownload,
+                reinstallFor = reinstallFor,
+                onRepairAllMissing = onRepairAllMissing,
                 tv = tvBrowser,
             )
             return@LazyColumn
@@ -6264,6 +6463,10 @@ private fun LazyListScope.extensionsSearchItems(
     testStatus: Map<String, ProviderTest> = emptyMap(),
     onTestInstalled: (String) -> Unit = {},
     onTestDownload: (Cs3RepoPlugin) -> Unit = {},
+    /** Re-installs one missing-file extension (repair). Null hides the button. */
+    reinstallFor: ((ContentProvider) -> Unit)? = null,
+    /** Repairs every missing-file extension at once. Null hides the button. */
+    onRepairAllMissing: (() -> Unit)? = null,
     /** The reference 2-per-row grid instead of phone rows. Passed in (rather
      *  than read here) because a LazyListScope cannot call TvMode itself. */
     tv: Boolean = false,
@@ -6311,7 +6514,14 @@ private fun LazyListScope.extensionsSearchItems(
         // extension's own row — see [ProviderPacks]), so the count is of
         // EXTENSIONS, not of stored sources.
         val installedRecords = ProviderPacks.rows(installedMatches)
-        item { SectionHeader("Installed · ${installedRecords.size}") }
+        val missingHere = installedRecords.count { rec -> rec.members.any { isMissingFile(it) } }
+        item {
+            RepairSectionHeader(
+                title = "Installed · ${installedRecords.size}",
+                missingCount = missingHere,
+                onRepairAll = onRepairAllMissing,
+            )
+        }
         items(installedRecords, key = { "inst-" + it.key }) { pack ->
             ProviderRecordRow(
                 pack = pack,
@@ -6323,6 +6533,7 @@ private fun LazyListScope.extensionsSearchItems(
                 settingsFor = { p ->
                     if (hasSettingsScreen(p, cs3SettingsIds)) { { onOpenSettings(p) } } else null
                 },
+                reinstallFor = reinstallFor,
             )
         }
     }
@@ -7366,6 +7577,8 @@ private fun ProviderCard(
     onVerify: (() -> Unit)? = null,
     updateAvailable: Boolean = false,
     onUpdate: (() -> Unit)? = null,
+    /** Re-installs a missing-file extension (see repairMissingExtensions). Null hides it. */
+    onReinstall: (() -> Unit)? = null,
     /** The name to draw instead of the provider's own — used by the extension
      *  row a [com.hikari.app.ui.ProviderPack] draws (its sources all share one
      *  name, and repeating it nine times is the bug being fixed). */
@@ -7516,6 +7729,15 @@ private fun ProviderCard(
                     )
                 }
             }
+            if (onReinstall != null) {
+                IconButton(onClick = onReinstall, modifier = Modifier.tvPress(previewPass = true, onClick = onReinstall)) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = tr("Reinstall extension"),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
             if (onTest != null) {
                 IconButton(onClick = onTest, enabled = !testing, modifier = Modifier.tvPress(previewPass = true, enabled = !testing, onClick = onTest)) {
                     Icon(
@@ -7580,6 +7802,8 @@ private fun ProviderRecordRow(
     onUpdateProvider: ((ContentProvider) -> Unit)? = null,
     testFor: ((ContentProvider) -> ProviderTest?)? = null,
     onTest: ((ContentProvider) -> Unit)? = null,
+    /** Re-installs one missing-file extension (repair). Null hides the button. */
+    reinstallFor: ((ContentProvider) -> Unit)? = null,
 ) {
     // Opened state is remembered per extension, so a list that re-sorts under
     // the row (a search being typed, a provider being installed) does not fold
@@ -7615,6 +7839,11 @@ private fun ProviderRecordRow(
         onToggleExpand = { open = !open },
         updateAvailable = offersUpdate && pack.members.any { m -> updateFlagOf(m) },
         onUpdate = updateAll,
+        // A pack row repairs its missing members; a single row repairs itself.
+        onReinstall = reinstallFor?.let { reinstall ->
+            val missing = pack.members.filter { isMissingFile(it) }
+            if (missing.isEmpty()) null else ({ missing.forEach { m -> reinstall(m) } })
+        },
     )
     if (pack.isPack && open) {
         pack.members.forEachIndexed { i, member ->
@@ -7633,6 +7862,7 @@ private fun ProviderRecordRow(
                 indent = true,
                 updateAvailable = offersUpdate && updateFlagOf(member),
                 onUpdate = if (onUpdateProvider == null) null else ({ updateOf(member) }),
+                onReinstall = if (reinstallFor != null && isMissingFile(member)) ({ reinstallFor(member) }) else null,
             )
         }
     }
@@ -8315,6 +8545,22 @@ private fun repoPluginSettingsTarget(
         val source = if (p.config.type == ProviderType.HIKARI) extra.substringBeforeLast('|') else extra
         if (SourceUrls.matchKeys(source).none { it in wanted }) return@firstOrNull false
         hasSettingsScreen(p, cs3SettingsIds)
+    }
+}
+
+/** True when the row's status would be a missing-file line (see [pluginStatus]). */
+private fun isMissingFile(p: ContentProvider): Boolean {
+    val c = p.config
+    return when (c.type) {
+        ProviderType.NUVIO -> com.hikari.app.nuvio.NuvioPluginManager.fileMissing(c)
+        ProviderType.SKYSTREAM -> com.hikari.app.skystream.SkyStreamPluginManager.fileMissing(c)
+        // Same split as [pluginStatus]: MANGA checks the manga store, every
+        // other APK kind checks the Aniyomi store.
+        ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.ANYMEX_MANGA ->
+            if (c.type == ProviderType.MANGA) com.hikari.app.manga.MangaExtensionManager.fileMissing(c)
+            else com.hikari.app.aniyomi.AniyomiExtensionManager.fileMissing(c)
+        ProviderType.CS3 -> !java.io.File(c.url).exists()
+        else -> false
     }
 }
 
@@ -9033,6 +9279,10 @@ private fun SourcesOverviewView(
     onRefreshRepo: (Cs3Repo) -> Unit,
     onRemoveRepo: (String) -> Unit,
     onOpenSettings: (ContentProvider) -> Unit,
+    /** Re-installs one missing-file extension (repair). Null hides the button. */
+    reinstallFor: ((ContentProvider) -> Unit)? = null,
+    /** Repairs every missing-file extension at once. Null hides the button. */
+    onRepairAllMissing: (() -> Unit)? = null,
     nav: NavHostController? = null,
 ) {
     var extFilter by remember { mutableStateOf("") }
@@ -9300,7 +9550,14 @@ private fun SourcesOverviewView(
                     onSettings = { onOpenSettings(p) }
                 )
             }
-            item { SectionHeader("Installed extensions") }
+            item {
+                val missingHere = installedPacks.count { rec -> rec.members.any { isMissingFile(it) } }
+                RepairSectionHeader(
+                    title = "Installed extensions",
+                    missingCount = missingHere,
+                    onRepairAll = onRepairAllMissing,
+                )
+            }
             item {
                 GlassSearchField(
                     value = extFilter,
@@ -9344,6 +9601,7 @@ private fun SourcesOverviewView(
                             else -> null
                         }
                     },
+                    reinstallFor = reinstallFor,
                 )
             }
         }
@@ -9657,6 +9915,10 @@ private fun InstalledExtensionsView(
      *  Extensions screen's `openProviderSettings`), so one place decides what
      *  "settings" means for every engine. */
     onOpenSettings: (ContentProvider) -> Unit = {},
+    /** Re-installs one missing-file extension (repair). Null hides the button. */
+    reinstallFor: ((ContentProvider) -> Unit)? = null,
+    /** Repairs every missing-file extension at once. Null hides the button. */
+    onRepairAllMissing: (() -> Unit)? = null,
     testStatus: Map<String, ProviderTest> = emptyMap(),
     onTest: (String) -> Unit = {},
 ) {
@@ -9701,6 +9963,18 @@ private fun InstalledExtensionsView(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+            val missingHere = providers.count { isMissingFile(it) }
+            if (onRepairAllMissing != null && missingHere > 0) {
+                TextButton(onClick = onRepairAllMissing) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(tr("Repair all"))
+                }
             }
         }
         HorizontalDivider()
@@ -9792,6 +10066,7 @@ private fun InstalledExtensionsView(
                     onUpdateProvider = { p -> onUpdateProvider(p) },
                     testFor = { p -> testStatus["inst::" + p.config.id] },
                     onTest = { p -> onTest(p.config.id) },
+                    reinstallFor = reinstallFor,
                 )
             }
         }

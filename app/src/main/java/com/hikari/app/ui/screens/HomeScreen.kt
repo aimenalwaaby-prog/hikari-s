@@ -30,12 +30,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -64,18 +67,17 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -99,6 +101,8 @@ import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -133,6 +137,8 @@ import com.hikari.app.tv.TvHomeHeaderBar
 import com.hikari.app.tv.TvManageFeedDialog
 import com.hikari.app.tv.TvMode
 import com.hikari.app.tv.TvProfileMenuDialog
+import com.hikari.app.tv.TvProviderCard
+import com.hikari.app.tv.TvProviderIcon
 import com.hikari.app.tv.TvSelectProviderDialog
 import com.hikari.app.tv.TvUi
 import com.hikari.app.ui.Artwork
@@ -1980,127 +1986,138 @@ internal fun ProviderPickerSheet(
         )
     }
 
-    // Minimal, list-first: a heading, a flat search field, the chip row, then
-    // plain rows separated by hairlines (the glass cards are gone — a long list
-    // of nearly identical names read as a wall of glass). Opens fully expanded
-    // so the whole list is reachable without a drag nobody knows about.
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    tr("Choose an extension"),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                // The Done button sits ABOVE the list ("add done button above
-                // in provider selection box"), which is where a thumb expects it
-                // and the only place a long list cannot hide it. "Save as folder"
-                // sits beside it: a multi pick the user reaches for daily becomes
-                // a folder they can apply in one tap next time (see the folders
-                // section below).
-                if (multi && saveable.isNotEmpty()) {
-                    TextButton(onClick = { folderName = ""; showFolderDialog = true }) {
-                        Text(tr("Save as folder"))
-                    }
-                }
-                if (multi) {
-                    Button(
-                        onClick = { onDone(working) },
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(tr("Done"))
-                    }
-                }
-            }
-            if (!LocalHideHelp.current) {
-            Text(
-                if (multi) {
-                    if (working.isEmpty()) tr("Tap the sources to show on Home, then Done.")
-                    else I18n.t("%s sources picked — tap more, then Done.")
-                        .replace("%s", working.size.toString())
-                } else {
-                    tr(
-                        "Only the selected extension's catalog is shown on Home. " +
-                            "Hold a source for half a second to pick several, or tap " +
-                            "its pin to keep it at the top of this list."
-                    )
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
-            )
-            }
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                placeholder = {
-                    Text(
-                        tr("Search extensions…"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().tvTextFieldKeys(query),
-            )
-            // Categories: All first, then one chip per engine that is actually
-            // installed. Picking one only NARROWS the list below.
-            if (kinds.isNotEmpty()) {
-                LazyRow(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    item {
-                        FilterChipLine(
-                            label = tr("All"),
-                            selected = filter == null,
-                            onClick = { onFilter(null) },
-                        )
-                    }
-                    items(kinds, key = { it.name }) { kind ->
-                        FilterChipLine(
-                            label = kind.groupLabel,
-                            selected = filter == kind,
-                            onClick = { onFilter(if (filter == kind) null else kind) },
-                        )
-                    }
-                }
-            }
-            LazyColumn(
+    // Reference Select-Provider shape (see the desktop client's
+    // ProviderSelectionDialog): a WIDE dialog — title + subtitle on the left,
+    // the "All Plugins (Global)" pill top-right — a full-width filter below,
+    // then the providers SIDE BY SIDE in a grid of icon+name+type cards, the
+    // pick tinted purple. A tap picks and closes; a hold ticks into the
+    // multi-pick without closing. The user's own folders, catalogues and
+    // trackers stay: the same picker, drawn full-width above the grid.
+    var showFeed by remember { mutableStateOf(false) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .widthIn(max = 760.dp)
+                .heightIn(min = 220.dp, max = 620.dp),
+        ) {
+            Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 6.dp, bottom = 24.dp),
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            tr("Select Provider"),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            if (multi) {
+                                if (working.isEmpty()) tr("Tap the sources to show on Home, then Done.")
+                                else I18n.t("%s sources picked — tap more, then Done.")
+                                    .replace("%s", working.size.toString())
+                            } else {
+                                tr("Choose a dedicated provider or search across all installed plugins")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    FilledTonalButton(
+                        onClick = { if (multi) working = emptyList() else onPick(null) },
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            tr("All Plugins (Global)"),
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    placeholder = {
+                        Text(
+                            tr("Filter providers..."),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .tvTextFieldKeys(query),
+                )
+                // Categories: All first, then one chip per engine that is actually
+                // installed. Picking one only NARROWS the grid below.
+                if (kinds.isNotEmpty()) {
+                    LazyRow(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        item {
+                            FilterChipLine(
+                                label = tr("All"),
+                                selected = filter == null,
+                                onClick = { onFilter(null) },
+                            )
+                        }
+                        items(kinds, key = { it.name }) { kind ->
+                            FilterChipLine(
+                                label = kind.groupLabel,
+                                selected = filter == kind,
+                                onClick = { onFilter(if (filter == kind) null else kind) },
+                            )
+                        }
+                    }
+                }
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 160.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 60.dp, max = 440.dp),
+                ) {
                 if (shownCollections.isNotEmpty()) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         PickerSectionLabel(tr("Personal catalogues"))
                     }
-                    item(key = "personal-catalogues") {
+                    item(key = "personal-catalogues", span = { GridItemSpan(maxLineSpan) }) {
                         PickerRow(
                             label = tr("Personal catalogues"),
                             isSelected = false,
@@ -2116,7 +2133,7 @@ internal fun ProviderPickerSheet(
                         )
                     }
                     if (cataloguesOpen) {
-                    items(shownCollections, key = { "collection|${it.id}" }) { c ->
+                    items(shownCollections, key = { "collection|${it.id}" }, span = { GridItemSpan(maxLineSpan) }) { c ->
                         val key = "$COLLECTION_PREFIX${c.id}"
                         val ticked = key in working
                         PickerRow(
@@ -2141,7 +2158,7 @@ internal fun ProviderPickerSheet(
                             },
                         )
                     }
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         PickerRow(
                             label = tr("Manage collections"),
                             isSelected = false,
@@ -2153,10 +2170,10 @@ internal fun ProviderPickerSheet(
                     } // cataloguesOpen
                 }
                 if (folders.isNotEmpty()) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         PickerSectionLabel(tr("Your folders"))
                     }
-                    items(folders, key = { "pfolder|${it.name}" }) { folder ->
+                    items(folders, key = { "pfolder|${it.name}" }, span = { GridItemSpan(maxLineSpan) }) { folder ->
                         val ids = folder.ids
                         val allOn = ids.isNotEmpty() && ids.all { it in working }
                         val anyOn = ids.any { it in working }
@@ -2192,8 +2209,8 @@ internal fun ProviderPickerSheet(
                     }
                 }
                 if (connectedTrackers.isNotEmpty()) {
-                    item { PickerSectionLabel(tr("Trackers")) }
-                    item(key = "trackers-parent") {
+                    item(span = { GridItemSpan(maxLineSpan) }) { PickerSectionLabel(tr("Trackers")) }
+                    item(key = "trackers-parent", span = { GridItemSpan(maxLineSpan) }) {
                         PickerRow(label = tr("Trackers"), isSelected = false, multi = false, leadingIcon = Icons.Filled.List,
                             supporting = I18n.t("%s connected").replace("%s", connectedTrackers.size.toString()),
                             expandable = true, expanded = "__trackers__" in expanded,
@@ -2201,7 +2218,7 @@ internal fun ProviderPickerSheet(
                             onClick = { expanded = if ("__trackers__" in expanded) expanded - "__trackers__" else expanded + "__trackers__" })
                     }
                     if ("__trackers__" in expanded) {
-                        items(connectedTrackers, key = { "tracker:" + it.kind.key }) { account ->
+                        items(connectedTrackers, key = { "tracker:" + it.kind.key }, span = { GridItemSpan(maxLineSpan) }) { account ->
                             val key = TRACKER_PREFIX + account.kind.key
                             PickerRow(label = account.kind.label, isSelected = if (multi) key in working else selection.contains(key), multi = multi,
                                 supporting = account.user.ifBlank { tr("Connected") },
@@ -2210,7 +2227,7 @@ internal fun ProviderPickerSheet(
                         }
                     }
                 }
-                item { PickerSectionLabel(tr("Providers")) }
+                item(span = { GridItemSpan(maxLineSpan) }) { PickerSectionLabel(tr("Providers")) }
                 // The gesture, said where the rows are. A user who has never
                 // multi-selected has no way to guess that a HOLD is what does it
                 // (the gesture exists because it was asked for by name), and a
@@ -2221,26 +2238,12 @@ internal fun ProviderPickerSheet(
                 // documented, so hiding it with the other explanations made
                 // multi-select undiscoverable exactly for the user who had
                 // tidied the interface.
-                item(key = "providers-hold-hint") {
+                item(key = "providers-hold-hint", span = { GridItemSpan(maxLineSpan) }) {
                     Text(
                         tr("Hold any provider for half a second to select more than one."),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 4.dp),
-                    )
-                }
-                item {
-                    PickerRow(
-                        label = "All providers",
-                        isSelected = if (multi) working.isEmpty() else selection.isEmpty(),
-                        multi = multi,
-                        onLongClick = {
-                            if (!multi) {
-                                multi = true
-                                working = emptyList()
-                            }
-                        },
-                        onClick = { if (multi) working = emptyList() else onPick(null) },
                     )
                 }
                 items(packs, key = { it.key }) { pack ->
@@ -2256,27 +2259,13 @@ internal fun ProviderPickerSheet(
                     val allTicked = tickedIds.size == ids.size
                     val isPinned = pinOrder.containsKey(key)
                     val open = key in expanded
-                    PickerRow(
-                        label = pack.label,
-                        isSelected = if (multi) ticked else selection.contains(key),
-                        multi = multi,
-                        // The reference provider list's flag in front of every
-                        // extension — read from the name + repo, never guessed.
-                        flagCode = ProviderFlags.codeOf(
-                            pack.label,
-                            repoLabels[pack.primary.config.id],
-                        ),
-                        // The pin is on EVERY row, not revealed by a hold: with
-                        // hundreds of installed extensions the user is looking
-                        // for the pin itself, and a control they have to know
-                        // about first cannot be found.
-                        pinned = isPinned,
-                        onTogglePin = { scope.launch { app.store.togglePinnedProvider(key) } },
-                        expandable = pack.isPack,
-                        expanded = open,
-                        onToggleExpand = {
-                            expanded = if (open) expanded - key else expanded + key
-                        },
+                    // Same-name installs from different repos are told apart by
+                    // the repo tag after the name, like the reference ("(repo)").
+                    val dupTag = if (packs.count { it.label == pack.label } > 1) {
+                        repoLabels[pack.primary.config.id]?.takeIf { it.isNotBlank() }?.let { "($it)" }
+                    } else null
+                    TvProviderCard(
+                        name = pack.label,
                         supporting = when {
                             streamOnly -> I18n.t("%s addon · browses TMDB").replace(
                                 "%s",
@@ -2284,13 +2273,13 @@ internal fun ProviderPickerSheet(
                             )
                             !pack.isPack -> repoLabels[pack.primary.config.id]
                                 ?.let { "${pack.primary.config.type.groupLabel} · $it" }
-                            // In multi-select the row is a checkbox for a whole
+                            // In multi-select the card is a checkbox for a whole
                             // extension, so it says how much of the pack is on.
                             multi && ticked && !allTicked -> I18n.t("%s of %s picked")
                                 .replaceFirst("%s", tickedIds.size.toString())
                                 .replaceFirst("%s", ids.size.toString())
                             else -> {
-                                // A pack row names what it folds: the count, the
+                                // A pack card names what it folds: the count, the
                                 // member details — and the repo(s) the members
                                 // were installed from, so five identical names
                                 // still tell which install each one is.
@@ -2304,35 +2293,30 @@ internal fun ProviderPickerSheet(
                                 else "$base · ${packRepos[0]} · +${packRepos.size - 1}"
                             }
                         },
-                        onLongClick = {
-                            if (!multi) {
-                                multi = true
-                                working = (selection + key).distinct()
-                            }
+                        tag = dupTag,
+                        selected = if (multi) ticked else selection.contains(key),
+                        icon = {
+                            TvProviderIcon(
+                                iconUrl = pack.primary.config.iconUrl,
+                                name = pack.label,
+                                size = 28.dp,
+                            )
                         },
                         onClick = {
                             if (multi) {
-                                // Ticking a COLLAPSED extension row ticks every
-                                // source it publishes — that is what the row is.
+                                // Ticking a COLLAPSED extension card ticks every
+                                // source it publishes — that is what the card is.
                                 // Its sources are one caret away for picking one.
                                 //
-                                // ...and UNticking it takes back every source,
-                                // which is the half that was broken: the test
-                                // used to be "are ALL of them on?", so a row that
-                                // was only PARTLY on — the normal state of the
-                                // extension you are already watching, since the
-                                // stored selection is one of its sources — went
-                                // to "all on" on the first tap instead of off.
-                                // The tick is a tick: a tap on a row that has any
-                                // of its sources on turns them all off, and a tap
-                                // on a row with none of them on turns them all on
-                                // (reported as "unselecting a provider ... it not
-                                // unticking"). A row left partly on stays pickable
-                                // that way: untick, tick, or use the caret.
+                                // ...and UNticking it takes back every source:
+                                // a tap on a card that has any of its sources on
+                                // turns them all off, and a tap on a card with
+                                // none of them on turns them all on (reported as
+                                // "unselecting a provider ... it not unticking").
                                 working = if (ticked) working - ids.toSet()
                                 else (working + ids).distinct()
                             } else {
-                                // A cross-engine row's tap OPENS it: the row
+                                // A cross-engine card's tap OPENS it: the card
                                 // stands for two extensions with one name, so
                                 // picking the first sight unseen would be a
                                 // guess. The expanded members name their
@@ -2342,55 +2326,112 @@ internal fun ProviderPickerSheet(
                                 else onPick(key)
                             }
                         },
+                        onHold = {
+                            if (!multi) {
+                                multi = true
+                                working = (selection + key).distinct()
+                            }
+                        },
+                        trailing = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isPinned || multi) {
+                                    IconButton(
+                                        onClick = { scope.launch { app.store.togglePinnedProvider(key) } },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.PushPin,
+                                            contentDescription = tr(
+                                                if (isPinned) "Unpin this extension"
+                                                else "Pin to the top of this list"
+                                            ),
+                                            tint = if (isPinned) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                                if (pack.isPack) {
+                                    IconButton(
+                                        onClick = { expanded = if (open) expanded - key else expanded + key },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                            contentDescription = tr(
+                                                if (open) "Hide this extension's sources"
+                                                else "Show this extension's sources"
+                                            ),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        },
                     )
                     if (pack.isPack && open) {
                         pack.members.forEachIndexed { i, member ->
                             val mkey = member.config.id
                             val mticked = mkey in working
-                            Row(Modifier.fillMaxWidth()) {
-                                Spacer(Modifier.width(18.dp))
-                                Box(Modifier.weight(1f)) {
-                                    PickerRow(
-                                        label = if (pack.cross) pack.memberEngine(i).ifBlank { pack.memberLabel(i) } else pack.memberLabel(i),
-                                        isSelected = if (multi) mticked else selection.contains(mkey),
-                                        multi = multi,
-                                        // Every member names its engine AND the
-                                        // repo it was installed from ("CloudStream
-                                        // · Codegeasse Repo"), so same-named
-                                        // sources are telling apart at a glance.
-                                        supporting = listOf(
-                                            member.config.type.groupLabel,
-                                            repoLabels[mkey]?.takeIf { it.isNotBlank() },
-                                        ).filterNotNull().filter { it.isNotBlank() }
-                                            .distinct().joinToString(" · ")
-                                            .ifBlank { null },
-                                        flagCode = ProviderFlags.codeOf(member.config.name, pack.memberLabel(i)),
-                                        pinned = pinOrder.containsKey(mkey),
-                                        onTogglePin = {
-                                            scope.launch { app.store.togglePinnedProvider(mkey) }
-                                        },
-                                        onLongClick = {
-                                            if (!multi) {
-                                                multi = true
-                                                working = (selection + mkey).distinct()
+                            item(key = "packmember|$mkey") {
+                                TvProviderCard(
+                                    name = if (pack.cross) pack.memberEngine(i).ifBlank { pack.memberLabel(i) } else pack.memberLabel(i),
+                                    // Every member names its engine AND the repo
+                                    // it was installed from ("CloudStream ·
+                                    // Codegeasse Repo"), so same-named sources
+                                    // are told apart at a glance.
+                                    supporting = listOf(
+                                        member.config.type.groupLabel,
+                                        repoLabels[mkey]?.takeIf { it.isNotBlank() },
+                                    ).filterNotNull().filter { it.isNotBlank() }
+                                        .distinct().joinToString(" · ")
+                                        .ifBlank { null },
+                                    selected = if (multi) mticked else selection.contains(mkey),
+                                    icon = {
+                                        TvProviderIcon(
+                                            iconUrl = member.config.iconUrl,
+                                            name = member.config.name,
+                                            size = 28.dp,
+                                        )
+                                    },
+                                    onClick = {
+                                        if (multi) {
+                                            working = if (mticked) working - mkey
+                                            else working + mkey
+                                        } else {
+                                            onPick(mkey)
+                                        }
+                                    },
+                                    onHold = {
+                                        if (!multi) {
+                                            multi = true
+                                            working = (selection + mkey).distinct()
+                                        }
+                                    },
+                                    trailing = {
+                                        if (pinOrder.containsKey(mkey) || multi) {
+                                            IconButton(
+                                                onClick = { scope.launch { app.store.togglePinnedProvider(mkey) } },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.PushPin,
+                                                    contentDescription = tr("Pin to the top of this list"),
+                                                    tint = if (pinOrder.containsKey(mkey)) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
                                             }
-                                        },
-                                        onClick = {
-                                            if (multi) {
-                                                working = if (mticked) working - mkey
-                                                else working + mkey
-                                            } else {
-                                                onPick(mkey)
-                                            }
-                                        },
-                                    )
-                                }
+                                        }
+                                    },
+                                )
                             }
                         }
                     }
                 }
                 if (packs.isEmpty() && query.isNotBlank()) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         Text(
                             I18n.t("No extension matches \"$query\""),
                             style = MaterialTheme.typography.bodySmall,
@@ -2399,8 +2440,49 @@ internal fun ProviderPickerSheet(
                         )
                     }
                 }
+                }
+                // Bottom bar: the feed mixer, the folder save, Done, Close — a
+                // long grid must never hide the way out.
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { showFeed = true }) { Text(tr("Manage feed")) }
+                    if (multi && saveable.isNotEmpty()) {
+                        TextButton(onClick = { folderName = ""; showFolderDialog = true }) {
+                            Text(tr("Save as folder"))
+                        }
+                    }
+                    if (multi) {
+                        Button(
+                            onClick = { onDone(working) },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(tr("Done"))
+                        }
+                    }
+                    TextButton(onClick = onDismiss) { Text(tr("Close")) }
+                }
             }
         }
+    }
+    // The Home Screen Feed mixer: the same dialog TV uses (an Active/Available
+    // two-pane when the multi switch is on, a single-provider grid otherwise).
+    // Its mix IS a saved selection, so saving applies exactly like Done.
+    if (showFeed) {
+        TvManageFeedDialog(
+            providers = providers,
+            selection = if (multi) working else selection,
+            onSave = { ids -> onDone(ids) },
+            onDismiss = { showFeed = false },
+        )
     }
 }
 

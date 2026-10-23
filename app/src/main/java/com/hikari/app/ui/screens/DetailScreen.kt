@@ -229,18 +229,33 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
      *  flow below): the dead links almost always came from it. */
     suspend fun originStreamsFast(item: MediaItem, episode: Episode?): List<StreamSource> =
         runCatching { repo.originStreams(item, episode) }.getOrDefault(emptyList())
-    suspend fun serversForBatch(item: MediaItem, episode: Episode): List<StreamSource> {
+    suspend fun serversForBatch(item: MediaItem, episode: Episode, originOnly: Boolean = false): List<StreamSource> {
+        fun dlOk(s: StreamSource) =
+            !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", true)
+        if (originOnly) {
+            // "This extension": the title's own provider alone, no cross search.
+            val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
+            return origin.filter { dlOk(it) }
+        }
         val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
-        val playable = origin.filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
+        val playable = origin.filter { dlOk(it) }
         if (playable.isNotEmpty()) return playable
-        // The cross-extension fallback has its own hard ceiling: without one
-        // a single hung provider parks this lookup forever — the batch's
-        // "Finding servers (i/N)…" line then never advances, Cancel is the
-        // only way out, and the queue behind it (download-all) silently
-        // stops after the episodes that already resolved.
-        return (withTimeoutOrNull(30_000L) {
-            runCatching { repo.streamsFor(item, episode) }.getOrDefault(emptyList())
-        } ?: emptyList()).filter { !it.isTorrent && !it.externalUrl && it.ytId.isNullOrBlank() && it.url.startsWith("http", true) }
+        // "All extensions": the full cross-extension sweep — but one capped
+        // pass is not an answer. The play flow retries an unfinished lookup
+        // instead of reporting none (see StreamLookup.complete); the batch
+        // does the same, bounded to three passes, keeping the best partial
+        // so a slow sweep still queues what it found instead of nothing.
+        var best: List<StreamSource> = emptyList()
+        repeat(3) {
+            val lookup = withTimeoutOrNull(30_000L) {
+                runCatching { repo.streamsForOutcome(item, episode) }.getOrNull()
+            } ?: return best
+            val got = lookup.servers.filter { dlOk(it) }
+            if (got.size > best.size) best = got
+            if (got.isNotEmpty() && lookup.complete) return got
+            if (lookup.complete) return best
+        }
+        return best
     }
     suspend fun enqueueBatch(ctx: android.content.Context, item: MediaItem, episodes: List<Episode>, chosen: StreamSource): Int {
         var done = 0
@@ -3493,6 +3508,14 @@ fun DetailScreen(
     // after the user has already backed out.
     var dlGen by remember { mutableStateOf(0) }
     var dlMsg by remember { mutableStateOf<String?>(null) }
+    // The scope the batch search runs in (see the scope question below):
+    // false searches every installed extension like playback does, true
+    // confines the batch to the title's own extension. Set when the search
+    // starts and threaded through every re-lookup of the chain.
+    var dlOriginOnly by remember { mutableStateOf(false) }
+    // Episodes waiting on the scope question (see showDlScope below).
+    var dlScopePending by remember { mutableStateOf(listOf<Episode>()) }
+    var showDlScope by remember { mutableStateOf(false) }
     val batchItem = m ?: savedItem
     // Television episode stills, straight from TMDB (see TmdbStills): the
     // TMDB still wins (desktop parity), the provider's own thumbnail is the
@@ -3592,9 +3615,10 @@ fun DetailScreen(
         dlBusy = false
         dlMsg = null
     }
-    fun resolveFirstServer(eps: List<Episode>) {
+    fun resolveFirstServer(eps: List<Episode>, originOnly: Boolean) {
         if (eps.isEmpty() || dlBusy) return
         dlTargets = eps
+        dlOriginOnly = originOnly
         val gen = dlGen + 1
         dlGen = gen
         scope.launch {
@@ -3607,7 +3631,7 @@ fun DetailScreen(
                     dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
                     // Bounded per episode (see serversForBatch): a hung
                     // provider costs seconds here, never the whole batch.
-                    val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                    val servers = runCatching { vm.serversForBatch(batchItem, ep, originOnly) }.getOrDefault(emptyList())
                     for (s in servers) {
                         if (seen.add(s.providerId + "|" + s.name)) union.add(s)
                     }
@@ -3669,10 +3693,10 @@ fun DetailScreen(
                     // A hung provider costs this episode a retry, never the
                     // whole batch: two bounded lookups, then the episode is
                     // reported as skipped instead of silently dropped.
-                    var servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                    var servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
                     if (servers.isEmpty()) {
                         runCatching { delay(1500L) }
-                        servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                        servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
                     }
                     if (servers.isEmpty()) {
                         failed.add(epTag(ep))
@@ -3746,7 +3770,7 @@ fun DetailScreen(
         showDlDest = false
         val first = dlTargets.firstOrNull() ?: return
         scope.launch {
-            val servers = runCatching { vm.serversForBatch(batchItem, first) }.getOrDefault(emptyList())
+            val servers = runCatching { vm.serversForBatch(batchItem, first, dlOriginOnly) }.getOrDefault(emptyList())
             if (servers.isEmpty()) {
                 runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
                 return@launch
@@ -3781,7 +3805,7 @@ fun DetailScreen(
     fun askBatchAudio(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, h: Int, bw: Long) {
         val first = dlTargets.firstOrNull() ?: return
         scope.launch {
-            val servers = runCatching { vm.serversForBatch(batchItem, first) }.getOrDefault(emptyList())
+            val servers = runCatching { vm.serversForBatch(batchItem, first, dlOriginOnly) }.getOrDefault(emptyList())
             val src = if (servers.isEmpty()) null else matchDlServer(servers, srv)
             val audios = if (src != null && (src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8"))) {
                 runCatching {
@@ -3831,7 +3855,14 @@ fun DetailScreen(
                 androidx.compose.material3.TextButton(onClick = { dlChecked = sortedEps.map { it.id }.toSet(); showDlChoice = false; showDlSelect = true }) { androidx.compose.material3.Text("Select episodes") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { resolveFirstServer(sortedEps.toList()) }, enabled = !dlBusy) { androidx.compose.material3.Text("Download all") }
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        dlScopePending = sortedEps.toList()
+                        showDlChoice = false
+                        showDlScope = true
+                    },
+                    enabled = !dlBusy
+                ) { androidx.compose.material3.Text("Download all") }
             }
         )
     }
@@ -3871,7 +3902,11 @@ fun DetailScreen(
                         val picked = sortedEps.filter { dlChecked.contains(it.id) }
                         if (picked.isEmpty()) {
                             runCatching { android.widget.Toast.makeText(context, "Select at least one episode.", android.widget.Toast.LENGTH_SHORT).show() }
-                        } else resolveFirstServer(picked)
+                        } else {
+                            showDlSelect = false
+                            dlScopePending = picked
+                            showDlScope = true
+                        }
                     },
                     enabled = !dlBusy && dlChecked.isNotEmpty()
                 ) { androidx.compose.material3.Text("Download (" + dlChecked.size + ")") }
@@ -3879,6 +3914,34 @@ fun DetailScreen(
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { cancelDlLookup(); showDlSelect = false }) { androidx.compose.material3.Text("Cancel") }
             }
+        )
+    }
+    // The scope question (asked once per batch, before the search): the same
+    // choice playback offers — this extension, or every installed extension
+    // like the player's own server list. The single download shows "so many
+    // servers" because it rides playback's all-extension sweep; the batch
+    // used to ask only the title's own extension and reported none.
+    if (showDlScope) {
+        ChoiceDialog(
+            title = tr("Search servers in"),
+            items = listOf(
+                ChoiceItem(
+                    key = "all",
+                    label = tr("All extensions"),
+                    supporting = tr("Every installed source, like playback"),
+                ),
+                ChoiceItem(
+                    key = "origin",
+                    label = tr("This extension"),
+                    supporting = tr("Only the extension this title was opened from"),
+                ),
+            ),
+            selectedKey = "all",
+            onPick = { key ->
+                showDlScope = false
+                resolveFirstServer(dlScopePending, key == "origin")
+            },
+            onDismiss = { showDlScope = false },
         )
     }
     if (showDlServer) {

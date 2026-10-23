@@ -1,5 +1,6 @@
 package com.hikari.app.ui.screens
 import com.hikari.app.tv.TvMode
+import com.hikari.app.tv.TvManageFeedDialog
 import com.hikari.app.tv.TvSelectProviderDialog
 import com.hikari.app.tv.TvUi
 import com.hikari.app.i18n.tr
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -79,6 +81,7 @@ import com.hikari.app.data.ContentRepository
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderType
+import com.hikari.app.data.RepoProvenance
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.ui.Artwork
 import com.hikari.app.ui.PosterLoader
@@ -654,6 +657,10 @@ fun SearchScreen(
             // will be searched and one tap to change it.
             var showProviders by remember { mutableStateOf(false) }
             var providerKind by remember { mutableStateOf<ProviderType?>(null) }
+            // Television's feed mixer — the same dialog Home uses. The old
+            // target (the personal-catalogue folder) was the wrong screen: the
+            // TV tab's Manage entry must open the multi-select provider dialog.
+            var showTvFeed by remember { mutableStateOf(false) }
             val scopeLabel = when {
                 selected.isEmpty() -> tr("All providers")
                 soleName != null -> soleName
@@ -690,7 +697,7 @@ fun SearchScreen(
                         },
                         onManage = {
                             showProviders = false
-                            Routes.safeNavigate(nav, Routes.COLLECTIONS)
+                            showTvFeed = true
                         },
                         onDismiss = { showProviders = false },
                     )
@@ -719,6 +726,17 @@ fun SearchScreen(
                         onDismiss = { showProviders = false },
                     )
                 }
+            }
+            if (showTvFeed) {
+                TvManageFeedDialog(
+                    providers = providers,
+                    selection = selected.toList(),
+                    onSave = { keys ->
+                        showTvFeed = false
+                        vm.setProviders(keys)
+                    },
+                    onDismiss = { showTvFeed = false },
+                )
             }
         }
         // ---- Result filters: kind + year (see the state at the top) ---------
@@ -1111,18 +1129,135 @@ fun SearchScreen(
                 // recomposition and opened a DataStore collection per poster on
                 // screen, which is a lot of subscriptions for one grid (see
                 // [com.hikari.app.ui.components.MediaRow]).
-                val gridItems = rememberVisibleItems(visible)
-                val searchKeys = remember(gridItems) { gridItems.map { it.uniqueId } }
                 val style = rememberPosterStyle()
                 val tvSearch = TvMode.current()
                 val searchCols = if (tvSearch) 3 else TvUi.resultsColumns()
-                LazyVerticalGrid(
+                val openSearchItem: (MediaItem) -> Unit = { item ->
+                    Routes.safeNavigate(
+                        nav,
+                        if (item.rawType == "manga") {
+                            Routes.mangaRoute(item.providerId, item.id, item.title, item.posterUrl)
+                        } else {
+                            Routes.detail(item.providerId, item.type, item.id, item.title, item.posterUrl, item.rawType)
+                        },
+                    )
+                }
+                val typesById = remember(providers) {
+                    providers.associate({ it.config.id }, { it.config.type.groupLabel })
+                }
+                val searchApp = LocalContext.current.applicationContext as HikariApp
+                val searchRepos by remember { searchApp.store.reposFlow() }
+                    .collectAsState(initial = emptyList())
+                val repoTagById = remember(providers, searchRepos) {
+                    RepoProvenance.nameMap(providers.map { it.config }, searchRepos)
+                }
+                // Phone groups the hits by provider — first hit sets the order —
+                // so every source reads as one shelf: a big name, a tiny
+                // "engine · repo" tag, and a sideways row of its posters. "See
+                // all (N)" drills into that provider's own vertical grid.
+                // Television keeps its single reference grid, untouched.
+                val groupedVisible = remember(visible) { visible.groupBy { it.providerId } }
+                var expandedProvider by rememberSaveable { mutableStateOf<String?>(null) }
+                val effectiveExpanded = if (tvSearch) null
+                    else expandedProvider?.takeIf { groupedVisible.containsKey(it) }
+                val gridSource = if (effectiveExpanded != null) groupedVisible.getValue(effectiveExpanded) else visible
+                val gridItems = rememberVisibleItems(gridSource)
+                val searchKeys = remember(gridItems) { gridItems.map { it.uniqueId } }
+                val gridStateKey = if (tvSearch) "search:$query|$activeEngine"
+                    else "search:$query|$activeEngine|$effectiveExpanded"
+                if (!tvSearch && effectiveExpanded == null) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentPadding = PaddingValues(
+                            bottom = LocalTaskbarInset.current + 12.dp,
+                        ),
+                    ) {
+                        groupedVisible.forEach { (pid, hits) ->
+                            val groupName = namesById[pid] ?: pid
+                            val groupTag = listOf(typesById[pid], repoTagById[pid])
+                                .filterNotNull().filter { it.isNotBlank() }
+                                .distinct().joinToString(" · ")
+                            item(key = "grp|$pid") {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 8.dp, top = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            groupName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (groupTag.isNotBlank()) {
+                                            Text(
+                                                groupTag,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    TextButton(onClick = { expandedProvider = pid }) {
+                                        Text(tr("See all") + " (${hits.size})")
+                                    }
+                                }
+                            }
+                            item(key = "row|$pid") {
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    items(hits, key = { it.uniqueId }) { item ->
+                                        PhoneSearchCell(
+                                            item = item,
+                                            onOpen = { openSearchItem(item) },
+                                            modifier = Modifier.width(112.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if (!tvSearch && effectiveExpanded != null) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(start = 4.dp, end = 16.dp, top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(onClick = { expandedProvider = null }) {
+                                Text("‹ " + tr("All providers"))
+                            }
+                            Text(
+                                namesById[effectiveExpanded] ?: effectiveExpanded,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                groupedVisible.getValue(effectiveExpanded).size.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    LazyVerticalGrid(
                     columns = GridCells.Fixed(searchCols),
                     // Results position held per query+engine (see
                     // ScrollKeeper): Back from a title lands where the grid
                     // was, and a new query starts at its own slot.
                     state = com.hikari.app.ui.components.keptGridState(
-                        "search:$query|$activeEngine",
+                        gridStateKey,
                         itemKeys = searchKeys,
                     ),
                     modifier = Modifier
@@ -1241,6 +1376,7 @@ fun SearchScreen(
                     }
                     }
                 }
+            }
             }
             }
         }
@@ -1526,6 +1662,73 @@ private fun HistoryChip(
  * multi-selectable list of every place a title can be looked for.
  */
 @Composable
+/**
+ * One phone search poster: art + title. The provider shelf's own header names
+ * the source, so the cell does not repeat it under every poster (the old flat
+ * grid printed it there because no header said it).
+ */
+@Composable
+private fun PhoneSearchCell(
+    item: MediaItem,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Show scores (Settings → App Layout) draws here too — the badge warms the
+    // ratings cache for the title and prints whatever is known. Null when the
+    // switch is off.
+    val style = rememberPosterStyle()
+    val badge = rememberPosterScore(item, style)
+    // Not clipped to the card rounding: the curve cut into the title's edges at
+    // high corner values (see CatalogCard). Only the artwork Box below is
+    // rounded.
+    Column(modifier.clickable { onOpen() }) {
+        val phoneCinema = style.isCinema(false)
+        val hero = if (phoneCinema) Artwork.heroModel(item) else null
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(if (phoneCinema) 16f / 9f else 2f / 3f)
+                .clip(RoundedCornerShape(10.dp))
+        ) {
+            if (phoneCinema && hero != null && !hero.second) {
+                // Portrait art in a cinema frame: a full-bleed 16:9 crop
+                // anchored exactly like every other cinema frame (see
+                // Artwork.CINEMA_ALIGNMENT).
+                AsyncImage(
+                    model = hero.first,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alignment = com.hikari.app.ui.Artwork.CINEMA_ALIGNMENT
+                )
+            } else {
+                AsyncImage(
+                    model = if (phoneCinema) hero?.first else Artwork.model(item),
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alignment = if (phoneCinema) com.hikari.app.ui.Artwork.CINEMA_ALIGNMENT else Alignment.Center
+                )
+            }
+            if (badge != null) {
+                RatingBadge(
+                    text = badge,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp),
+                )
+            }
+        }
+        Text(
+            item.title,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
 private fun ProviderScopeButton(
     label: String,
     supporting: String,
@@ -1540,6 +1743,8 @@ private fun ProviderScopeButton(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 2.dp),
     ) {
+        // One compact line — icon, scope, chevron — so the words always fit:
+        // the two-line card truncated the scope it was meant to announce.
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1551,22 +1756,14 @@ private fun ProviderScopeButton(
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    supporting,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                "$label · $supporting",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             Icon(
                 Icons.Filled.KeyboardArrowDown,
                 contentDescription = tr("Choose providers"),

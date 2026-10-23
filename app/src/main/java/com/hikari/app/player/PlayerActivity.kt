@@ -6291,6 +6291,9 @@ class PlayerActivity : ComponentActivity() {
                 includeFontPadding = false
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFDCE3EE.toInt())
+                // Readable on any art: a soft dark halo behind the glyphs,
+                // invisible on dark scenes, saving light ones.
+                setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
             })
@@ -6300,6 +6303,7 @@ class PlayerActivity : ComponentActivity() {
                     dpText(10.5f)
                     includeFontPadding = false
                     setTextColor(0xFF98A3B5.toInt())
+                    setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
                     maxLines = 2
                     ellipsize = TextUtils.TruncateAt.END
                 }, LinearLayout.LayoutParams(
@@ -6316,6 +6320,7 @@ class PlayerActivity : ComponentActivity() {
             isSingleLine = true
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(withAlpha(accentMidColor, 0.95f))
+            setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply {
@@ -8134,6 +8139,30 @@ class PlayerActivity : ComponentActivity() {
         // is one flat origin-first list, so the list holds rows only.
         val list = optionList()
 
+        // Source filter pills (All + every engine that has landed): the strip
+        // sits as the list's own first child, so it scrolls with the rows and
+        // needs no overlay. Hidden until a second engine lands — one pill is
+        // not a filter. A tap filters the rows in place (see `visible`) and
+        // restyles the strip without tearing it down.
+        val chipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val chipStrip = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(
+                (8 * density).toInt(), (6 * density).toInt(),
+                (8 * density).toInt(), (8 * density).toInt()
+            )
+            clipToPadding = false
+            addView(chipRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            visibility = View.GONE
+        }
+        list.addView(chipStrip)
+
         /**
          * One engine chip. Its box is measured from the TEXT rather than left to
          * the TextView's own WRAP_CONTENT: a chip that wraps inside a
@@ -8261,7 +8290,10 @@ class PlayerActivity : ComponentActivity() {
                 if (sources.isEmpty()) emptyList()
                 else listOf("All" to sources.indices.toList())
             )
-            val visible = if (chip == "All") all else all.filter { it.first == chip }
+            val visible = if (chip == "All") all
+            else all.map { (name, memberIdx) ->
+                name to memberIdx.filter { serverGroup(sources[it]) == chip }
+            }.filter { it.second.isNotEmpty() }
             val sig = ArrayList<String>()
             val sigCounts = HashMap<String, Int>()
             visible.forEach { (name, memberIdx) ->
@@ -8279,7 +8311,7 @@ class PlayerActivity : ComponentActivity() {
             // the blank box over the searching footer from the report. Empty
             // always falls through to the placeholder branch.
             if (sig.isNotEmpty() && sig == builtSig && builtSelected == currentIndex && stateRowView == null &&
-                (list.childCount) == sig.size) return
+                (list.childCount) == sig.size + 1) return
             // Append-only live growth (the common search case: new servers land
             // at the end of the last section): keep every view on screen and
             // only inflate the tail. A full teardown on every below-fold append
@@ -8293,7 +8325,7 @@ class PlayerActivity : ComponentActivity() {
             // appends nothing still verifies positions, so a dropped view (a
             // disposed list, a cleared container) is re-seated instead of going
             // permanently missing — the log-proven permanent blank cannot recur.
-            var slot = 0 // child index inside `list` (0 is the chip strip)
+            var slot = 1 // child index inside `list` (0 is the chip strip)
             fun place(v: View) {
                 val cur = list.indexOfChild(v)
                 if (cur == slot) { slot++; return }
@@ -8414,19 +8446,21 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
             // Trailing children past the desired set are detached; their
-            // views stay cached for reuse.
-            while (list.childCount > newSig.size) list.removeViewAt(list.childCount - 1)
+            // views stay cached for reuse. Child 0 is the chip strip and is
+            // never trimmed.
+            while (list.childCount > newSig.size + 1) list.removeViewAt(list.childCount - 1)
             if (rowViews.size > sources.size + 24) {
                 val keepSet = newSig.toHashSet()
                 rowViews.keys.retainAll(keepSet)
             }
             sig.clear()
             sig.addAll(newSig)
-            // Rows already on screen from an earlier paint (the incremental path
-            // above only counts NEW rows): a paint that appends nothing must not
-            // read as an empty chooser, or every steady-state tick logs a false
-            // "chooser empty" and stacks another Searching card under live rows.
-            val onScreenRows = list.childCount
+            // Rows actually on screen, minus the chip strip at child 0 (the
+            // incremental path above only counts NEW rows): a paint that
+            // appends nothing must not read as an empty chooser, or every
+            // steady-state tick logs a false "chooser empty" and stacks
+            // another Searching card under live rows.
+            val onScreenRows = (list.childCount - 1).coerceAtLeast(0)
             if (rendered == 0 && onScreenRows == 0) {
                 // Opened before the first server landed ("don't play directly"
                 // opens the chooser the instant the player does): show that the
@@ -8513,12 +8547,45 @@ class PlayerActivity : ComponentActivity() {
             builtSelected = currentIndex
         }
 
-// No engine chips (the reference sheet is one flat list): this stays a
-        // no-op so the dead chip builder below still resolves.
-        fun rebuildChips() {}
+// The chip strip's live sync: All + every engine that has landed, in
+        // the same order the old section headings used. Pills are reused by
+        // label and restyled in place — a full teardown on every paint
+        // remeasured the panel mid-search and blanked the list until a touch
+        // forced a traversal (see styleChipPill). Gone engines are dropped;
+        // the strip hides while a single engine is present. A tap filters
+        // the rows (see `visible`) and restyles without rebuilding.
+        fun rebuildChips() {
+            val want = listOf("All") + groups()
+            if (chip != "All" && chip !in want) chip = "All"
+            chipStrip.visibility = if (want.size > 1) View.VISIBLE else View.GONE
+            if (want.size <= 1) return
+            for (i in chipRow.childCount - 1 downTo 0) {
+                val c = chipRow.getChildAt(i)
+                if ((c.tag as? String) !in want) chipRow.removeViewAt(i)
+            }
+            want.forEachIndexed { idx, label ->
+                var tv = chipRow.findViewWithTag<TextView>(label)
+                if (tv == null) {
+                    tv = chipPill(label, label == chip) {
+                        chip = label
+                        rebuildChips()
+                        rebuildList()
+                    }
+                    tv.tag = label
+                    chipRow.addView(tv, idx)
+                } else {
+                    styleChipPill(tv, label, label == chip)
+                    if (chipRow.indexOfChild(tv) != idx) {
+                        chipRow.removeView(tv)
+                        chipRow.addView(tv, idx)
+                    }
+                }
+            }
+        }
 
         syncFromSession()
         rebuildList()
+        rebuildChips()
         // Rows added after the dialog is already on screen need an explicit
         // layout pass: without it a chooser opened over an empty list can sit
         // blank until the next touch-driven traversal, even though the rows
@@ -8588,7 +8655,9 @@ class PlayerActivity : ComponentActivity() {
             var anchorOff = 0
             sv?.let { v ->
                 val y = v.scrollY
-                for (ai in 0 until list.childCount) {
+                // Child 0 is the chip strip, not a row: anchoring on it would
+                // pin every restore to the strip instead of the row read.
+                for (ai in 1 until list.childCount) {
                     val c = list.getChildAt(ai) ?: continue
                     if (c.bottom > y + 4) {
                         anchorTag = c.tag as? String
@@ -8615,6 +8684,7 @@ class PlayerActivity : ComponentActivity() {
             if (paintSig == lastPaintSig && builtSig.isNotEmpty() && list.childCount > 0) return
             lastPaintSig = paintSig
             rebuildList()
+            rebuildChips()
             // Synchronous measure + layout: positions are set HERE, on this
             // frame, instead of in a posted traversal that the restore below
             // could race (that race was BOTH symptoms: rows at zero height
@@ -8655,7 +8725,8 @@ class PlayerActivity : ComponentActivity() {
             // the recovery actually grew the list (settle pass, which early-
             // returns on identical input), so a poisoned list cannot loop.
             val beforeRecover = list.childCount
-            if (dialog.isShowing && sources.isNotEmpty() && list.childCount <= 0) {
+            // Child 0 is the chip strip, so "zero rows" is childCount <= 1.
+            if (dialog.isShowing && sources.isNotEmpty() && list.childCount <= 1) {
                 com.hikari.app.data.Logs.log(
                     "Player",
                     "chooser paint left zero rows over ${sources.size} server(s); recovering in place",
@@ -8865,8 +8936,10 @@ class PlayerActivity : ComponentActivity() {
         val serverHeader = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            val hp = (14 * density).toInt()
-            setPadding(hp, (12 * density).toInt(), hp, (4 * density).toInt())
+            // Compact: the list is the point of this screen, so the header
+            // takes the least room it can — small title up top, tight rows.
+            val hp = (12 * density).toInt()
+            setPadding(hp, (6 * density).toInt(), hp, (2 * density).toInt())
         }
         if (logoModel != null) {
             serverHeader.addView(ImageView(this).apply {
@@ -8879,20 +8952,23 @@ class PlayerActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = (10 * density).toInt()
+                bottomMargin = (6 * density).toInt()
             })
         } else {
             serverHeader.addView(TextView(this).apply {
                 text = serverTitle.uppercase()
-                dpText(22f)
+                dpText(15f)
                 includeFontPadding = false
                 gravity = Gravity.CENTER
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
                 setTextColor(0xFFFFFFFF.toInt())
+                setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (8 * density).toInt() })
+            ).apply { bottomMargin = (4 * density).toInt() })
         }
         if (epPillText.isNotBlank()) {
             serverHeader.addView(TextView(this).apply {
@@ -8905,18 +8981,19 @@ class PlayerActivity : ComponentActivity() {
                 maxWidth = (resources.displayMetrics.widthPixels * 0.92f).toInt()
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(0xFFFFFFFF.toInt())
+                setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
                 background = GradientDrawable(
                     GradientDrawable.Orientation.LEFT_RIGHT,
                     intArrayOf(withAlpha(accentStartColor, 0.55f), withAlpha(accentEndColor, 0.6f))
                 ).apply { cornerRadius = 999f }
-                val px = (14 * density).toInt()
-                setPadding(px, (6 * density).toInt(), px, (6 * density).toInt())
+                val px = (10 * density).toInt()
+                setPadding(px, (4 * density).toInt(), px, (4 * density).toInt())
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = (8 * density).toInt()
+                bottomMargin = (4 * density).toInt()
             })
         }
         val foundRow = LinearLayout(this).apply {
@@ -8928,6 +9005,7 @@ class PlayerActivity : ComponentActivity() {
             dpText(10f)
             includeFontPadding = false
             setTextColor(0xFFD5DCE8.toInt())
+            setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
         }
         /**
          * The SOURCES pill restyled for [label] without ever clipping: the
@@ -9095,6 +9173,17 @@ class PlayerActivity : ComponentActivity() {
             if (!dialog.isShowing) return@post
             syncFromSession()
             rebuildList()
+            rebuildChips()
+            // The last row must scroll fully clear of the footer (Skip/Cancel):
+            // pad the list's own bottom by the footer's measured height, so the
+            // final server parks above it instead of under it.
+            runCatching {
+                val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
+                list.setPadding(
+                    list.paddingLeft, list.paddingTop, list.paddingRight,
+                    fh + (12 * density).toInt()
+                )
+            }
             list.requestLayout()
             (list.parent as? View)?.requestLayout()
             verticalScrollerOf(list)?.requestLayout()

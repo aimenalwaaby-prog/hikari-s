@@ -74,6 +74,16 @@ data class NovelHighlight(
     }
 }
 
+/** One chapter's read mark: opened vs read to the last page. */
+data class MangaChapterRead(
+    val chapterUrl: String,
+    val finished: Boolean,
+    val at: Long,
+)
+
+/** Manga-level mark derived from its chapters' marks. */
+enum class MangaReadState { NONE, READING, COMPLETED }
+
 /** Where the reader left off in one manga. */
 data class MangaProgress(
     val mangaKey: String,
@@ -210,6 +220,100 @@ object MangaStore {
         progressCache = HashMap()
         runCatching { progressFile(ctx()).writeText("[]") }
         ping()
+    }
+
+    // ---- Chapter read marks (Reading / Completed) ----
+
+    /**
+     * One chapter's read mark: opened-but-unfinished vs read to the last
+     * page. Written by the reader (see MangaReaderScreen.saveProgress), read
+     * by the detail page's chapter rows and manga-level badge. A finished
+     * chapter is never downgraded back to started by a re-open.
+     */
+    @Volatile
+    private var chapterReadCache: MutableMap<String, MutableMap<String, MangaChapterRead>>? = null
+
+    private fun chapterReadFile(context: Context) = File(dir(context), "chapters-read.json")
+
+    fun chapterReadState(mangaKey: String, chapterUrl: String): MangaChapterRead? =
+        chapterReadMap()[mangaKey]?.get(chapterUrl)
+
+    fun markChapterStarted(mangaKey: String, chapterUrl: String) {
+        if (mangaKey.isBlank() || chapterUrl.isBlank()) return
+        val map = chapterReadMap()
+        val per = map.getOrPut(mangaKey) { HashMap() }
+        if (per[chapterUrl]?.finished == true) return
+        per[chapterUrl] = MangaChapterRead(chapterUrl, finished = false, at = System.currentTimeMillis())
+        chapterReadCache = map
+        saveChapterRead(map)
+        ping()
+    }
+
+    fun markChapterFinished(mangaKey: String, chapterUrl: String) {
+        if (mangaKey.isBlank() || chapterUrl.isBlank()) return
+        val map = chapterReadMap()
+        val per = map.getOrPut(mangaKey) { HashMap() }
+        per[chapterUrl] = MangaChapterRead(chapterUrl, finished = true, at = System.currentTimeMillis())
+        chapterReadCache = map
+        saveChapterRead(map)
+        ping()
+    }
+
+    /** Manga-level mark from its chapters: none started, some in progress, or all finished. */
+    fun mangaReadState(mangaKey: String, chapterUrls: List<String>): MangaReadState {
+        val per = chapterReadMap()[mangaKey] ?: return MangaReadState.NONE
+        if (chapterUrls.isEmpty()) return MangaReadState.NONE
+        var anyStarted = false
+        for (u in chapterUrls) {
+            val s = per[u] ?: return MangaReadState.READING.takeIf { anyStarted } ?: MangaReadState.NONE
+            if (!s.finished) return MangaReadState.READING
+            anyStarted = true
+        }
+        return if (anyStarted) MangaReadState.COMPLETED else MangaReadState.NONE
+    }
+
+    private fun chapterReadMap(): MutableMap<String, MutableMap<String, MangaChapterRead>> {
+        chapterReadCache?.let { return it }
+        val map = HashMap<String, MutableMap<String, MangaChapterRead>>()
+        runCatching {
+            val f = chapterReadFile(ctx())
+            if (!f.exists()) return@runCatching
+            val arr = JSONArray(f.readText())
+            for (i in 0 until arr.length()) {
+                runCatching {
+                    val o = arr.getJSONObject(i)
+                    val k = o.optString("mangaKey")
+                    val u = o.optString("chapterUrl")
+                    if (k.isBlank() || u.isBlank()) return@runCatching
+                    map.getOrPut(k) { HashMap() }[u] = MangaChapterRead(
+                        chapterUrl = u,
+                        finished = o.optBoolean("finished", false),
+                        at = o.optLong("at"),
+                    )
+                }
+            }
+        }
+        chapterReadCache = map
+        return map
+    }
+
+    private fun saveChapterRead(map: Map<String, Map<String, MangaChapterRead>>) {
+        runCatching {
+            val arr = JSONArray()
+            for ((k, per) in map) {
+                for ((_, s) in per) {
+                    arr.put(
+                        JSONObject().apply {
+                            put("mangaKey", k)
+                            put("chapterUrl", s.chapterUrl)
+                            put("finished", s.finished)
+                            put("at", s.at)
+                        }
+                    )
+                }
+            }
+            chapterReadFile(ctx()).writeText(arr.toString())
+        }
     }
 
     private fun progressMap(): MutableMap<String, MangaProgress> {

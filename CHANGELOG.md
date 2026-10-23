@@ -1,3 +1,13 @@
+## 0.11.91 (continuous build only)
+
+### Changed (batch: exact phone provider box, grouped phone search, TV search manage-feed fix)
+- Phone provider box is now the exact reference dialog like TV: wide card with title + All Plugins (Global) pill, full-width filter, engine chips, then providers SIDE BY SIDE in a grid of icon+name+type cards (duplicate names carry their repo tag), purple when picked. Tap picks and closes, hold ticks into multi-select, Done saves; pins and the pack caret live on the cards, folders/catalogues/trackers stay full-width above the grid, and Manage feed opens the same feed mixer TV uses
+- Phone search groups hits by provider: each source is one shelf with a big name + tiny "engine · repo" tag + a sideways row of its posters, and "See all (N)" opens that provider's own vertical grid with a back row. TV keeps its single reference grid untouched. The scope button is one compact line that always fits, and TV's Manage entry now opens the multi-select provider dialog instead of the personal-catalogue folder
+- Manga reading progress: chapters track started/finished automatically (marked at the end page) and manga shows Reading/Completed, so finished and in-progress reads are visible at a glance
+- Backup repair: extensions whose files went missing reinstall from their repo URL, with a repair-all pass that names the ones it could not reach at the end
+- Download-all asks This extension vs All extensions after the episode pick and unions servers across every picked episode like playback does, instead of the current-provider-only search
+- Player server screen stays readable over bright art (shadowed text), the last row scrolls clear of the footer, source filter pills narrow rows by origin, and the header is compact on phones
+
 ## 0.11.90 (continuous build only)
 
 ### Changed (batch: exact server screen, exact provider box, exact manage feed, full download-all, resume fit)

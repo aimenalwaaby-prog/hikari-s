@@ -542,6 +542,10 @@ fun MangaReaderScreen(
                 at = System.currentTimeMillis(),
             )
         )
+        // Chapter read marks (detail page pills + manga badge): the last
+        // page finishes the chapter, anything before that starts it.
+        if (p >= list.size - 1) MangaStore.markChapterFinished(key, url)
+        else MangaStore.markChapterStarted(key, url)
     }
 
     LaunchedEffect(activeChapterUrl, pages) {
