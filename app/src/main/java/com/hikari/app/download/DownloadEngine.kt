@@ -117,6 +117,7 @@ object DownloadEngine {
                 reporter = Reporter(onProgress),
                 preferredHeight = task.preferredHeight,
                 preferredBandwidth = task.preferredBandwidth,
+                preferredAudio = task.preferredAudio,
                 isCancelled = isCancelled,
             )
             if (task.kind == DownloadKind.EXPORT) {
@@ -163,6 +164,24 @@ object DownloadEngine {
                 .map { v -> (v.height.coerceAtLeast(0)) to v.bandwidth }
                 .distinct()
                 .sortedByDescending { (h, bw) -> if (h > 0) h.toLong() else bw }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * The audio rendition NAMES an HLS master playlist offers ("English",
+     * "Hindi", "Original"…), in playlist order, de-duplicated. The download
+     * flows ask this when nothing has PLAYED yet (same reason as
+     * [hlsQualities]): a batch picked from the detail page has no player
+     * tracks to read the audio set from. Empty when the playlist carries no
+     * separate audio — then there is nothing to ask.
+     */
+    suspend fun hlsAudios(url: String, headers: Map<String, String>): List<String> {
+        if (url.isBlank()) return emptyList()
+        val ua = headers["User-Agent"]?.takeIf { it.isNotBlank() } ?: Http.UA
+        return runCatching {
+            val (text, finalUrl) = fetchText(url, headers, ua)
+            val top = parsePlaylist(text, finalUrl)
+            top.audios.map { it.name.trim() }.filter { it.isNotBlank() }.distinct()
         }.getOrDefault(emptyList())
     }
 
@@ -273,6 +292,7 @@ object DownloadEngine {
         reporter: Reporter,
         preferredHeight: Int,
         preferredBandwidth: Long,
+        preferredAudio: String = "",
         isCancelled: () -> Boolean,
     ): HlsResult {
         val (text, finalUrl) = fetchText(masterUrl, headers, ua)
@@ -285,7 +305,16 @@ object DownloadEngine {
             val best = pickVariant(variants, preferredHeight, preferredBandwidth)
             videoUrl = best.url
             best.audioGroup
-                ?.let { g -> top.audios.firstOrNull { it.group == g } }
+                ?.let { g -> top.audios.filter { it.group == g } }
+                ?.let { cands ->
+                    // One answer for the whole batch (see preferredAudio): an
+                    // episode whose playlist lacks the named rendition falls
+                    // back to its own first audio instead of failing.
+                    if (preferredAudio.isNotBlank()) {
+                        cands.firstOrNull { it.name.equals(preferredAudio, ignoreCase = true) }
+                            ?: cands.firstOrNull()
+                    } else cands.firstOrNull()
+                }
                 ?.let { audioUrl = it.url }
         } else {
             videoUrl = finalUrl

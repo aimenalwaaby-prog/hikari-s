@@ -93,6 +93,11 @@ object ServerMeta {
         return haystack.contains(token, ignoreCase = true)
     }
 
+    /** The 54dp row badge for a server (its parsed quality, "SRC" when the
+     *  texts state none) — the reference Sources row's leading badge. */
+    fun rowQuality(name: String, details: String): String =
+        qualityOf("$name $details") ?: "SRC"
+
     /**
      * The uniform details line for [name]+[details] (no host — the caller
      * prepends it). Returns "" when nothing is known. Never invents size /

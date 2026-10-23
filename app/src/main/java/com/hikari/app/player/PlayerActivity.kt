@@ -6202,6 +6202,181 @@ class PlayerActivity : ComponentActivity() {
         if (onClick != null) card.setOnClickListener { onClick() }
         return card
     }
+    /**
+     * One server as the reference Sources row: a 54dp quality badge (or SRC),
+     * the name + meta badges line, READY (PLAYING on the active server), and
+     * download / external / play buttons. The whole row plays on tap. The row
+     * carries its own glass pill because the Sources screen runs ghostPanel —
+     * rows float directly over the art, with no dark box around them.
+     */
+    private fun serverRefRow(
+        src: PlayerSource,
+        selected: Boolean,
+        onPlay: () -> Unit,
+        onDownload: () -> Unit,
+        onExternal: () -> Unit,
+    ): View {
+        val density = resources.displayMetrics.density
+        val glass = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 12f * density
+            setColor(if (selected) withAlpha(accentMidColor, 0.22f) else 0x14FFFFFF)
+            setStroke(
+                (1 * density).toInt().coerceAtLeast(1),
+                if (selected) withAlpha(accentMidColor, 0.9f) else 0x30FFFFFF
+            )
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            clipToOutline = true
+            if (playerTvRemote()) {
+                isFocusableInTouchMode = true
+                if (foreground == null) foreground = tvFocusRing()
+            }
+            minimumHeight = (56 * density).roundToInt()
+            setPadding(
+                (10 * density).toInt(), (9 * density).toInt(),
+                (10 * density).toInt(), (9 * density).toInt()
+            )
+            background = RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), glass, glass)
+            setOnClickListener { onPlay() }
+        }
+        // 54dp quality badge (or SRC), fixed width like the reference row.
+        val quality = com.hikari.app.data.ServerMeta.rowQuality(src.name, src.details)
+        row.addView(TextView(this).apply {
+            text = quality
+            dpText(10f)
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            isSingleLine = true
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFFFFFFFF.toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 6f * density
+                setColor(withAlpha(accentMidColor, 0.30f))
+                setStroke((1 * density).toInt().coerceAtLeast(1), withAlpha(accentMidColor, 0.7f))
+            }
+            val vPad = (7 * density).toInt()
+            setPadding((4 * density).toInt(), vPad, (4 * density).toInt(), vPad)
+        }, LinearLayout.LayoutParams((54 * density).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginEnd = (9 * density).toInt()
+        })
+        // Name + meta badges line.
+        var facts = com.hikari.app.data.ServerMeta.enrichedDetails(src.name, src.details, src.url)
+        if (quality != "SRC") {
+            val segs = facts.split(" • ").toMutableList()
+            if (segs.isNotEmpty() && segs[0].equals(quality, ignoreCase = true)) segs.removeAt(0)
+            facts = segs.joinToString(" • ")
+        }
+        val badgeLine = listOfNotNull(
+            if (src.isM3u8) "HLS" else null,
+            if (src.isMpd) "DASH" else null,
+            if (src.isTorrent || src.torrentStream) "TORRENT" else null,
+            if (src.subtitles.isNotEmpty()) "SUBS " + src.subtitles.size else null,
+        ).joinToString(" · ")
+        val metaLine = listOf(badgeLine, facts)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+            .ifBlank { hostOf(src.url).orEmpty() }
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@PlayerActivity).apply {
+                text = serverLabel(src)
+                dpText(13f)
+                includeFontPadding = false
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFDCE3EE.toInt())
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            if (metaLine.isNotBlank()) {
+                addView(TextView(this@PlayerActivity).apply {
+                    text = metaLine
+                    dpText(10.5f)
+                    includeFontPadding = false
+                    setTextColor(0xFF98A3B5.toInt())
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (2 * density).toInt() })
+            }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        // READY (or PLAYING on the committed server).
+        row.addView(TextView(this).apply {
+            text = if (selected) "PLAYING" else "READY"
+            dpText(10f)
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            isSingleLine = true
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(withAlpha(accentMidColor, 0.95f))
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = (8 * density).toInt()
+            marginEnd = (4 * density).toInt()
+        })
+        fun iconBtn(iconRes: Int, desc: String, onClick: () -> Unit) {
+            row.addView(ImageView(this).apply {
+                setImageResource(iconRes)
+                imageTintList = ColorStateList.valueOf(0xE6FFFFFF.toInt())
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                background = ContextCompat.getDrawable(
+                    this@PlayerActivity, R.drawable.circle_glass_ripple
+                )
+                isClickable = true
+                if (playerTvRemote()) {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    if (foreground == null) foreground = tvFocusRing()
+                }
+                val p = (7 * density).toInt()
+                setPadding(p, p, p, p)
+                setOnClickListener { onClick() }
+            }, LinearLayout.LayoutParams(
+                (36 * density).toInt(), (36 * density).toInt()
+            ).apply { marginStart = (4 * density).toInt() })
+        }
+        // A download from any row must not fall back to playback when the
+        // sheet closes (see startChoicePending): the row tap claims the sheet.
+        iconBtn(R.drawable.ic_download, I18n.t("Download")) {
+            onDownload()
+        }
+        iconBtn(R.drawable.ic_external, I18n.t("Open in browser")) {
+            onExternal()
+        }
+        row.addView(TextView(this).apply {
+            text = "▶"
+            dpText(13f)
+            includeFontPadding = false
+            gravity = Gravity.CENTER
+            setTextColor(0xFFFFFFFF.toInt())
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(withAlpha(accentStartColor, 0.9f), withAlpha(accentEndColor, 0.95f))
+            ).apply { cornerRadius = 999f }
+            val hPad = (13 * density).toInt()
+            val vPad = (9 * density).toInt()
+            setPadding(hPad, vPad, hPad, vPad)
+            isClickable = true
+            if (playerTvRemote()) {
+                isFocusable = true
+                isFocusableInTouchMode = true
+                if (foreground == null) foreground = tvFocusRing()
+            }
+            setOnClickListener { onPlay() }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { marginStart = (6 * density).toInt() })
+        return row
+    }
+
     private fun glassRow(option: GlassOption, onClick: (() -> Unit)?): View {
         // Server results are rectangular full-width cards like the reference
         // Sources screen — never stadium pills, on phone and TV alike.
@@ -6575,6 +6750,13 @@ class PlayerActivity : ComponentActivity() {
         headerView: View? = null,
         /** Reference footer (Skip Loading + Cancel) drawn below the panel. */
         footerView: View? = null,
+        /** Ghost mode (the Sources screen): no dark glass box — the rows are
+         *  glass pills floating directly over the full-bleed art, like the
+         *  reference client's sheet. The scroll list is sized to the room and
+         *  added straight to the root, the panel stays out of the tree, and
+         *  bending (a curved-pane concern) is skipped. Null = a boxed panel,
+         *  every other caller unchanged. */
+        ghostPanel: Boolean = false,
     ): TextView? {
         val density = resources.displayMetrics.density
         // The halo is where the curved pane's neon blooms. A flat panel (every
@@ -6769,13 +6951,13 @@ class PlayerActivity : ComponentActivity() {
             // the whole list fits that is the row container itself, and the row
             // stack's outline then IS the shape. A dialog with rows in two
             // places (track list + control rows) hands over both.
-            rowHosts.forEach { bendHost(it) }
+            if (!ghostPanel) rowHosts.forEach { bendHost(it) }
             // …and anything else the content holds that is not part of a host:
             // a message line above the list (the download sheet's "Episode 683
             // · …"), which otherwise sits at the panel's full inner width and
             // gets sliced by the bowed edge. The content is a plain view by
             // signature; only a container can hold loose children.
-            (content as? ViewGroup)?.let { bendLoose(it) }
+            if (!ghostPanel) (content as? ViewGroup)?.let { bendLoose(it) }
         }
         panel.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         // Rows are bent to the curve at their CURRENT height inside the panel, so
@@ -6784,7 +6966,7 @@ class PlayerActivity : ComponentActivity() {
         // the (wider) margins it was given while it was still off-screen, and
         // the bowed edges slice it — which is what cut the lower quality rows
         // ("1080p" -> "0p") in a list long enough to scroll.
-        scroll.setOnScrollChangeListener { _, _, _, _, _ -> panel.rebend() }
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> if (!ghostPanel) panel.rebend() }
 
         val win = windowSize()
         // Width of the PANEL's own silhouette (the halo is added around it), so
@@ -6878,11 +7060,16 @@ class PlayerActivity : ComponentActivity() {
          * settings sheet of any sensible size fits whole, and only a genuinely
          * long list (thirty subtitle tracks) has to scroll.
          */
+        /** Room the footer under the panel needs, so a panel with footer
+         *  buttons (Skip Loading + Cancel) keeps them on screen instead of
+         *  spending their room and pushing them off the bottom. */
+        val footerReserve = if (footerView != null) (72 * density).toInt() else 0
         fun roomFor(winNow: Point, width: Int): Int =
             // Full-bleed Sources (edge-to-edge): the glow spills past the screen
             // edges instead of insetting the box, so only one halo plus a 4dp
             // breath is kept — the red-marked extra length lives here.
             (winNow.y - headerHeightFor(width + 2 * halo) -
+                footerReserve -
                 (if (edgeToEdge) halo else 2 * halo) -
                 ((if (edgeToEdge) 4 else 8) * density).toInt())
                 .coerceAtLeast((110 * density).toInt())
@@ -6900,10 +7087,19 @@ class PlayerActivity : ComponentActivity() {
             (preferredHeightDp * density).toInt().coerceIn(minPanel, room)
         }
         // The panel view carries its own halo, so its silhouette comes out
-        // exactly panelW x panelH in the middle of it.
-        root.addView(panel, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, panelH + 2 * halo
-        ))
+        // exactly panelW x panelH in the middle of it. Ghost mode skips the
+        // box: the scroll list goes straight onto the root at the same size,
+        // so rows float over the art instead of inside a dark panel.
+        if (ghostPanel) {
+            (scroll.parent as? ViewGroup)?.removeView(scroll)
+            root.addView(scroll, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, panelH + 2 * halo
+            ))
+        } else {
+            root.addView(panel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, panelH + 2 * halo
+            ))
+        }
         // Reference footer (Skip Loading + Cancel) below the glass panel.
         footerView?.let {
             root.addView(it, LinearLayout.LayoutParams(
@@ -6923,8 +7119,12 @@ class PlayerActivity : ComponentActivity() {
                 addView(android.view.View(this@PlayerActivity).apply {
                     // Readable scrim, not a blackout: dark edges for the
                     // rows to sit on, clearer middle so the title art reads
-                    // through like the reference client.
-                    background = GradientDrawable(
+                    // through like the reference client. Ghost mode (Sources
+                    // over art) keeps it lighter still, so the art reads.
+                    background = if (ghostPanel) GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        intArrayOf(0xB3000000.toInt(), 0x26000000.toInt(), 0xB3000000.toInt())
+                    ) else GradientDrawable(
                         GradientDrawable.Orientation.TOP_BOTTOM,
                         intArrayOf(0xD9000000.toInt(), 0x55000000.toInt(), 0xD9000000.toInt())
                     )
@@ -7844,6 +8044,13 @@ class PlayerActivity : ComponentActivity() {
             // fastest server instead of the one that was chosen.
             if (startChooserShown) return
             startChooserShown = true
+            // The start chooser is a landscape screen like the reference: the
+            // server rows read full-bleed over the title art on phones too.
+            if (!playerTvRemote()) {
+                runCatching {
+                    requestedOrientation = SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                }
+            }
             // Backing out of a download chooser must NOT fall back to playing
             // the remembered server — there is no playback to fall back to.
             startChoicePending = !forDownload
@@ -7911,54 +8118,21 @@ class PlayerActivity : ComponentActivity() {
          * ever appears in one section, so the counts add up to the number of
          * servers on screen.
          */
+        /**
+         * The one flat section: the title's own origin rows first (what the
+         * user opened the title from), then everything else in arrival order.
+         * The reference Sources sheet has no engine chips and no section
+         * headings — servers are a single full-width result list.
+         */
         fun sections(): List<Pair<String, List<Int>>> {
-            // Origin rows lead (they are what the user opened the title from),
-            // then every engine group. When the origin's own engine is ALSO a
-            // group — a CloudStream title plus the other installed CloudStream
-            // repos — the two are one section named after the engine: two
-            // "CLOUDSTREAM" headings (and two identical chips) would be a bug of
-            // their own, and the other repos' servers belong beside the origin's
-            // anyway.
-            val byName = LinkedHashMap<String, MutableList<Int>>()
             val origin = sources.indices.filter { sources[it].isFromOrigin() }
-            if (origin.isNotEmpty() && originLabel.isNotBlank()) {
-                byName.getOrPut(originLabel) { ArrayList() }.addAll(origin)
-            }
-            for (name in groups()) {
-                val idx = sources.indices.filter {
-                    !sources[it].isFromOrigin() && serverGroup(sources[it]) == name
-                }
-                if (idx.isEmpty()) continue
-                byName.getOrPut(name) { ArrayList() }.addAll(idx)
-            }
-            return byName.map { it.key to it.value.toList() }
+            val rest = sources.indices.filter { !sources[it].isFromOrigin() }
+            return listOf("All" to (origin + rest))
         }
 
-        val chipRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            // Chips with labels of different lengths all sit centred in their
-            // own pill instead of being nudged onto a shared baseline.
-            isBaselineAligned = false
-        }
-        // The engine chips swipe sideways for the engines that don't fit: with
-        // four extensions installed the row is wider than the panel, and before
-        // this there was no way to reach the chips past the edge — and no hint
-        // that anything was out there. OVER_SCROLL_ALWAYS adds the stretch glow
-        // that says "this row moves".
-        val chipScroll = sidewaysStrip(chipRow)
-        // One container for the chip strip, the headers AND the rows: the panel
-        // bends a registered host's children to the glass's curve, so the strip
-        // has to be one of them. Kept outside the list it was measured against
-        // the panel's full width, so its first chip sat under the concave left
-        // edge and the bowed glass sliced it into an empty stub — the "All"
-        // button that looked collapsed and cut off. As a bent child the whole
-        // strip is pulled inside the silhouette at its own height, so the first
-        // chip always clears the curve, and the strip scrolls within that.
+        // No engine chips and no section headings: the reference Sources sheet
+        // is one flat origin-first list, so the list holds rows only.
         val list = optionList()
-        list.addView(chipScroll, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = (2 * density).roundToInt() })
 
         /**
          * One engine chip. Its box is measured from the TEXT rather than left to
@@ -8105,7 +8279,7 @@ class PlayerActivity : ComponentActivity() {
             // the blank box over the searching footer from the report. Empty
             // always falls through to the placeholder branch.
             if (sig.isNotEmpty() && sig == builtSig && builtSelected == currentIndex && stateRowView == null &&
-                (list.childCount - 1) == sig.size) return
+                (list.childCount) == sig.size) return
             // Append-only live growth (the common search case: new servers land
             // at the end of the last section): keep every view on screen and
             // only inflate the tail. A full teardown on every below-fold append
@@ -8119,7 +8293,7 @@ class PlayerActivity : ComponentActivity() {
             // appends nothing still verifies positions, so a dropped view (a
             // disposed list, a cleared container) is re-seated instead of going
             // permanently missing — the log-proven permanent blank cannot recur.
-            var slot = 1 // child index inside `list` (0 is the chip strip)
+            var slot = 0 // child index inside `list` (0 is the chip strip)
             fun place(v: View) {
                 val cur = list.indexOfChild(v)
                 if (cur == slot) { slot++; return }
@@ -8163,26 +8337,64 @@ class PlayerActivity : ComponentActivity() {
                 rowViews[key]?.let { return it }
                 return runCatching {
                     val src = sources[i]
-                    val opt = serverOption(src, i)
-                    val tvMenu = PlayerSkins.normalize(skin) == PlayerSkins.TV && playerTvRemote()
-                    val v = glassRow(opt) {
-                        startChoicePending = false
-                        serverPickActed = true
-                        dialog.dismiss()
-                        if (forDownload) {
+                    val v = serverRefRow(
+                        src = src,
+                        selected = playbackCommitted && i == currentIndex,
+                        onPlay = {
+                            startChoicePending = false
+                            serverPickActed = true
+                            dialog.dismiss()
+                            if (forDownload) {
+                                currentIndex = i
+                                pickedByUser = true
+                                showDownloadDialog()
+                            } else if (i != currentIndex || !playbackCommitted) {
+                                noSubsRetry = false
+                                playSource(i)
+                                pickedByUser = true
+                            }
+                        },
+                        onDownload = {
+                            startChoicePending = false
+                            serverPickActed = true
                             currentIndex = i
                             pickedByUser = true
+                            dialog.dismiss()
                             showDownloadDialog()
-                        } else if (i != currentIndex || !playbackCommitted) {
-                            noSubsRetry = false
-                            playSource(i)
-                            pickedByUser = true
-                        }
-                    }
+                        },
+                        onExternal = {
+                            val url = src.url
+                            if (url.isBlank() || !url.startsWith("http", ignoreCase = true)) {
+                                android.widget.Toast.makeText(
+                                    this@PlayerActivity,
+                                    I18n.t("No link to open."),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                return@serverRefRow
+                            }
+                            runCatching {
+                                startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(url)
+                                    ).apply {
+                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                                    }
+                                )
+                            }.onFailure {
+                                android.widget.Toast.makeText(
+                                    this@PlayerActivity,
+                                    I18n.t("No app can open this link."),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                    )
                     v.layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply {
-                        bottomMargin = if (opt.labelMaxLines >= 3 || tvMenu) (6 * density).toInt() else (3 * density).toInt()
+                        bottomMargin = (6 * density).toInt()
                     }
                     rowViews[key] = v
                     v.tag = key
@@ -8192,10 +8404,7 @@ class PlayerActivity : ComponentActivity() {
                 }.getOrNull()
             }
             visible.forEach { (name, memberIdx) ->
-                if (chip == "All") {
-                    newSig.add("#" + name)
-                    place(headerView(name, memberIdx.size, slot == 1))
-                }
+                // No section headings: one flat origin-first list.
                 memberIdx.forEach { i ->
                     val key = rowKey(i)
                     val v = rowView(i, key) ?: return@forEach
@@ -8204,9 +8413,9 @@ class PlayerActivity : ComponentActivity() {
                     rendered++
                 }
             }
-            // Trailing children past the desired set (a chip switch narrowing
-            // the list) are detached; their views stay cached for reuse.
-            while (list.childCount - 1 > newSig.size) list.removeViewAt(list.childCount - 1)
+            // Trailing children past the desired set are detached; their
+            // views stay cached for reuse.
+            while (list.childCount > newSig.size) list.removeViewAt(list.childCount - 1)
             if (rowViews.size > sources.size + 24) {
                 val keepSet = newSig.toHashSet()
                 rowViews.keys.retainAll(keepSet)
@@ -8217,7 +8426,7 @@ class PlayerActivity : ComponentActivity() {
             // above only counts NEW rows): a paint that appends nothing must not
             // read as an empty chooser, or every steady-state tick logs a false
             // "chooser empty" and stacks another Searching card under live rows.
-            val onScreenRows = (list.childCount - 1).coerceAtLeast(0)
+            val onScreenRows = list.childCount
             if (rendered == 0 && onScreenRows == 0) {
                 // Opened before the first server landed ("don't play directly"
                 // opens the chooser the instant the player does): show that the
@@ -8237,7 +8446,7 @@ class PlayerActivity : ComponentActivity() {
                         "chooser empty with $sessionSize server(s) in the live session " +
                             "(sources=${sources.size}, chip=$chip, sections=${runCatching { sections().size }.getOrDefault(-1)}" +
                             ", visible=${visible.size}/${runCatching { visible.sumOf { it.second.size } }.getOrDefault(-1)}, rendered=$rendered, onScreen=$onScreenRows, child=${list.childCount}" +
-                            ", builtSig=${builtSig.size}, sig=${sig.size}, want=${list.childCount - 1}" +
+                            ", builtSig=${builtSig.size}, sig=${sig.size}, want=${list.childCount}" +
                             (if (firstRowError != null) ", rowErr=$firstRowError" else "") + ")",
                     )
                 }
@@ -8304,94 +8513,11 @@ class PlayerActivity : ComponentActivity() {
             builtSelected = currentIndex
         }
 
-        /** The pills the strip currently shows and which of them is selected, so
-         *  a rebuild that would produce exactly the same strip is skipped: a
-         *  server landing every second used to tear down and re-inflate the whole
-         *  chip row (and throw away the strip's scroll offset) for nothing. */
-        var builtChips = ""
-        var builtChipSelection = ""
-        // Engine pills by name, living across paints like the rows below:
-        // a new engine arriving mid-search must not tear the strip down.
-        val chipViews = HashMap<String, TextView>()
-        fun rebuildChips() {
-            // sections() walks provider metadata; a poison entry must degrade
-            // to the bare "All" strip instead of throwing out of the watcher
-            // (a throw here used to abort paintChooser before rebuildList, so
-            // the box sat blank over servers the search had already found).
-            val secs = runCatching { sections() }.getOrDefault(emptyList())
-            val names = listOf("All") + secs.map { it.first }
-            val sig = names.joinToString("\u0000")
-            // Counts first: the strip rebuilds when servers land (counts change)
-            // as well as when sections appear — but never for nothing, so the
-            // strip's scroll offset survives live ticks that change nothing.
-            val chipCounts = runCatching { secs.toMap().mapValues { it.value.size } }
-                .getOrDefault(emptyMap())
-            val totalCount = chipCounts.values.sum()
-            if (sig == builtChips && chip + "|" + totalCount == builtChipSelection) return
-            builtChips = sig
-            builtChipSelection = chip + "|" + totalCount
-            // Provider chips carry their server counts, like the reference
-            // Sources screen ("All 74", "HdHub 23"): the counts come from the
-            // same sections the list below renders, so they always agree.
-            fun pillLabel(name: String): String {
-                val count = if (name == "All") totalCount else (chipCounts[name] ?: 0)
-                return if (count > 0) "$name  $count" else name
-            }
-            // Fast path (the live-search case: same engines, counts growing):
-            // restyle the pills in place — no detach, no strip teardown, no
-            // panel-wide remeasure storm. A full rebuild happens only when the
-            // engine SET changes or the user taps a chip (both rare).
-            if (chipRow.childCount == names.size) {
-                var match = true
-                for (i in names.indices) {
-                    val tv = chipRow.getChildAt(i) as? TextView
-                    if (tv == null || tv.tag as? String != names[i]) { match = false; break }
-                }
-                if (match) {
-                    for (i in names.indices) {
-                        styleChipPill(chipRow.getChildAt(i) as TextView, pillLabel(names[i]), names[i] == chip)
-                    }
-                    return
-                }
-            }
-            // New engine set (a server from another extension lands): sync
-            // the pills in place exactly like the rows below — reuse by
-            // engine name, move to order, inflate only the genuinely new,
-            // detach the departed. The old removeAllViews tore the strip
-            // down on every new-engine arrival and remeasured the whole
-            // panel mid-search (the reported bottom-append blank).
-            var cslot = 0
-            for (name in names) {
-                var tv = chipViews[name]
-                if (tv == null) {
-                    // The pill carries its own measured LayoutParams (see
-                    // chipPill), so it is added bare — it can neither
-                    // collapse nor be squeezed.
-                    tv = chipPill(pillLabel(name), name == chip) {
-                        chip = name
-                        rebuildChips()
-                        rebuildList()
-                    }
-                    tv.tag = name
-                    chipViews[name] = tv
-                } else {
-                    styleChipPill(tv, pillLabel(name), name == chip)
-                }
-                val cur = chipRow.indexOfChild(tv)
-                if (cur != cslot) {
-                    if (cur >= 0) chipRow.removeViewAt(cur)
-                    (tv.parent as? ViewGroup)?.let { if (it !== chipRow) it.removeView(tv) }
-                    chipRow.addView(tv, cslot.coerceAtMost(chipRow.childCount))
-                }
-                cslot++
-            }
-            while (chipRow.childCount > names.size) chipRow.removeViewAt(chipRow.childCount - 1)
-            chipViews.keys.retainAll(names.toSet())
-        }
+// No engine chips (the reference sheet is one flat list): this stays a
+        // no-op so the dead chip builder below still resolves.
+        fun rebuildChips() {}
 
-        rebuildChips()
         syncFromSession()
-        rebuildChips()
         rebuildList()
         // Rows added after the dialog is already on screen need an explicit
         // layout pass: without it a chooser opened over an empty list can sit
@@ -8449,7 +8575,6 @@ class PlayerActivity : ComponentActivity() {
                 val content = if (v.childCount > 0) v.getChildAt(0) else null
                 content != null && content.bottom - (v.scrollY + v.height) <= nearBottomPx
             } ?: false)
-            val keepX = chipScroll.scrollX
             // Finger-down state for this paint (see the guard above): when true
             // this paint rebuilds without a synchronous measure and never
             // restores scroll — the settle paint after the finger lifts does.
@@ -8463,7 +8588,7 @@ class PlayerActivity : ComponentActivity() {
             var anchorOff = 0
             sv?.let { v ->
                 val y = v.scrollY
-                for (ai in 1 until list.childCount) {
+                for (ai in 0 until list.childCount) {
                     val c = list.getChildAt(ai) ?: continue
                     if (c.bottom > y + 4) {
                         anchorTag = c.tag as? String
@@ -8487,9 +8612,8 @@ class PlayerActivity : ComponentActivity() {
             for (s in sources) contentHash = contentHash * 31 + s.identityKey().hashCode()
             val paintSig = sources.size.toString() + "|" + contentHash + "|" + chip + "|" +
                 currentIndex + "|" + playbackCommitted
-            if (paintSig == lastPaintSig && builtSig.isNotEmpty() && (list.childCount - 1) > 0) return
+            if (paintSig == lastPaintSig && builtSig.isNotEmpty() && list.childCount > 0) return
             lastPaintSig = paintSig
-            rebuildChips()
             rebuildList()
             // Synchronous measure + layout: positions are set HERE, on this
             // frame, instead of in a posted traversal that the restore below
@@ -8531,13 +8655,12 @@ class PlayerActivity : ComponentActivity() {
             // the recovery actually grew the list (settle pass, which early-
             // returns on identical input), so a poisoned list cannot loop.
             val beforeRecover = list.childCount
-            if (dialog.isShowing && sources.isNotEmpty() && (list.childCount - 1) <= 0) {
+            if (dialog.isShowing && sources.isNotEmpty() && list.childCount <= 0) {
                 com.hikari.app.data.Logs.log(
                     "Player",
                     "chooser paint left zero rows over ${sources.size} server(s); recovering in place",
                 )
                 syncFromSession()
-                rebuildChips()
                 rebuildList()
                 if (sv != null && sv.width > 0) {
                     runCatching {
@@ -8592,7 +8715,7 @@ class PlayerActivity : ComponentActivity() {
                         val tag = anchorTag
                         var seated = false
                         if (tag != null) {
-                            for (ai in 1 until list.childCount) {
+                            for (ai in 0 until list.childCount) {
                                 val c = list.getChildAt(ai) ?: continue
                                 if (c.tag as? String == tag) {
                                     sv.scrollTo(0, (c.top - anchorOff).coerceIn(0, maxY))
@@ -8605,7 +8728,6 @@ class PlayerActivity : ComponentActivity() {
                     }
                 }
             }
-            if (dialog.isShowing && chipScroll.scrollX != keepX) chipScroll.scrollTo(keepX, 0)
         }
         // Live servers land in bursts (dozens for big titles): painting every
         // single arrival on the main thread saturates it — the sheet freezes
@@ -8626,9 +8748,9 @@ class PlayerActivity : ComponentActivity() {
             // non-empty list paints NOW, however many children the container
             // holds (a mid-list collapse has >1 children yet shows nothing —
             // the reported bottom-append blank).
-            val onScreenNow = (list.childCount - 1).coerceAtLeast(0)
+            val onScreenNow = list.childCount
             val interactingNow = chooserTouching || chooserScrolling
-            val blankNow = list.childCount <= 1 || (sources.isNotEmpty() && onScreenNow == 0)
+            val blankNow = list.childCount <= 0 || (sources.isNotEmpty() && onScreenNow == 0)
             if (blankNow) {
                 lastChooserPaintMs = now
                 if (dialog.isShowing) paintChooser()
@@ -8717,10 +8839,24 @@ class PlayerActivity : ComponentActivity() {
         val epS = intent.getIntExtra("histEpisodeSeason", 0)
         val epN = intent.getIntExtra("histEpisodeNumber", 0)
         val epNm = intent.getStringExtra("histEpisodeName").orEmpty()
-        val epPillText = when {
-            epS > 1 && epN > 0 -> "S${epS}:E${epN}" + (if (epNm.isNotBlank()) " • $epNm" else "")
-            epN > 0 -> "Episode $epN" + (if (epNm.isNotBlank()) " • $epNm" else "")
-            else -> epNm
+        val epPillText = run {
+            // The reference pill is "S2:E9 • Name" (or the movie title): the
+            // provider's own episode name is very often just the generic
+            // label again ("Episode 2 • Episode 2"), so a name that adds
+            // nothing is dropped instead of duplicated.
+            val generic = when {
+                epS > 0 && epN > 0 -> "S${epS}:E${epN}"
+                epN > 0 -> "Episode $epN"
+                else -> ""
+            }
+            val nm = epNm.trim()
+            when {
+                generic.isBlank() -> nm
+                nm.isBlank() -> generic
+                nm.equals(generic, ignoreCase = true) -> generic
+                nm.equals("Episode $epN", ignoreCase = true) -> generic
+                else -> "$generic • $nm"
+            }
         }
         val logoModel = PosterLoader.model(intent.getStringExtra("titleLogo")?.takeIf { it.isNotBlank() })
         var foundLine: TextView? = null
@@ -8793,8 +8929,23 @@ class PlayerActivity : ComponentActivity() {
             includeFontPadding = false
             setTextColor(0xFFD5DCE8.toInt())
         }
+        /**
+         * The SOURCES pill restyled for [label] without ever clipping: the
+         * shared styler fixes the pill width from the label's glyphs, and the
+         * live count outgrows the opening width ("0 SOURCES" → "128
+         * SOURCES") — so the measured width stays as the floor and the pill
+         * wraps wider instead of slicing its own text at the panel's edge.
+         */
+        fun restyleSourcesPill(tv: TextView, label: String) {
+            styleChipPill(tv, label, true)
+            (tv.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                tv.minWidth = lp.width
+                lp.width = LinearLayout.LayoutParams.WRAP_CONTENT
+                tv.layoutParams = lp
+            }
+        }
         sourcesPill = TextView(this)
-        styleChipPill(sourcesPill!!, "0 SOURCES", true)
+        restyleSourcesPill(sourcesPill!!, "0 SOURCES")
         foundRow.addView(foundLine, LinearLayout.LayoutParams(
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
         ))
@@ -8855,11 +9006,28 @@ class PlayerActivity : ComponentActivity() {
             gravity = Gravity.CENTER
             setPadding(0, (10 * density).toInt(), 0, (12 * density).toInt())
         }
-        serverFooter.addView(footerBtn(I18n.t("Skip Loading")) { dialog.dismiss() },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginEnd = (10 * density).toInt() })
+        if (!forDownload) {
+            serverFooter.addView(footerBtn(I18n.t("Skip Loading")) {
+                // The reference Skip: play the best of what has landed so far,
+                // right now — not a second dismiss. Empty-handed it says so.
+                if (sources.isEmpty()) {
+                    android.widget.Toast.makeText(
+                        this,
+                        I18n.t("Still looking for sources…"),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@footerBtn
+                }
+                startChoicePending = false
+                serverPickActed = true
+                dialog.dismiss()
+                playSource(preferredStartIndex())
+            },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = (10 * density).toInt() })
+        }
         serverFooter.addView(footerBtn(I18n.t("Cancel"), false) {
             // Abandon, never fall back to a server: the player leaves
             // instead of starting something the user just cancelled.
@@ -8913,6 +9081,9 @@ class PlayerActivity : ComponentActivity() {
             dimAmount = 0.30f,
             headerView = serverHeader,
             footerView = serverFooter,
+            // Ghost panel: reference glass READY rows float directly over the
+            // art, with no dark box between the header and the footer.
+            ghostPanel = true,
         )
         // The dialog is on screen from here: converge the list on the live
         // session one more time, on the window's own message queue. The open
@@ -8923,7 +9094,6 @@ class PlayerActivity : ComponentActivity() {
         list.post {
             if (!dialog.isShowing) return@post
             syncFromSession()
-            rebuildChips()
             rebuildList()
             list.requestLayout()
             (list.parent as? View)?.requestLayout()
@@ -8999,7 +9169,7 @@ class PlayerActivity : ComponentActivity() {
                     val pillText = "$n SOURCES"
                     if (pillText != shownPill) {
                         shownPill = pillText
-                        sourcesPill?.let { styleChipPill(it, pillText, true) }
+                        sourcesPill?.let { restyleSourcesPill(it, pillText) }
                     }
                     if (searchingNow != shownSearching) {
                         shownSearching = searchingNow
@@ -9018,7 +9188,7 @@ class PlayerActivity : ComponentActivity() {
                     val sessionSize = liveSessionId?.let {
                         runCatching { StreamsLive.flow(it).value.size }.getOrDefault(0)
                     } ?: 0
-                    if ((list.childCount - 1) <= 0 && (sources.isNotEmpty() || sessionSize > 0)) {
+                    if (list.childCount <= 0 && (sources.isNotEmpty() || sessionSize > 0)) {
                         runCatching { if (dialog.isShowing) requestPaint() }
                     }
                     // 1.5s, not every tick: the tally line remeasures the whole
@@ -15919,7 +16089,7 @@ class PlayerActivity : ComponentActivity() {
      *  (the player's parsed tracks, the master playlist). */
     private fun offerQualitiesThenDownload(kind: DownloadKind, qualities: List<VideoQuality>) {
         if (qualities.size <= 1) {
-            startDownload(kind, 0, 0L)
+            offerAudioThenDownload(kind, 0, 0L)
             return
         }
         val options = mutableListOf(
@@ -15948,10 +16118,68 @@ class PlayerActivity : ComponentActivity() {
             },
         ) { which ->
             picked = true
+            // The quality answer chains into the audio question (see
+            // offerAudioThenDownload): one server, one quality, one track.
             if (which == 0) {
-                startDownload(kind, 0, 0L)
+                offerAudioThenDownload(kind, 0, 0L)
             } else {
-                qualities.getOrNull(which - 1)?.let { startDownload(kind, it.height, it.bandwidth) }
+                qualities.getOrNull(which - 1)?.let { offerAudioThenDownload(kind, it.height, it.bandwidth) }
+            }
+        }
+    }
+
+    /**
+     * After the quality is chosen, offer the stream's audio renditions when
+     * it exposes more than one (the batch flow asks the same question — see
+     * [askBatchAudio] on the detail screen); a single-audio source goes
+     * straight to the download at the server's own default track.
+     */
+    private fun offerAudioThenDownload(kind: DownloadKind, preferredHeight: Int, preferredBandwidth: Long) {
+        val src = sources.getOrNull(currentIndex)
+        val isHls = src != null &&
+            (src.isM3u8 || src.url.substringBefore('?').lowercase().contains(".m3u8"))
+        if (!isHls || src == null) {
+            startDownload(kind, preferredHeight, preferredBandwidth, "")
+            return
+        }
+        val progress = showGlassProgress(
+            I18n.t("Choose audio"),
+            I18n.t("Asking the server which audio tracks it has\u2026"),
+            cancelable = true,
+        ) { leaveAfterDownloadPick() }
+        lifecycleScope.launch {
+            val audios = withContext(Dispatchers.IO) {
+                runCatching { DownloadEngine.hlsAudios(src.url, src.headers) }
+                    .getOrDefault(emptyList())
+            }
+            runCatching { progress.dismiss() }
+            if (audios.size <= 1) {
+                startDownload(kind, preferredHeight, preferredBandwidth, "")
+                return@launch
+            }
+            val options = mutableListOf(
+                GlassOption(
+                    I18n.t("Original audio"),
+                    I18n.t("The server's own default track"),
+                    selected = true
+                )
+            )
+            audios.forEach { a -> options.add(GlassOption(label = a)) }
+            var picked = false
+            showGlassMenu(
+                I18n.t("Choose audio"),
+                options,
+                hint = I18n.t("Used only for this download."),
+                iconRes = R.drawable.ic_audio,
+                onDialog = { dlg ->
+                    dlg.setOnDismissListener { if (!picked && downloadPickMode) leaveAfterDownloadPick() }
+                },
+            ) { which ->
+                picked = true
+                startDownload(
+                    kind, preferredHeight, preferredBandwidth,
+                    if (which == 0) "" else audios.getOrNull(which - 1).orEmpty()
+                )
             }
         }
     }
@@ -15991,7 +16219,7 @@ class PlayerActivity : ComponentActivity() {
     /** Queues a download of the CURRENT server. The task id is per episode +
      *  destination, so re-downloading an episode replaces the old entry rather
      *  than piling up duplicates. */
-    private fun startDownload(kind: DownloadKind, preferredHeight: Int, preferredBandwidth: Long) {
+    private fun startDownload(kind: DownloadKind, preferredHeight: Int, preferredBandwidth: Long, preferredAudio: String = "") {
         val src = sources.getOrNull(currentIndex) ?: return
         if (src.url.isBlank() || src.isTorrent || src.torrentStream) {
             Toast.makeText(this, I18n.t("This server can't be downloaded."), Toast.LENGTH_SHORT).show()
@@ -16018,6 +16246,7 @@ class PlayerActivity : ComponentActivity() {
             subtitles = src.subtitles,
             preferredHeight = preferredHeight,
             preferredBandwidth = preferredBandwidth,
+            preferredAudio = preferredAudio,
             kind = kind,
             status = DownloadStatus.QUEUED,
             createdAt = System.currentTimeMillis(),

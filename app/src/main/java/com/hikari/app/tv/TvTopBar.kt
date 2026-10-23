@@ -57,11 +57,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material3.Button
+import androidx.compose.material3.Switch
+import com.hikari.app.data.ProviderType
 import com.hikari.app.data.Collection
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.data.Profiles
-import com.hikari.app.ui.FlagIcon
-import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.i18n.tr
 
 /**
@@ -491,15 +500,15 @@ fun TvSelectProviderDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    columns = GridCells.Adaptive(minSize = 180.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(vertical = 2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 440.dp),
                 ) {
-                    items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(2) }) { col ->
+                    items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(maxLineSpan) }) { col ->
                     val key = com.hikari.app.ui.navigation.Routes.COLLECTION_PROVIDER_PREFIX + col.id
                     TvProviderCard(
                         name = col.name,
@@ -518,16 +527,20 @@ fun TvSelectProviderDialog(
                 }
                 items(shown, key = { "tv-sel-" + it.config.id }) { p ->
                         val id = p.config.id
+                        val dupTag = if (shown.count { q -> q.config.name == p.config.name } > 1) {
+                            p.config.id.split("|").drop(1).firstOrNull()?.trim()
+                                ?.takeIf { it.isNotEmpty() }?.let { "($it)" }
+                        } else null
                         TvProviderCard(
                             name = p.config.name,
-                            supporting = p.config.type.groupLabel,
+                            supporting = tvProviderSubtitle(p),
+                            tag = dupTag,
                             selected = id in selection,
-                            flagCode = ProviderFlags.codeOf(p.config.name),
                             icon = {
                                 TvProviderIcon(
                                     iconUrl = p.config.iconUrl,
                                     name = p.config.name,
-                                    size = 34.dp,
+                                    size = 28.dp,
                                 )
                             },
                             onClick = { onPick(id) },
@@ -552,11 +565,11 @@ fun TvSelectProviderDialog(
 }
 
 /**
- * "Manage Home Screen Feed", in the reference shape: the picked providers as
- * the Active feed (each removable), every other installed provider as
- * Available (each addable), and Save & Close applying the mix. An empty feed
- * is the global feed (everything); a non-empty one mixes exactly the picked
- * providers. TV only; the phone's picker sheet is unchanged.
+ * "Manage Home Screen Feed", in the reference shape: an "Enable
+ * Multi-Provider Feed" switch, type chips (Movies/Series/Anime/Docs/Live),
+ * and either a single-provider grid (switch off — a tap picks and closes) or
+ * the Active/Available two-pane feed mixer (switch on — reorder with arrows,
+ * add/remove, Save & Close applies the mix).
  */
 @Composable
 fun TvManageFeedDialog(
@@ -566,128 +579,312 @@ fun TvManageFeedDialog(
     onDismiss: () -> Unit,
 ) {
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
-    val active = working.value.mapNotNull { id -> providers.firstOrNull { it.config.id == id } }
-    val available = providers.filter { p -> p.config.id !in working.value }
-    AlertDialog(
+    var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
+    var typeFilter by remember { mutableStateOf(setOf<String>()) }
+    fun matches(p: ContentProvider): Boolean {
+        if (typeFilter.isEmpty()) return true
+        return tvFeedCats(p.config.type).any { it in typeFilter }
+    }
+    val feedCats = listOf("Movies", "Series", "Anime", "Docs", "Live")
+    Dialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(TvDesktop.CornerLarge),
-        containerColor = TvDesktop.SurfaceElevated,
-        title = {
-            Column {
-                Text(tr("Manage Home Screen Feed"), fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary)
-                Text(
-                    tr("Mix providers into one Home feed. Empty means everything."),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TvDesktop.TextMuted,
-                )
-            }
-        },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
-                Text(
-                    tr("Active Providers Feed"),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Cs3.accent,
-                )
-                Spacer(Modifier.height(6.dp))
-                if (active.isEmpty()) {
-                    Text(
-                        tr("Global — all installed plugins"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TvDesktop.TextMuted,
-                    )
-                }
-                active.forEach { p ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.weight(1f)) {
-                            TvProviderCard(
-                                name = p.config.name,
-                                supporting = p.config.type.groupLabel,
-                                selected = true,
-                                flagCode = ProviderFlags.codeOf(p.config.name),
-                                icon = {
-                                    TvProviderIcon(
-                                        iconUrl = p.config.iconUrl,
-                                        name = p.config.name,
-                                        size = 34.dp,
-                                    )
-                                },
-                                onClick = {},
-                            )
-                        }
-                        IconButton(onClick = {
-                            working.value = ArrayList(working.value - p.config.id)
-                        }) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = tr("Remove"),
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    tr("Available Plugins"),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = TvDesktop.TextMuted,
-                )
-                Spacer(Modifier.height(6.dp))
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 260.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(TvDesktop.CornerLarge),
+            color = TvDesktop.SurfaceElevated,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .fillMaxHeight(0.85f),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+            ) {
+                // HEADER
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(available, key = { "tv-feed-" + it.config.id }) { p ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) {
-                                TvProviderCard(
-                                    name = p.config.name,
-                                    supporting = p.config.type.groupLabel,
-                                    selected = false,
-                                    flagCode = ProviderFlags.codeOf(p.config.name),
-                                    icon = {
-                                        TvProviderIcon(
-                                            iconUrl = p.config.iconUrl,
-                                            name = p.config.name,
-                                            size = 34.dp,
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (isAdvancedMode) tr("Manage Home Screen Feed") else tr("Select Provider"),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = TvDesktop.TextPrimary,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            if (isAdvancedMode) tr("Mix, reorder, and customize multiple providers.")
+                            else tr("Choose a provider to display on your Home Screen."),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TvDesktop.TextMuted,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            tr("Enable Multi-Provider Feed"),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TvDesktop.TextPrimary,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = isAdvancedMode,
+                            onCheckedChange = { enabled ->
+                                isAdvancedMode = enabled
+                                if (!enabled) {
+                                    val top = working.value.firstOrNull()
+                                        ?: providers.firstOrNull()?.config?.id
+                                    working.value = if (top != null) ArrayList(listOf(top)) else ArrayList()
+                                }
+                            },
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                // TYPE CHIPS
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    feedCats.forEach { c ->
+                        val on = c in typeFilter
+                        Surface(
+                            onClick = { typeFilter = if (on) typeFilter - c else typeFilter + c },
+                            shape = RoundedCornerShape(50),
+                            color = if (on) Cs3.accent.copy(alpha = 0.28f) else TvDesktop.SurfaceCard,
+                            border = BorderStroke(
+                                1.dp,
+                                if (on) Cs3.accent else TvDesktop.GlassEdge,
+                                RoundedCornerShape(50),
+                            ),
+                        ) {
+                            Text(
+                                c,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (on) TvDesktop.TextPrimary else TvDesktop.TextMuted,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                // CONTENT
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    if (!isAdvancedMode) {
+                        // Single-provider grid: a tap picks and closes.
+                        val filtered = providers.filter { matches(it) }.sortedBy { it.config.name }
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 250.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(TvDesktop.SurfaceCard.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(filtered, key = { "tv-feed-single-" + it.config.id }) { p ->
+                                val active = p.config.id in working.value
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (active) Cs3.accent.copy(alpha = 0.22f) else TvDesktop.SurfaceElevated)
+                                        .clickable {
+                                            working.value = ArrayList(listOf(p.config.id))
+                                            onSave(listOf(p.config.id))
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TvProviderIcon(iconUrl = p.config.iconUrl, name = p.config.name, size = 32.dp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            p.config.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium,
+                                            color = TvDesktop.TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
-                                    },
-                                    onClick = {
-                                        working.value = ArrayList((working.value + p.config.id).distinct())
-                                    },
-                                )
+                                        Text(
+                                            tvProviderSubtitle(p),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TvDesktop.TextMuted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
                             }
-                            IconButton(onClick = {
-                                working.value = ArrayList((working.value + p.config.id).distinct())
-                            }) {
-                                Icon(
-                                    Icons.Filled.Add,
-                                    contentDescription = tr("Add"),
-                                    tint = Cs3.accent,
-                                    modifier = Modifier.size(20.dp),
-                                )
+                        }
+                    } else {
+                        // Active/Available two-pane mixer.
+                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            // Active feed.
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                Text(tr("Active Providers Feed"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = TvDesktop.TextPrimary)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                if (working.value.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard, RoundedCornerShape(12.dp)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(tr("No active providers"), color = TvDesktop.TextMuted)
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard, RoundedCornerShape(12.dp)).padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        itemsIndexed(working.value.toList(), key = { _, id -> "tv-feed-active-$id" }) { index, id ->
+                                            val p = providers.firstOrNull { it.config.id == id } ?: return@itemsIndexed
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = TvDesktop.SurfaceElevated,
+                                                border = BorderStroke(0.5.dp, TvDesktop.GlassEdge),
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Text(
+                                                        (index + 1).toString() + ".",
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = TvDesktop.TextMuted,
+                                                        modifier = Modifier.padding(end = 10.dp, start = 4.dp),
+                                                    )
+                                                    TvProviderIcon(iconUrl = p.config.iconUrl, name = p.config.name, size = 40.dp)
+                                                    Spacer(modifier = Modifier.width(16.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(p.config.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                        Text(tvProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    }
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.background(TvDesktop.SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(50)).padding(horizontal = 4.dp),
+                                                    ) {
+                                                        IconButton(
+                                                            onClick = {
+                                                                val cur = ArrayList(working.value)
+                                                                if (index > 0) {
+                                                                    val tmp = cur[index - 1]
+                                                                    cur[index - 1] = cur[index]
+                                                                    cur[index] = tmp
+                                                                    working.value = cur
+                                                                }
+                                                            },
+                                                            enabled = index > 0,
+                                                            modifier = Modifier.size(28.dp),
+                                                        ) {
+                                                            Icon(Icons.Filled.ArrowUpward, contentDescription = tr("Move Up"), tint = TvDesktop.TextMuted, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        IconButton(
+                                                            onClick = {
+                                                                val cur = ArrayList(working.value)
+                                                                if (index < cur.lastIndex) {
+                                                                    val tmp = cur[index + 1]
+                                                                    cur[index + 1] = cur[index]
+                                                                    cur[index] = tmp
+                                                                    working.value = cur
+                                                                }
+                                                            },
+                                                            enabled = index < working.value.lastIndex,
+                                                            modifier = Modifier.size(28.dp),
+                                                        ) {
+                                                            Icon(Icons.Filled.ArrowDownward, contentDescription = tr("Move Down"), tint = TvDesktop.TextMuted, modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    IconButton(
+                                                        onClick = { working.value = ArrayList(working.value - id) },
+                                                        modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(50)),
+                                                    ) {
+                                                        Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Available plugins.
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                Text(tr("Available Plugins"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = TvDesktop.TextPrimary)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                val inactive = providers.filter { it.config.id !in working.value && matches(it) }.sortedBy { it.config.name }
+                                if (inactive.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(tr("All plugins are active"), color = TvDesktop.TextMuted)
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).padding(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        items(inactive, key = { "tv-feed-avail-" + it.config.id }) { p ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(TvDesktop.SurfaceElevated).padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                TvProviderIcon(iconUrl = p.config.iconUrl, name = p.config.name, size = 32.dp)
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(p.config.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(tvProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                }
+                                                IconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }) {
+                                                    Icon(Icons.Filled.Add, contentDescription = tr("Add"), tint = Cs3.accent, modifier = Modifier.size(20.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+                // BOTTOM ACTION BAR
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Button(onClick = { onSave(working.value.toList()) }) {
+                        Text(tr("Save & Close"))
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(working.value.toList()) }) { Text(tr("Save & Close")) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(tr("Cancel")) }
-        },
-    )
+        }
+    }
+}
+
+/** Reference feed categories for a provider kind (the Manage dialog chips). */
+private fun tvFeedCats(type: ProviderType): Set<String> = when (type) {
+    ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA -> setOf("Anime")
+    ProviderType.IPTV -> setOf("Live")
+    ProviderType.MANGA, ProviderType.ANYMEX_MANGA -> emptySet()
+    else -> setOf("Movies", "Series", "Docs")
+}
+
+/** Reference Select-Provider card subtitle: "Types • domain". */
+private fun tvProviderSubtitle(p: ContentProvider): String {
+    val t = when (p.config.type) {
+        ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA -> "Anime"
+        ProviderType.IPTV -> "Live"
+        else -> "Movies • Series"
+    }
+    val d = runCatching {
+        val u = p.config.url.trim()
+        if (u.isBlank()) "" else java.net.URI(u).host?.removePrefix("www.").orEmpty()
+    }.getOrDefault("")
+    return if (d.isBlank()) t else "$t • $d"
 }
 
 @Composable
@@ -698,11 +895,10 @@ private fun TvProviderCard(
     icon: @Composable () -> Unit,
     onClick: () -> Unit,
     onHold: (() -> Unit)? = null,
-    /** ISO country code for the real flag image beside the icon — null draws
-     *  no flag. */
-    flagCode: String? = null,
+    /** Duplicate-name tag ("(repo)") — the reference disambiguates twins. */
+    tag: String? = null,
 ) {
-    val shape = RoundedCornerShape(TvDesktop.CornerCard)
+    val shape = RoundedCornerShape(TvDesktop.CornerLarge)
     Row(
         Modifier
             .fillMaxWidth()
@@ -723,20 +919,32 @@ private fun TvProviderCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon()
-        if (flagCode != null) {
-            Spacer(Modifier.width(8.dp))
-            FlagIcon(code = flagCode, size = 20.dp)
-        }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                color = TvDesktop.TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    fontWeight = FontWeight.SemiBold,
+                    color = TvDesktop.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (!tag.isNullOrBlank()) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        tag,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Cs3.accent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (!supporting.isNullOrBlank()) {
                 Text(
                     supporting,
@@ -746,15 +954,6 @@ private fun TvProviderCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        if (selected) {
-            Spacer(Modifier.width(6.dp))
-            Icon(
-                Icons.Filled.Check,
-                contentDescription = null,
-                tint = Cs3.accent,
-                modifier = Modifier.size(18.dp),
-            )
         }
     }
 }

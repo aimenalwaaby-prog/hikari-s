@@ -253,8 +253,12 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
                 ?: servers[0]
             if (src.url.isBlank()) continue
             val label = if (ep.season > 1) "S" + ep.season + " E" + ep.number else "E" + ep.number
+            // The task id is per episode: a blank provider episode id used to
+            // collapse the whole batch onto ONE id, so every enqueue replaced
+            // the last and only a single download survived.
+            val epKey = ep.id.ifBlank { "s" + ep.season + "e" + ep.number }
             val task = com.hikari.app.download.DownloadTask(
-                id = com.hikari.app.download.DownloadTask.idFor(item.providerId.ifBlank { "detail" }, item.id, ep.id, com.hikari.app.download.DownloadKind.OFFLINE),
+                id = com.hikari.app.download.DownloadTask.idFor(item.providerId.ifBlank { "detail" }, item.id, epKey, com.hikari.app.download.DownloadKind.OFFLINE),
                 title = item.title.ifBlank { "Video" },
                 episodeLabel = label,
                 poster = item.posterUrl,
@@ -3466,6 +3470,14 @@ fun DetailScreen(
     var showDlQuality by remember { mutableStateOf(false) }
     var dlQualityOpts by remember { mutableStateOf(listOf<Pair<Int, Long>>()) }
     var dlPendingKind by remember { mutableStateOf(com.hikari.app.download.DownloadKind.OFFLINE) }
+    // Audio asked once per batch after the quality (see askBatchAudio): the
+    // picked server's own rendition names, with the chosen height/bandwidth
+    // stashed alongside while open.
+    var showDlAudio by remember { mutableStateOf(false) }
+    var dlAudioOpts by remember { mutableStateOf(listOf<String>()) }
+    var dlPendingH by remember { mutableStateOf(0) }
+    var dlPendingBw by remember { mutableStateOf(0L) }
+    var dlAudioClaimed by remember { mutableStateOf(false) }
     // ChoiceDialog fires onDismiss() and THEN onPick() on every tap — so a tap
     // on a quality would queue the batch twice (Highest from the dismiss,
     // then the pick). The dismiss path therefore only queues when no pick
@@ -3640,25 +3652,45 @@ fun DetailScreen(
             ?: servers.firstOrNull { it.providerId == srv.providerId }
             ?: servers.firstOrNull { it.name == srv.name }
             ?: servers[0]
-    fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, preferredHeight: Int, preferredBandwidth: Long) {
+    fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, preferredHeight: Int, preferredBandwidth: Long, preferredAudio: String = "") {
         showDlDest = false
+        showDlAudio = false
         val eps = dlTargets
         if (eps.isEmpty()) return
+        fun epTag(ep: Episode): String =
+            if (ep.season > 1) "S" + ep.season + " E" + ep.number else "E" + ep.number
         runCatching { android.widget.Toast.makeText(context, "Queueing " + eps.size + " episodes… see Downloads to manage them.", android.widget.Toast.LENGTH_SHORT).show() }
         scope.launch {
             dlBusy = true
             var done = 0
+            val failed = ArrayList<String>()
             try {
-            done = runCatching {
-                var n = 0
                 for (ep in eps) {
-                    val servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
-                    if (servers.isEmpty()) continue
+                    // A hung provider costs this episode a retry, never the
+                    // whole batch: two bounded lookups, then the episode is
+                    // reported as skipped instead of silently dropped.
+                    var servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                    if (servers.isEmpty()) {
+                        runCatching { delay(1500L) }
+                        servers = runCatching { vm.serversForBatch(batchItem, ep) }.getOrDefault(emptyList())
+                    }
+                    if (servers.isEmpty()) {
+                        failed.add(epTag(ep))
+                        continue
+                    }
                     val src = matchDlServer(servers, srv)
-                    if (src.url.isBlank()) continue
-                    val label = if (ep.season > 1) "S" + ep.season + " E" + ep.number else "E" + ep.number
+                    if (src.url.isBlank()) {
+                        failed.add(epTag(ep))
+                        continue
+                    }
+                    val label = epTag(ep)
+                    // The task id is per episode (see enqueueBatch above): a
+                    // blank provider episode id collapsed the whole batch onto
+                    // ONE id, so every enqueue replaced the last and only a
+                    // single download survived.
+                    val epKey = ep.id.ifBlank { "s" + ep.season + "e" + ep.number }
                     val task = com.hikari.app.download.DownloadTask(
-                        id = com.hikari.app.download.DownloadTask.idFor(batchItem.providerId.ifBlank { "detail" }, batchItem.id, ep.id, kind),
+                        id = com.hikari.app.download.DownloadTask.idFor(batchItem.providerId.ifBlank { "detail" }, batchItem.id, epKey, kind),
                         title = batchItem.title.ifBlank { "Video" },
                         episodeLabel = label,
                         poster = batchItem.posterUrl,
@@ -3672,22 +3704,37 @@ fun DetailScreen(
                         subtitles = src.subtitles,
                         preferredHeight = preferredHeight,
                         preferredBandwidth = preferredBandwidth,
+                        preferredAudio = preferredAudio,
                         kind = kind,
                         status = com.hikari.app.download.DownloadStatus.QUEUED,
                         createdAt = System.currentTimeMillis()
                     )
-                    runCatching { com.hikari.app.download.DownloadsRepository.enqueue(context, task) }
-                    n++
+                    // enqueue() posts to its own scope and never throws
+                    // synchronously, so the count is gated on the handover —
+                    // and every skip is named, never silent.
+                    if (runCatching { com.hikari.app.download.DownloadsRepository.enqueue(context, task) }.isSuccess) done++
+                    else failed.add(label)
                 }
-                n
-            }.getOrDefault(0)
             } finally {
                 // The queueing pass must never strand the busy flag (a throw
                 // or a cancelled screen had the same freezing effect as the
                 // lookup's stuck state above).
                 dlBusy = false
             }
-            runCatching { android.widget.Toast.makeText(context, if (done > 0) "Queued " + done + " download" + (if (done == 1) "" else "s") + " from " + srv.name + " — see Downloads." else "No episodes could be queued.", android.widget.Toast.LENGTH_LONG).show() }
+            runCatching {
+                android.widget.Toast.makeText(
+                    context,
+                    when {
+                        done > 0 && failed.isEmpty() ->
+                            "Queued " + done + " download" + (if (done == 1) "" else "s") + " from " + srv.name + " — see Downloads."
+                        done > 0 ->
+                            "Queued " + done + " of " + eps.size + " — no server for " + failed.take(4).joinToString(", ") + (if (failed.size > 4) "…" else "") + "."
+                        else ->
+                            "No episodes could be queued" + (if (failed.isNotEmpty()) " — no server for " + failed.take(3).joinToString(", ") + (if (failed.size > 3) "…" else "") + "." else ".")
+                    },
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
     // The second once-per-batch question (destination was the first): read
@@ -3722,6 +3769,36 @@ fun DetailScreen(
             dlQualityOpts = quals
             dlQualityClaimed = false
             showDlQuality = true
+        }
+    }
+    // The third once-per-batch question (destination was first, quality
+    // second): the picked server's own audio renditions off the first
+    // episode — "English", "Hindi", the playlist's own default first. One
+    // answer rides every episode; an episode whose playlist lacks the named
+    // rendition falls back to its own first audio (see preferredAudio), so a
+    // mixed batch never fails on this question. A single-audio source skips
+    // the question and goes straight in at the default.
+    fun askBatchAudio(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, h: Int, bw: Long) {
+        val first = dlTargets.firstOrNull() ?: return
+        scope.launch {
+            val servers = runCatching { vm.serversForBatch(batchItem, first) }.getOrDefault(emptyList())
+            val src = if (servers.isEmpty()) null else matchDlServer(servers, srv)
+            val audios = if (src != null && (src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8"))) {
+                runCatching {
+                    com.hikari.app.download.DownloadEngine.hlsAudios(src.url, src.headers)
+                }.getOrDefault(emptyList())
+            } else emptyList()
+            if (audios.size <= 1) {
+                startBatchDownload(srv, kind, h, bw, "")
+                return@launch
+            }
+            dlPendingSrv = srv
+            dlPendingKind = kind
+            dlPendingH = h
+            dlPendingBw = bw
+            dlAudioOpts = audios
+            dlAudioClaimed = false
+            showDlAudio = true
         }
     }
     val openDlChoice: () -> Unit = {
@@ -3903,25 +3980,76 @@ fun DetailScreen(
             selectedKey = "best",
             onPick = { key ->
                 // Backing out picks Highest: the batch still runs rather than
-                // dying on a dismissed sheet.
+                // dying on a dismissed sheet. The quality answer chains into
+                // the audio question (see askBatchAudio).
                 showDlQuality = false
                 dlQualityClaimed = true
                 if (pending != null) {
                     val q = key.removePrefix("q").toIntOrNull()?.let { dlQualityOpts.getOrNull(it) }
-                    startBatchDownload(pending, dlPendingKind, q?.first ?: 0, q?.second ?: 0L)
+                    askBatchAudio(pending, dlPendingKind, q?.first ?: 0, q?.second ?: 0L)
                 }
             },
             onDismiss = {
                 showDlQuality = false
                 // A tap runs this BEFORE onPick (see dlQualityClaimed): queue
                 // Highest only when no pick claimed the dialog — deferred past
-                // the tap so the pick's own queue wins.
+                // the tap so the pick's own queue wins. The dismiss answer
+                // chains into the audio question like a Highest pick.
                 if (pending != null && !dlQualityClaimed) {
                     scope.launch {
                         delay(150)
                         if (!dlQualityClaimed && pending != null) {
                             dlQualityClaimed = true
-                            startBatchDownload(pending, dlPendingKind, 0, 0L)
+                            askBatchAudio(pending, dlPendingKind, 0, 0L)
+                        }
+                    }
+                }
+            },
+        )
+    }
+    if (showDlAudio) {
+        val pending = dlPendingSrv
+        ChoiceDialog(
+            title = tr("Choose audio"),
+            items = buildList {
+                add(
+                    ChoiceItem(
+                        key = "orig",
+                        label = tr("Original audio"),
+                        supporting = tr("The server's own default track"),
+                    )
+                )
+                dlAudioOpts.forEachIndexed { index, a ->
+                    add(
+                        ChoiceItem(
+                            key = "a$index",
+                            label = a,
+                        )
+                    )
+                }
+            },
+            selectedKey = "orig",
+            onPick = { key ->
+                // Backing out picks the default track: the batch still runs
+                // rather than dying on a dismissed sheet.
+                showDlAudio = false
+                dlAudioClaimed = true
+                if (pending != null) {
+                    val a = key.removePrefix("a").toIntOrNull()?.let { dlAudioOpts.getOrNull(it) } ?: ""
+                    startBatchDownload(pending, dlPendingKind, dlPendingH, dlPendingBw, a)
+                }
+            },
+            onDismiss = {
+                showDlAudio = false
+                // A tap runs this BEFORE onPick (see dlAudioClaimed): queue
+                // at the default track only when no pick claimed the dialog,
+                // deferred past the tap so the pick's own queue wins.
+                if (pending != null && !dlAudioClaimed) {
+                    scope.launch {
+                        delay(150)
+                        if (!dlAudioClaimed && pending != null) {
+                            dlAudioClaimed = true
+                            startBatchDownload(pending, dlPendingKind, dlPendingH, dlPendingBw, "")
                         }
                     }
                 }
@@ -4270,8 +4398,11 @@ fun DetailScreen(
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
+                                // The label takes the room the icon leaves: even
+                                // "Resume E2693" fits instead of truncating.
+                                modifier = Modifier.weight(1f, fill = false),
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontSize = 13.sp * (10f / detailActionLabel.length.toFloat()).coerceIn(0.68f, 1f)
+                                    fontSize = 13.sp * (10f / detailActionLabel.length.toFloat()).coerceIn(0.55f, 1f)
                                 ),
                             )
                         }
@@ -5279,8 +5410,11 @@ fun DetailScreen(
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
+                                // The label takes the room the icon leaves: even
+                                // "Resume E2693" fits instead of truncating.
+                                modifier = Modifier.weight(1f, fill = false),
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontSize = 13.sp * (10f / actionLabel.length.toFloat()).coerceIn(0.68f, 1f)
+                                    fontSize = 13.sp * (10f / actionLabel.length.toFloat()).coerceIn(0.55f, 1f)
                                 ),
                             )
                         }

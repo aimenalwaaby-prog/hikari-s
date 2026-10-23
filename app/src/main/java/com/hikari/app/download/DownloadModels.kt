@@ -37,6 +37,12 @@ data class DownloadTask(
      *  tie-breaker for playlists that don't publish a RESOLUTION. */
     val preferredHeight: Int = 0,
     val preferredBandwidth: Long = 0L,
+    /** Preferred HLS audio rendition by NAME ("", "English", "Hindi"… — see
+     *  [DownloadEngine.hlsAudios]). "" = the playlist's own default. A name
+     *  missing from one episode's playlist falls back to that playlist's
+     *  first audio rendition, so one answer covers a whole batch even when
+     *  episodes carry different audio sets. */
+    val preferredAudio: String = "",
     val kind: DownloadKind = DownloadKind.OFFLINE,
     val status: DownloadStatus = DownloadStatus.QUEUED,
     val bytesDone: Long = 0L,
@@ -99,6 +105,7 @@ data class DownloadTask(
         put("isM3u8", isM3u8)
         put("preferredHeight", preferredHeight)
         put("preferredBandwidth", preferredBandwidth)
+        put("preferredAudio", preferredAudio)
         put(
             "subtitles",
             JSONArray().apply {
@@ -158,6 +165,7 @@ data class DownloadTask(
                 subtitles = subs,
                 preferredHeight = o.optInt("preferredHeight"),
                 preferredBandwidth = o.optLong("preferredBandwidth"),
+                preferredAudio = o.optString("preferredAudio"),
                 kind = runCatching { DownloadKind.valueOf(o.optString("kind")) }
                     .getOrDefault(DownloadKind.OFFLINE),
                 status = runCatching { DownloadStatus.valueOf(o.optString("status")) }

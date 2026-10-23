@@ -1,3 +1,12 @@
+## 0.11.90 (continuous build only)
+
+### Changed (batch: exact server screen, exact provider box, exact manage feed, full download-all, resume fit)
+- Player server screen is now the exact reference sheet on phone, TV and landscape: full-bleed title art, title wordmark, episode pill (duplicate names dropped, so no more "Episode 2 • Episode 2"), live "Found N sources" + SOURCES pill (uncapped width, never clipped at the edge), progress line, then glass READY rows directly over the art with no dark box — each row a 54dp quality badge (or SRC), name + meta badges, READY (PLAYING on the active server), download / open-in-browser / play buttons. No engine chips and no section headings; the list is one flat origin-first result list. Skip Loading plays the best server found so far (says so when empty); Cancel abandons without fallback. The start chooser opens in landscape on phones
+- TV Select Provider is now the exact reference box in Home and Search: Adaptive grid, 12dp horizontal cards with 28dp icon, 13sp name with duplicate-repo tag, "Types • domain" subtitle, purple selected container + border, title + All Plugins (Global) pill + full-width filter
+- TV Manage feed is now the exact reference dialog: "Enable Multi-Provider Feed" switch, Movies/Series/Anime/Docs/Live type chips, single-provider grid when off (tap picks and closes), Active/Available two-pane mixer when on (reorder with arrows, add/remove) with Save & Close
+- Download-all fixed end to end: every picked episode gets its own task id (a blank provider episode id used to collapse the batch onto one id, so only a single download survived); each episode lookup retries on failure and failures are named in the final toast instead of silently dropped; the queued count is success-gated. After the server pick and destination comes quality, then the new audio question (Original/English/Hindi/… from the same server, per-episode fallback to each playlist's own default); a picked 1080p auto-shifts to the nearest variant an episode actually carries. The single download flow asks quality then audio the same way
+- Resume pill label takes the room the icon leaves and steps down further, so even "Resume E2693" fits on one line
+
 ## 0.11.89 (continuous build only)
 
 ### Changed (batch: TMDB phone header, reference server screen, wide provider card)
