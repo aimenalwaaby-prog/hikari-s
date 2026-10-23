@@ -476,6 +476,11 @@ fun TvSelectProviderDialog(
     /** The user's own collections, drawn full-width above the provider grid. */
     collections: List<Collection> = emptyList(),
 ) {
+    // Portrait phones run this same TV UI: 65% of a narrow portrait screen is a
+    // vertical strip, while the reference desktop is landscape-only. Same
+    // reference fraction on wide screens, near-full width on narrow ones.
+    val selectCfg = LocalConfiguration.current
+    val selectW = if (selectCfg.screenWidthDp < 600) (selectCfg.screenWidthDp * 0.92f).dp else minOf((selectCfg.screenWidthDp * 0.65f).dp, 760.dp)
     var providerModalSearch by remember { mutableStateOf("") }
     // Repo display names for the "(repo)" duplicate tags — the reference tells
     // same-named installs apart by the parent folder of the plugin path, which
@@ -500,7 +505,7 @@ fun TvSelectProviderDialog(
 
     RefDialogFrame(
         onDismiss = onDismiss,
-        modifier = Modifier.fillMaxWidth(0.65f).wrapContentHeight().heightIn(min = 220.dp, max = 620.dp),
+        modifier = Modifier.width(selectW).wrapContentHeight().heightIn(min = 220.dp, max = 620.dp),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().wrapContentHeight().padding(24.dp),
@@ -512,7 +517,7 @@ fun TvSelectProviderDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = tr("Select Provider"),
                         style = MaterialTheme.typography.titleLarge,
@@ -701,6 +706,8 @@ fun TvManageFeedDialog(
     onDismiss: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as HikariApp
+    val mcfg = LocalConfiguration.current
+    val manageW = if (mcfg.screenWidthDp < 600) (mcfg.screenWidthDp * 0.95f).dp else (mcfg.screenWidthDp * 0.85f).dp
     val scope = rememberCoroutineScope()
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
@@ -749,7 +756,7 @@ fun TvManageFeedDialog(
                 onDismiss()
             }
         },
-        modifier = Modifier.fillMaxWidth(0.85f).fillMaxHeight(0.85f),
+        modifier = Modifier.width(manageW).fillMaxHeight(0.85f),
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
             // HEADER
@@ -762,10 +769,8 @@ fun TvManageFeedDialog(
                     Text(
                         text = if (catalogProvider != null) {
                             tr("Customize %s").replace("%s", catalogProvider?.config?.name.orEmpty())
-                        } else if (isAdvancedMode) {
-                            tr("Manage Home Screen Feed")
                         } else {
-                            tr("Select Provider")
+                            tr("Manage Home Screen Feed")
                         },
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
@@ -775,10 +780,8 @@ fun TvManageFeedDialog(
                     Text(
                         text = if (catalogProvider != null) {
                             tr("Enable, disable, and drag to reorder catalogs.")
-                        } else if (isAdvancedMode) {
-                            tr("Mix, reorder, and customize multiple providers.")
                         } else {
-                            tr("Choose a provider to display on your Home Screen.")
+                            tr("Mix, reorder, and customize multiple providers.")
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

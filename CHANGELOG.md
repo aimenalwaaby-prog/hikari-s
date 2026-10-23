@@ -1,3 +1,11 @@
+## 0.11.96 (continuous build only)
+
+### Fixed (batch: reference-exact provider boxes on every screen + full resume label)
+- TV Select Provider is the reference cinema rectangle on every screen: near-full width on portrait phones, 65% on wide/TV, title + All Plugins (Global) pill on one line, full-width filter, providers side-by-side (never the tall narrow strip)
+- Home provider button opens Manage Home Screen Feed (always titled so, never "Select Provider"): Enable Multi-Provider Feed toggle, type chips, single grid with counts + Tune, two-pane Advanced mixer with + add / arrows / drag / expanders / remove, Save & Close; Search keeps the Select Provider box only
+- Resume pill never truncates again: label shrinks adaptively with no ellipsis, so even Episode 2774848 shows in full
+- Phone UI untouched
+
 ## 0.11.95 (continuous build only)
 
 ### Fixed (batch: provider box + feed mixer ported one-to-one from the reference client)

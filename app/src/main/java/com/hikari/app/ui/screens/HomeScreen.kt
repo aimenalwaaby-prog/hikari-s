@@ -139,7 +139,6 @@ import com.hikari.app.tv.TvMode
 import com.hikari.app.tv.TvProfileMenuDialog
 import com.hikari.app.tv.TvProviderCard
 import com.hikari.app.tv.TvProviderIcon
-import com.hikari.app.tv.TvSelectProviderDialog
 import com.hikari.app.tv.TvUi
 import com.hikari.app.ui.Artwork
 import com.hikari.app.ui.FlagIcon
@@ -713,7 +712,6 @@ fun HomeScreen(nav: NavHostController) {
     var showTranslate by remember { mutableStateOf(false) }
     // Television: the CloudStream-desktop-style provider box and profile menu,
     // opened from the top-right pills (see [TvHomeTopBar]).
-    var showTvProviderBox by remember { mutableStateOf(false) }
     var showTvManageFeed by remember { mutableStateOf(false) }
     var showTvProfileMenu by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
@@ -1059,7 +1057,7 @@ fun HomeScreen(nav: NavHostController) {
                     // line — title, mouse/search/translate/site buttons and the
                     // provider + profile pills in a single row (see
                     // [TvHomeHeaderBar]). The old provider strip and its search
-                    // field below it are gone: the top pill's Select Provider
+                    // field below it are gone: the top pill's Manage box
                     // box (filter + hold-to-multi) is the one place providers
                     // are picked.
                     if (TvMode.current()) {
@@ -1074,7 +1072,7 @@ fun HomeScreen(nav: NavHostController) {
                             },
                             providerIconUrl = pillProvider?.config?.iconUrl,
                             profileName = pillProfileName,
-                            onProviderClick = { showTvProviderBox = true },
+                            onProviderClick = { showTvManageFeed = true },
                             onProfileClick = { showTvProfileMenu = true },
                             selected = headerSelection,
                             onSearch = openSearch,
@@ -1549,25 +1547,6 @@ fun HomeScreen(nav: NavHostController) {
             },
             onDismiss = { showPicker = false },
             repoNameByProvider = repoNameByProvider,
-        )
-    }
-
-    // Television: the CloudStream-desktop Select Provider box — title, the
-    // "All Plugins (Global)" pill, filter, one card per extension. A tap
-    // chooses and closes; the mixer opens from the header's Manage entry.
-    if (showTvProviderBox) {
-        TvSelectProviderDialog(
-            providers = activeProviders,
-            selection = selection,
-            onPickAll = {
-                showTvProviderBox = false
-                vm.setSelection(emptyList())
-            },
-            onPick = { id ->
-                showTvProviderBox = false
-                vm.selectProvider(id)
-            },
-            onDismiss = { showTvProviderBox = false },
         )
     }
 

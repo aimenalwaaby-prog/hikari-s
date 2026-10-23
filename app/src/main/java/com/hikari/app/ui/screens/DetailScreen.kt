@@ -4608,12 +4608,10 @@ fun DetailScreen(
                                 detailActionLabel,
                                 maxLines = 1,
                                 softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                                // The label takes the room the icon leaves: even
-                                // "Resume E2693" fits instead of truncating.
-                                modifier = Modifier.weight(1f, fill = false),
+                                overflow = TextOverflow.Visible,
+                                modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontSize = 13.sp * (10f / detailActionLabel.length.toFloat()).coerceIn(0.55f, 1f)
+                                    fontSize = 13.sp * (11f / detailActionLabel.length.toFloat()).coerceIn(0.45f, 1f)
                                 ),
                             )
                         }
@@ -5601,10 +5599,10 @@ fun DetailScreen(
                             // Tighter inside padding (width is weight-driven,
                             // so the pill is exactly as big — the label just
                             // gets more of it, for "Resume E2650" and friends).
-                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             // Always an action word, never a spinner: the
                             // source search keeps running in the background
                             // (prefetch + live feed) and the sheet shows its
@@ -5620,12 +5618,10 @@ fun DetailScreen(
                                 actionLabel,
                                 maxLines = 1,
                                 softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                                // The label takes the room the icon leaves: even
-                                // "Resume E2693" fits instead of truncating.
-                                modifier = Modifier.weight(1f, fill = false),
+                                overflow = TextOverflow.Visible,
+                                modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontSize = 13.sp * (10f / actionLabel.length.toFloat()).coerceIn(0.55f, 1f)
+                                    fontSize = 13.sp * (11f / actionLabel.length.toFloat()).coerceIn(0.45f, 1f)
                                 ),
                             )
                         }
