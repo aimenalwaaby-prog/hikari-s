@@ -92,12 +92,14 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -1751,6 +1753,110 @@ private fun RefActiveProviderItem(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * One provider card for the PHONE picker sheet (HomeScreen.ProviderPickerSheet —
+ * untouched): icon + name + repo tag + supporting line, purple when picked. A
+ * tap picks; on touch a half-second hold ticks the multi-pick (tvPress only
+ * answers remote keys, so the press is timed here and clickable stays OFF on
+ * that path, or the tap would fire twice).
+ */
+@Composable
+fun TvProviderCard(
+    name: String,
+    supporting: String?,
+    selected: Boolean,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+    onHold: (() -> Unit)? = null,
+    /** Duplicate-name tag ("(repo)"). */
+    tag: String? = null,
+    /** Phone picker actions (pin, pack caret) — null on TV, which has none. */
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    // Fresh lambdas for the gesture below (see PickerRow's note): the touch
+    // hold's pointerInput key never changes, so without these every tap after
+    // the first recomposition would compute from a dead snapshot.
+    val latestClick by rememberUpdatedState(onClick)
+    val latestHold by rememberUpdatedState(onHold)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                if (selected) Cs3.accent.copy(alpha = 0.28f)
+                else TvDesktop.SurfaceCard.copy(alpha = 0.45f)
+            )
+            .border(
+                1.dp,
+                if (selected) Cs3.accent
+                else TvDesktop.GlassEdge,
+                shape,
+            )
+            .then(
+                when {
+                    // No hold: a plain tap card, TV and touch alike.
+                    onHold == null -> Modifier.clickable(onClick = onClick)
+                    // Television keeps the remote key hold it already had.
+                    TvMode.isTv -> Modifier.clickable(onClick = onClick)
+                        .tvPress(previewPass = true, onClick = onClick, onHold = onHold)
+                    // Touch never reached onHold (tvPress only answers remote
+                    // keys), so a held card did nothing on phones: the press
+                    // is timed here — a tap picks, half a second ticks the
+                    // multi-pick — and clickable stays OFF, or the tap would
+                    // fire twice (once from each handler).
+                    else -> Modifier
+                        .tvPress(previewPass = true, onClick = { latestClick() }, onHold = { latestHold?.invoke() })
+                        .pointerInput(Unit) { holdOrTap({ latestHold?.invoke() }, { latestClick() }) }
+                }
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        icon()
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    fontWeight = FontWeight.SemiBold,
+                    color = TvDesktop.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (!tag.isNullOrBlank()) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        tag,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Cs3.accent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (!supporting.isNullOrBlank()) {
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TvDesktop.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(2.dp))
+            trailing()
         }
     }
 }
