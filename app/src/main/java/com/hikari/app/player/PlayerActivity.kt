@@ -9021,7 +9021,7 @@ class PlayerActivity : ComponentActivity() {
                 startChoicePending = false
                 serverPickActed = true
                 dialog.dismiss()
-                playSource(preferredStartIndex())
+                lifecycleScope.launch { playSource(preferredStartIndex()) }
             },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,

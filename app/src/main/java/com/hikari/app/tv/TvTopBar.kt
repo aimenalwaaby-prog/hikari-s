@@ -659,7 +659,6 @@ fun TvManageFeedDialog(
                             border = BorderStroke(
                                 1.dp,
                                 if (on) Cs3.accent else TvDesktop.GlassEdge,
-                                RoundedCornerShape(50),
                             ),
                         ) {
                             Text(
