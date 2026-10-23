@@ -3718,7 +3718,8 @@ fun DetailScreen(
                 dlMsg = "Found " + union.size + " server" + (if (union.size == 1) "" else "s") + " — still searching…"
             }
         }
-        val job = scope.launch {
+        var job: Job? = null
+        job = scope.launch {
             try {
                 for ((i, ep) in eps.withIndex()) {
                     if (gen != dlGen) return@launch
