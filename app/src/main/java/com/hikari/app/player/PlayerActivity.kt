@@ -6750,6 +6750,9 @@ class PlayerActivity : ComponentActivity() {
          *  client's look): a scrim keeps the rows readable. Null = no art,
          *  every other panel unchanged. */
         artUrl: String? = null,
+        /** The chooser passes a smaller title size so its header stays compact
+         *  and the list gets the room; every other caller keeps the default. */
+        titleSizeSp: Float = 0f,
         /** Reference Sources header (logo/title, episode pill, found-count,
          *  progress) drawn above the panel, over the art. Null = no header. */
         headerView: View? = null,
@@ -6831,7 +6834,7 @@ class PlayerActivity : ComponentActivity() {
                         orientation = LinearLayout.VERTICAL
                         addView(TextView(this@PlayerActivity).apply {
                             text = title
-                            dpText(24f)
+                            dpText(if (titleSizeSp > 0f) titleSizeSp else 24f)
                             includeFontPadding = false
                             maxLines = 1
                             ellipsize = TextUtils.TruncateAt.END
@@ -7635,7 +7638,17 @@ class PlayerActivity : ComponentActivity() {
                 ) { cancelled = true }
             }
             val streams = withTimeoutOrNull(90_000L) {
-                runCatching { repo.streamsFor(item, ep) }.getOrNull().orEmpty()
+                runCatching {
+                    // Progressive, like the origin-fast path above: every
+                    // server that lands is appended to the open chooser
+                    // immediately — a stuck provider never gates the list,
+                    // and the tail keeps searching in the background.
+                    repo.streamsFor(item, ep) { prog ->
+                        if (gen == episodeSwitchGen) {
+                            withContext(Dispatchers.Main) { appendSources(prog) }
+                        }
+                    }
+                }.getOrNull().orEmpty()
             }
             dismissDialog()
             if (cancelled) {
@@ -8207,20 +8220,25 @@ class PlayerActivity : ComponentActivity() {
             // with (medium is wider than regular — the old probe under-measured
             // and "Nuvio 65" came out sliced), plus a 4dp safety so a count
             // tick can never clip the pill it lands in.
-            val probe = TextView(this).apply {
-                dpText(if (tvMenu) 13f else 9.5f)
-                includeFontPadding = false
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            }
-            val textW = ceil(probe.paint.measureText(label)).toInt()
-            val w = (textW + padX * 2 + (4 * density)).toInt().coerceAtLeast((28 * density).roundToInt())
-            val h = ((if (tvMenu) 40 else 21) * density).roundToInt()
+            // The pill's own box, measured with the SAME view that draws it:
+            // the old throwaway probe measured at one size while the real pill
+            // drew at the theme default, so its box came out narrower than its
+            // glyphs and labels like "3 SOURCES" were sliced at the panel's
+            // edge. Set the size on the pill first, then measure its own paint
+            // (plus a 4dp safety so a count tick can never clip the pill it
+            // lands in).
             tv.apply {
                 text = label
                 isSingleLine = true
                 includeFontPadding = false
                 gravity = Gravity.CENTER
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                dpText(if (tvMenu) 13f else 9.5f)
+            }
+            val textW = ceil(tv.paint.measureText(label)).toInt()
+            val w = (textW + padX * 2 + (4 * density)).toInt().coerceAtLeast((28 * density).roundToInt())
+            val h = ((if (tvMenu) 40 else 21) * density).roundToInt()
+            tv.apply {
                 setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFC9D2E0.toInt())
                 background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, null)
                 layoutParams = LinearLayout.LayoutParams(w, h).apply {
@@ -9159,6 +9177,9 @@ class PlayerActivity : ComponentActivity() {
             dimAmount = 0.30f,
             headerView = serverHeader,
             footerView = serverFooter,
+            // Compact title: the reference sheet's header is a small line
+            // over the art, not a billboard — the list gets the room.
+            titleSizeSp = 16f,
             // Ghost panel: reference glass READY rows float directly over the
             // art, with no dark box between the header and the footer.
             ghostPanel = true,
@@ -9183,6 +9204,20 @@ class PlayerActivity : ComponentActivity() {
                     list.paddingLeft, list.paddingTop, list.paddingRight,
                     fh + (12 * density).toInt()
                 )
+            }
+            // The footer may not be measured yet on this frame: converge again
+            // once it is, so the pad always matches its real height and the
+            // last row parks above it instead of under it.
+            serverFooter.post {
+                if (!dialog.isShowing) return@post
+                runCatching {
+                    val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
+                    list.setPadding(
+                        list.paddingLeft, list.paddingTop, list.paddingRight,
+                        fh + (12 * density).toInt()
+                    )
+                    list.requestLayout()
+                }
             }
             list.requestLayout()
             (list.parent as? View)?.requestLayout()

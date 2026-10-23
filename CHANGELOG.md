@@ -1,3 +1,13 @@
+## 0.11.92 (continuous build only)
+
+### Fixed (batch: the sweep never gates, download-all waits, one-line filters, TV box guaranteed wide)
+- Server lists stream live on EVERY path: a stuck provider never gates the list — loaded servers render the instant they land and the stuck one keeps searching in the background. The episode-switch slow path appends progressively like the fast path instead of holding a spinner for 90s
+- Download-all waits like playback: the batch lookup harvests each pass's own progressive feed under a total 100s budget across 3 passes instead of reporting nothing after one cut-off 30s pass, and every pass logs its result so the next failure explains itself in Settings → Logs
+- Phone search filters are ONE slim row: provider pill + kind + years + genres as small wrap-content pills in a single sideways scroller — full names always fit, nothing truncates, nothing collapses, results get the room. TV keeps its own provider + search box screen
+- TV Select Provider box is structurally exact now: width anchored to the screen (never the window) with a fixed 2-column card grid, so it can never render narrow single-column with a truncated title again
+- Titles shrink to fit instead of cutting: manga/novel poster names and phone search result names auto-size down so the full name shows (Reading/Completed sits ABOVE the manga/novel title on the detail page, outside the reader, so progress reads at a glance)
+- Sources pill can never clip again (measured with the pill's own paint after its size is set), the chooser header is compact, and the last row converges above the footer once it is measured
+
 ## 0.11.91 (continuous build only)
 
 ### Changed (batch: exact phone provider box, grouped phone search, TV search manage-feed fix)

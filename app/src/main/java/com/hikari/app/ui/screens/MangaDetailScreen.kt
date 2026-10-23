@@ -351,6 +351,27 @@ fun MangaDetailScreen(
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
+                        // Reading/Completed FIRST, above the title: from outside
+                        // the reader the user sees at a glance what they were
+                        // reading and what is done (manga and novels share this
+                        // page, so one move covers both).
+                        if (mangaRead != com.hikari.app.manga.MangaReadState.NONE) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = if (mangaRead == com.hikari.app.manga.MangaReadState.COMPLETED)
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                            ) {
+                                Text(
+                                    if (mangaRead == com.hikari.app.manga.MangaReadState.COMPLETED) tr("Completed") else tr("Reading"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
                         Text(
                             meta?.title?.takeIf { it.isNotBlank() } ?: title,
                             style = MaterialTheme.typography.titleLarge,
@@ -372,25 +393,6 @@ fun MangaDetailScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp),
                         )
-                        // Manga-level read mark: Reading while any chapter is
-                        // open-or-done, Completed when every chapter is done.
-                        if (mangaRead != com.hikari.app.manga.MangaReadState.NONE) {
-                            Spacer(Modifier.height(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(50),
-                                color = if (mangaRead == com.hikari.app.manga.MangaReadState.COMPLETED)
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                            ) {
-                                Text(
-                                    if (mangaRead == com.hikari.app.manga.MangaReadState.COMPLETED) tr("Completed") else tr("Reading"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                )
-                            }
-                        }
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilledTonalButton(onClick = {

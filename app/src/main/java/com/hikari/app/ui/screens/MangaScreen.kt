@@ -59,8 +59,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.DropdownMenu
@@ -1370,6 +1372,12 @@ private fun MangaPosterCard(
             style = MaterialTheme.typography.bodySmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            // Shrink-to-fit instead of cutting words: the name always shows
+            // in full (two lines at most), never "Who Got Tran...".
+            autoSize = TextAutoSize.StepBased(
+                minFontSize = 8.sp,
+                maxFontSize = 12.sp,
+            ),
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
         )

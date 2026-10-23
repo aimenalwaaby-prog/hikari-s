@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -380,6 +381,13 @@ fun TvSelectProviderDialog(
         if (q.isBlank()) collections
         else collections.filter { it.name.contains(q, ignoreCase = true) }
     }
+    // Reference width, anchored to the SCREEN — never to the window: a dialog
+    // window that wraps its content made the old fraction-of-parent width
+    // collapse on some TV boxes, which is what rendered this box narrow with
+    // a single column and a truncated title. Two-thirds of the screen,
+    // clamped, always fits title + pill + two cards side by side.
+    val screenW = LocalConfiguration.current.screenWidthDp.dp
+    val dlgW = (screenW * 0.66f).coerceIn(600.dp, 880.dp)
     // Wide reference card (desktop Select Provider): the platform-default
     // AlertDialog width is what truncated the title to "Select ..." and
     // clipped the All Plugins pill on TV.
@@ -391,9 +399,7 @@ fun TvSelectProviderDialog(
             shape = RoundedCornerShape(TvDesktop.CornerLarge),
             color = TvDesktop.SurfaceElevated,
             tonalElevation = 0.dp,
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .widthIn(max = 760.dp),
+            modifier = Modifier.width(dlgW),
         ) {
             Column(
                 Modifier
@@ -487,7 +493,11 @@ fun TvSelectProviderDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 180.dp),
+                    // Fixed two columns, exactly like the reference (AniKoto +
+                    // Aniilight side by side): an adaptive cell could collapse
+                    // to one column whenever the window measured small, which
+                    // is the single-column box from the user's report.
+                    columns = GridCells.Fixed(2),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(vertical = 2.dp),

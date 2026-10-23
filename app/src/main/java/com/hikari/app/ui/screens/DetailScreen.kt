@@ -232,29 +232,61 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun serversForBatch(item: MediaItem, episode: Episode, originOnly: Boolean = false): List<StreamSource> {
         fun dlOk(s: StreamSource) =
             !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", true)
+        fun epTag() = "S" + episode.season + "E" + episode.number
+        fun log(msg: String) = runCatching {
+            com.hikari.app.data.Logs.log("Download", "batch \"${item.title.take(50)}\" ${epTag()} $msg")
+        }
+        log("lookup start scope=" + if (originOnly) "origin-only" else "all-extensions")
         if (originOnly) {
             // "This extension": the title's own provider alone, no cross search.
             val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
-            return origin.filter { dlOk(it) }
+            val playable = origin.filter { dlOk(it) }
+            log("origin-only: ${playable.size} downloadable of ${origin.size} found")
+            return playable
         }
         val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
         val playable = origin.filter { dlOk(it) }
-        if (playable.isNotEmpty()) return playable
+        if (playable.isNotEmpty()) {
+            log("origin hit: ${playable.size} downloadable — no sweep needed")
+            return playable
+        }
         // "All extensions": the full cross-extension sweep — but one capped
         // pass is not an answer. The play flow retries an unfinished lookup
         // instead of reporting none (see StreamLookup.complete); the batch
-        // does the same, bounded to three passes, keeping the best partial
-        // so a slow sweep still queues what it found instead of nothing.
+        // does the same, bounded by a TOTAL 100s budget across up to three
+        // passes, keeping the best partial. A pass cut off by its timeout
+        // used to return NOTHING (the lookup never came back, so there was no
+        // list to filter) even while the log showed servers landing — the
+        // "31 servers found, download-all says none" report. Now every pass
+        // harvests its own progressive feed, so a slow pass still queues what
+        // it found instead of nothing.
         var best: List<StreamSource> = emptyList()
-        repeat(3) {
-            val lookup = withTimeoutOrNull(30_000L) {
-                runCatching { repo.streamsForOutcome(item, episode) }.getOrNull()
-            } ?: return best
-            val got = lookup.servers.filter { dlOk(it) }
+        val deadline = android.os.SystemClock.uptimeMillis() + 100_000L
+        repeat(3) { pass ->
+            val left = deadline - android.os.SystemClock.uptimeMillis()
+            if (left <= 0L) {
+                log("pass ${pass + 1} skipped: out of budget (best=${best.size})")
+                return best
+            }
+            val partial = java.util.Collections.synchronizedList(ArrayList<StreamSource>())
+            val lookup = withTimeoutOrNull(left.coerceAtMost(60_000L)) {
+                runCatching {
+                    repo.streamsForOutcome(item, episode, onProgress = { got ->
+                        partial.clear()
+                        partial.addAll(got.filter { dlOk(it) })
+                    })
+                }.getOrNull()
+            }
+            val got = (lookup?.servers ?: partial.toList()).filter { dlOk(it) }
             if (got.size > best.size) best = got
-            if (got.isNotEmpty() && lookup.complete) return got
-            if (lookup.complete) return best
+            log(
+                "pass ${pass + 1}: got=${got.size} best=${best.size} " +
+                    "complete=${lookup?.complete} timedOut=${lookup == null}",
+            )
+            if (got.isNotEmpty() && lookup?.complete == true) return got
+            if (lookup?.complete == true) return best
         }
+        log("lookup done: ${best.size} server(s)")
         return best
     }
     suspend fun enqueueBatch(ctx: android.content.Context, item: MediaItem, episodes: List<Episode>, chosen: StreamSource): Int {
