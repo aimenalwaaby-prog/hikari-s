@@ -43,8 +43,8 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Icon
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -1571,16 +1571,17 @@ private fun PhoneSearchCell(
                 )
             }
         }
+        // Shrink-to-fit: the name shows in full, never cut mid-word.
+        var cellTitleSize by remember(item.title) { mutableFloatStateOf(12f) }
         Text(
             item.title,
             style = MaterialTheme.typography.bodySmall,
+            fontSize = cellTitleSize.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            // Shrink-to-fit: the name shows in full, never cut mid-word.
-            autoSize = TextAutoSize.StepBased(
-                minFontSize = 8.sp,
-                maxFontSize = 12.sp,
-            ),
+            onTextLayout = { r ->
+                if (r.hasVisualOverflow && cellTitleSize > 8f) cellTitleSize -= 1f
+            },
             modifier = Modifier.padding(top = 4.dp)
         )
     }

@@ -59,7 +59,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1367,17 +1367,18 @@ private fun MangaPosterCard(
                 Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) { trailing() }
             }
         }
+        // Shrink-to-fit: measures its own overflow and steps down until the
+        // full name fits (two lines at most) — never "Who Got Tran...".
+        var titleSize by remember(title) { mutableFloatStateOf(12f) }
         Text(
             title,
             style = MaterialTheme.typography.bodySmall,
+            fontSize = titleSize.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            // Shrink-to-fit instead of cutting words: the name always shows
-            // in full (two lines at most), never "Who Got Tran...".
-            autoSize = TextAutoSize.StepBased(
-                minFontSize = 8.sp,
-                maxFontSize = 12.sp,
-            ),
+            onTextLayout = { r ->
+                if (r.hasVisualOverflow && titleSize > 8f) titleSize -= 1f
+            },
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
         )
