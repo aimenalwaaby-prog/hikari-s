@@ -1649,20 +1649,6 @@ private fun HistoryChip(
 }
 
 /**
- * The scope button: what a search will look through, and the way to change it.
- *
- * The row of provider chips this replaces could only ever show what fitted on
- * screen, and a provider whose chip had scrolled off could not be picked at all —
- * the user's report was "make the all provider showing from horizontal scrolling
- * to vertical … with multi select … and remove the search provider we have
- * outside, as now we will get it in the scrollable vertical bar". So this is a
- * BUTTON in the same shape as the app's other pickers (Home's own provider
- * button): it names the current scope on one line and what the search will do on
- * the next, and tapping it opens the picker — a full-height, searchable,
- * multi-selectable list of every place a title can be looked for.
- */
-@Composable
-/**
  * One phone search poster: art + title. The provider shelf's own header names
  * the source, so the cell does not repeat it under every poster (the old flat
  * grid printed it there because no header said it).
@@ -1729,6 +1715,10 @@ private fun PhoneSearchCell(
     }
 }
 
+/**
+ * The scope button: what a search will look through, and the way to change it.
+ * One compact line — icon, scope, chevron — so the words always fit.
+ */
 @Composable
 private fun ProviderScopeButton(
     label: String,

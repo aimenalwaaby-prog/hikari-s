@@ -2105,6 +2105,21 @@ internal fun ProviderPickerSheet(
                         }
                     }
                 }
+                // One flat cell per card: a pack's own card, then — while its
+                // caret is open — one card per source it publishes. Hoisted
+                // here (composable context) because the grid content below is
+                // a plain LazyGridScope lambda: a cell cannot be emitted from
+                // inside another cell's content, and `remember` cannot run in
+                // there either.
+                val packByKey = remember(packs) { packs.associateBy { it.key } }
+                val packCells: List<Pair<String, Int>> = remember(packs, expanded) {
+                    packs.flatMap { pack ->
+                        val self = listOf(pack.key to -1)
+                        if (pack.isPack && pack.key in expanded) {
+                            self + pack.members.mapIndexed { i, _ -> pack.key to i }
+                        } else self
+                    }
+                }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 160.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2245,20 +2260,6 @@ internal fun ProviderPickerSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 4.dp),
                     )
-                }
-                // One flat cell per card: a pack's own card, then — while its
-                // caret is open — one card per source it publishes. Flat
-                // because a cell cannot be emitted from inside another cell's
-                // content: the `items` lambda below has a LazyGridItemScope
-                // receiver, which has no `item()` member of its own.
-                val packByKey = remember(packs) { packs.associateBy { it.key } }
-                val packCells: List<Pair<String, Int>> = remember(packs, expanded) {
-                    packs.flatMap { pack ->
-                        val self = listOf(pack.key to -1)
-                        if (pack.isPack && pack.key in expanded) {
-                            self + pack.members.mapIndexed { i, _ -> pack.key to i }
-                        } else self
-                    }
                 }
                 items(
                     packCells,
