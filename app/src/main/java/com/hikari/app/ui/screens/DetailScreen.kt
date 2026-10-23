@@ -229,12 +229,27 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
      *  flow below): the dead links almost always came from it. */
     suspend fun originStreamsFast(item: MediaItem, episode: Episode?): List<StreamSource> =
         runCatching { repo.originStreams(item, episode) }.getOrDefault(emptyList())
-    suspend fun serversForBatch(item: MediaItem, episode: Episode, originOnly: Boolean = false): List<StreamSource> {
+    suspend fun serversForBatch(
+        item: MediaItem,
+        episode: Episode,
+        originOnly: Boolean = false,
+        /** Live downloadable servers for the batch picker: invoked whenever the running lookup grows, so the UI can show servers instantly instead of waiting for the whole union. Null keeps the old blocking shape. */
+        onServers: (suspend (List<StreamSource>) -> Unit)? = null,
+    ): List<StreamSource> {
         fun dlOk(s: StreamSource) =
             !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", true)
         fun epTag() = "S" + episode.season + "E" + episode.number
         fun log(msg: String) = runCatching {
             com.hikari.app.data.Logs.log("Download", "batch \"${item.title.take(50)}\" ${epTag()} $msg")
+        }
+        suspend fun publishLive(servers: List<StreamSource>) {
+            val sink = onServers ?: return
+            if (servers.isEmpty()) return
+            try {
+                sink(servers)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            }
         }
         log("lookup start scope=" + if (originOnly) "origin-only" else "all-extensions")
         if (originOnly) {
@@ -242,12 +257,14 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
             val playable = origin.filter { dlOk(it) }
             log("origin-only: ${playable.size} downloadable of ${origin.size} found")
+            publishLive(playable)
             return playable
         }
         val origin = runCatching { repo.originStreams(item, episode, 15000L) }.getOrDefault(emptyList())
         val playable = origin.filter { dlOk(it) }
         if (playable.isNotEmpty()) {
             log("origin hit: ${playable.size} downloadable — no sweep needed")
+            publishLive(playable)
             return playable
         }
         // "All extensions": the full cross-extension sweep — but one capped
@@ -261,6 +278,7 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
         // harvests its own progressive feed, so a slow pass still queues what
         // it found instead of nothing.
         var best: List<StreamSource> = emptyList()
+        var liveSent = 0
         val deadline = android.os.SystemClock.uptimeMillis() + 100_000L
         repeat(3) { pass ->
             val left = deadline - android.os.SystemClock.uptimeMillis()
@@ -272,13 +290,24 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             val lookup = withTimeoutOrNull(left.coerceAtMost(60_000L)) {
                 runCatching {
                     repo.streamsForOutcome(item, episode, onProgress = { got ->
+                        val downloadable = got.filter { dlOk(it) }
                         partial.clear()
-                        partial.addAll(got.filter { dlOk(it) })
+                        partial.addAll(downloadable)
+                        if (downloadable.size > liveSent) {
+                            liveSent = downloadable.size
+                            publishLive(downloadable)
+                        }
                     })
                 }.getOrNull()
             }
             val got = (lookup?.servers ?: partial.toList()).filter { dlOk(it) }
-            if (got.size > best.size) best = got
+            if (got.size > best.size) {
+                best = got
+                if (got.size > liveSent) {
+                    liveSent = got.size
+                    publishLive(got)
+                }
+            }
             log(
                 "pass ${pass + 1}: got=${got.size} best=${best.size} " +
                     "complete=${lookup?.complete} timedOut=${lookup == null}",
@@ -3534,6 +3563,11 @@ fun DetailScreen(
     var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
     var dlServers by remember { mutableStateOf(listOf<StreamSource>()) }
     var dlBusy by remember { mutableStateOf(false) }
+    // True while the batch union is still growing. Rows stay clickable the
+    // whole time: the list opens on the first server instead of after the
+    // whole sweep, and late servers append without disturbing a tap.
+    var dlSearching by remember { mutableStateOf(false) }
+    var dlLookupJob by remember { mutableStateOf<Job?>(null) }
     // Lookup generation: the server search runs in the background while the
     // episode picker stays open with its progress line. Tapping Cancel bumps
     // this, so a stale lookup can never pop the server picker (or its toast)
@@ -3643,50 +3677,87 @@ fun DetailScreen(
     // and every button gated on the search lights up again. Backing out of
     // either dialog, or its own Cancel button, lands here.
     fun cancelDlLookup() {
+        dlLookupJob?.cancel()
+        dlLookupJob = null
         dlGen++
+        dlSearching = false
         dlBusy = false
         dlMsg = null
     }
     fun resolveFirstServer(eps: List<Episode>, originOnly: Boolean) {
         if (eps.isEmpty() || dlBusy) return
+        dlLookupJob?.cancel()
         dlTargets = eps
         dlOriginOnly = originOnly
         val gen = dlGen + 1
         dlGen = gen
-        scope.launch {
-            dlBusy = true
+        val seen = LinkedHashSet<String>()
+        val union = ArrayList<StreamSource>()
+        dlServers = emptyList()
+        dlMsg = "Finding servers (1/" + eps.size + ")…"
+        dlBusy = false
+        dlSearching = true
+        showDlChoice = false
+        showDlSelect = false
+        showDlServer = true
+        fun publishLive(servers: List<StreamSource>) {
+            if (gen != dlGen) return
+            var changed = false
+            for (s in servers) {
+                // One row per server, not one row per episode carrying it:
+                // the same mirror repeats across episodes with a different
+                // URL, and printing it N times is what made a small sweep
+                // look like dozens of rows.
+                if (seen.add(s.providerId + "|" + s.name)) {
+                    union.add(s)
+                    changed = true
+                }
+            }
+            if (changed) {
+                dlServers = ArrayList(union)
+                dlMsg = "Found " + union.size + " server" + (if (union.size == 1) "" else "s") + " — still searching…"
+            }
+        }
+        val job = scope.launch {
             try {
-                val seen = LinkedHashSet<String>()
-                val union = ArrayList<StreamSource>()
                 for ((i, ep) in eps.withIndex()) {
                     if (gen != dlGen) return@launch
-                    dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
-                    // Bounded per episode (see serversForBatch): a hung
-                    // provider costs seconds here, never the whole batch.
-                    val servers = runCatching { vm.serversForBatch(batchItem, ep, originOnly) }.getOrDefault(emptyList())
-                    for (s in servers) {
-                        if (seen.add(s.providerId + "|" + s.name)) union.add(s)
+                    if (union.isEmpty()) {
+                        dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
                     }
+                    // Bounded per episode (see serversForBatch), and live:
+                    // every server the running lookup finds is published
+                    // through [publishLive] while slower providers — and later
+                    // episodes — keep searching behind it.
+                    val servers = runCatching {
+                        vm.serversForBatch(batchItem, ep, originOnly, onServers = { prog ->
+                            withContext(Dispatchers.Main) { publishLive(prog) }
+                        })
+                    }.getOrDefault(emptyList())
+                    publishLive(servers)
                 }
                 if (gen != dlGen) return@launch
                 if (union.isEmpty()) {
                     dlMsg = null
+                    showDlServer = false
                     runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
                 } else {
                     dlMsg = null
-                    dlServers = union
-                    showDlChoice = false
-                    showDlSelect = false
-                    showDlServer = true
+                    dlServers = ArrayList(union)
                 }
             } finally {
-                // A cancelled search must never leave the busy flag (and its
-                // progress line) behind: that stuck state is what froze both
-                // dialogs with greyed-out buttons on a stale "(i/N)…" line.
-                dlBusy = false
-                if (gen != dlGen) dlMsg = null
+                if (dlLookupJob === job) dlLookupJob = null
+                // A cancelled/superseded search must never touch the state its
+                // replacement owns: backing out or picking already cleared or
+                // replaced these. Only the live generation settles them.
+                if (gen == dlGen) {
+                    dlSearching = false
+                    dlBusy = false
+                    if (!showDlServer) dlMsg = null
+                }
             }
         }
+        dlLookupJob = job
     }
     // Server picked for a batch: stash it and ask the destination ONCE — the
     // same two the player's own Download button offers (in-app or phone) —
@@ -3695,6 +3766,17 @@ fun DetailScreen(
     // the moment it is queued, where it can be paused, resumed or deleted,
     // and the app stays usable throughout.
     fun confirmDlServer(srv: StreamSource) {
+        if (dlBusy) return
+        // The tap wins over the tail: stop appending the moment a server is
+        // picked, so the finished union can never pop the picker back over the
+        // destination/quality questions. The queue pass re-resolves every
+        // episode itself (see startBatchDownload).
+        dlLookupJob?.cancel()
+        dlLookupJob = null
+        dlGen++
+        dlSearching = false
+        dlMsg = null
+        dlBusy = false
         showDlServer = false
         if (dlTargets.isEmpty()) return
         dlPendingSrv = srv
@@ -3800,14 +3882,15 @@ fun DetailScreen(
     // straight in at Highest.
     fun askBatchQuality(srv: StreamSource, kind: com.hikari.app.download.DownloadKind) {
         showDlDest = false
-        val first = dlTargets.firstOrNull() ?: return
+        // The picked server is already in hand from the live list: probe ITS
+        // own playlist directly instead of re-running the whole search, so a
+        // tap on an instantly shown server starts the flow instantly.
+        if (srv.url.isBlank() || dlTargets.isEmpty()) {
+            runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
+            return
+        }
+        val src = srv
         scope.launch {
-            val servers = runCatching { vm.serversForBatch(batchItem, first, dlOriginOnly) }.getOrDefault(emptyList())
-            if (servers.isEmpty()) {
-                runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
-                return@launch
-            }
-            val src = matchDlServer(servers, srv)
             val isHls = src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8")
             if (!isHls) {
                 startBatchDownload(srv, kind, 0, 0L)
@@ -3835,11 +3918,13 @@ fun DetailScreen(
     // mixed batch never fails on this question. A single-audio source skips
     // the question and goes straight in at the default.
     fun askBatchAudio(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, h: Int, bw: Long) {
-        val first = dlTargets.firstOrNull() ?: return
+        if (srv.url.isBlank() || dlTargets.isEmpty()) {
+            runCatching { android.widget.Toast.makeText(context, "No downloadable server found.", android.widget.Toast.LENGTH_SHORT).show() }
+            return
+        }
+        val src = srv
         scope.launch {
-            val servers = runCatching { vm.serversForBatch(batchItem, first, dlOriginOnly) }.getOrDefault(emptyList())
-            val src = if (servers.isEmpty()) null else matchDlServer(servers, srv)
-            val audios = if (src != null && (src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8"))) {
+            val audios = if (src.isM3u8 || src.url.substringBefore("?").lowercase().contains(".m3u8")) {
                 runCatching {
                     com.hikari.app.download.DownloadEngine.hlsAudios(src.url, src.headers)
                 }.getOrDefault(emptyList())
@@ -3981,7 +4066,12 @@ fun DetailScreen(
         // 12dp corners, white/muted text); the phone keeps its own dialog.
         val tvDl = com.hikari.app.tv.TvMode.current()
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!dlBusy) showDlServer = false },
+            onDismissRequest = {
+                if (!dlBusy) {
+                    cancelDlLookup()
+                    showDlServer = false
+                }
+            },
             shape = if (tvDl) RoundedCornerShape(com.hikari.app.tv.TvDesktop.CornerLarge)
             else androidx.compose.material3.AlertDialogDefaults.shape,
             containerColor = if (tvDl) com.hikari.app.tv.TvDesktop.SurfaceElevated
@@ -3994,29 +4084,54 @@ fun DetailScreen(
                 )
             },
             text = {
-                LazyColumn(Modifier.heightIn(max = 420.dp).fillMaxWidth()) {
-                    items(dlServers, key = { it.providerId + "|" + it.name + "|" + it.url }) { srv ->
-                        Column(Modifier.fillMaxWidth().clickable(enabled = !dlBusy) { confirmDlServer(srv) }.padding(vertical = 8.dp)) {
-                            androidx.compose.material3.Text(
-                                srv.name,
-                                maxLines = 1,
-                                color = if (tvDl) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
-                            )
-                            val sub = listOf(srv.providerName, srv.details).filter { it.isNotBlank() }.joinToString(" - ")
-                            if (sub.isNotBlank()) androidx.compose.material3.Text(
-                                sub,
-                                maxLines = 1,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (tvDl) com.hikari.app.tv.TvDesktop.TextMuted
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                Column(Modifier.heightIn(max = 420.dp).fillMaxWidth()) {
+                    if (dlSearching) {
+                        androidx.compose.material3.Text(
+                            if (dlServers.isEmpty()) "Finding servers…"
+                            else "Found " + dlServers.size + " server" + (if (dlServers.size == 1) "" else "s") + " — still searching…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (tvDl) com.hikari.app.tv.TvDesktop.TextMuted
+                            else MaterialTheme.colorScheme.primary,
+                        )
+                        if (dlServers.isNotEmpty()) {
+                            androidx.compose.material3.TextButton(onClick = { cancelDlLookup() }) {
+                                androidx.compose.material3.Text("Stop search")
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    LazyColumn(Modifier.heightIn(max = 340.dp).fillMaxWidth()) {
+                        items(dlServers, key = { it.providerId + "|" + it.name }) { srv ->
+                            Column(Modifier.fillMaxWidth().clickable(enabled = !dlBusy) { confirmDlServer(srv) }.padding(vertical = 8.dp)) {
+                                androidx.compose.material3.Text(
+                                    srv.name,
+                                    maxLines = 1,
+                                    color = if (tvDl) com.hikari.app.tv.TvDesktop.TextPrimary else Color.Unspecified,
+                                )
+                                val sub = listOf(srv.providerName, srv.details).filter { it.isNotBlank() }.joinToString(" - ")
+                                if (sub.isNotBlank()) androidx.compose.material3.Text(
+                                    sub,
+                                    maxLines = 1,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (tvDl) com.hikari.app.tv.TvDesktop.TextMuted
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
             },
             confirmButton = {},
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showDlServer = false }, enabled = !dlBusy) { androidx.compose.material3.Text("Cancel") }
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        cancelDlLookup()
+                        showDlServer = false
+                    },
+                    enabled = !dlBusy
+                ) {
+                    androidx.compose.material3.Text(if (dlSearching) "Stop and close" else "Cancel")
+                }
             }
         )
     }
@@ -6328,7 +6443,7 @@ fun DetailScreen(
     // The plural TMDB header art for the loading card: the same image the
     // header settled on (first /images backdrop), so the hand-off into the
     // player never swaps the design the user was just looking at.
-    val loadingTmdb = rememberHeaderTmdbArt(m)
+    val loadingTmdb = rememberHeaderTmdbArts(m).firstOrNull()
     if (showLoadingBanner) {
         PlayLoadingBanner(
             title = artTitle,
@@ -7566,19 +7681,19 @@ object DetailHeroStyles {
 }
 
 /** The plural TMDB header art for a title (the same /images backdrops list
- *  TV's banner rotates): loads once per title, null while loading or when
+ *  TV's banner rotates): loads once per title, empty while loading or when
  *  TMDB has nothing. Callers paint it first and fall back to their normal
  *  model — the single backdrop_path is often null while /images has art. */
 @Composable
-private fun rememberHeaderTmdbArt(item: MediaItem?): String? {
-    var url by remember(item?.uniqueId) { mutableStateOf<String?>(null) }
+private fun rememberHeaderTmdbArts(item: MediaItem?): List<String> {
+    var urls by remember(item?.uniqueId) { mutableStateOf(emptyList<String>()) }
     LaunchedEffect(item?.uniqueId) {
-        url = null
+        urls = emptyList()
         val it = item ?: return@LaunchedEffect
         if (it.type != MediaType.SERIES && it.type != MediaType.MOVIE) return@LaunchedEffect
-        url = runCatching { TmdbScreenshots.backdropsFor(it).firstOrNull() }.getOrNull()
+        urls = runCatching { TmdbScreenshots.backdropsFor(it) }.getOrDefault(emptyList())
     }
-    return url
+    return urls
 }
 
 /** The page's header art, in whichever shape [style] asks for. */
@@ -7600,7 +7715,20 @@ private fun Hero(
     // The plural TMDB backdrops first (what TV's banner shows): a dead
     // override falls back to the normal model below, never black.
     var tmdbHeaderDead by remember(meta?.uniqueId) { mutableStateOf(false) }
-    val tmdbHeader = rememberHeaderTmdbArt(meta)
+    // Phone rotates through the same plural list TV's banner rotates: one
+    // TMDB image used to sit still here while TV kept changing every few
+    // seconds. Every 2s, exactly as asked; a dead image falls back below.
+    val tmdbHeaders = rememberHeaderTmdbArts(meta)
+    var tmdbHeaderIndex by remember(meta?.uniqueId) { mutableStateOf(0) }
+    LaunchedEffect(meta?.uniqueId, tmdbHeaders.size) {
+        if (tmdbHeaders.size > 1) {
+            while (true) {
+                delay(2_000L)
+                tmdbHeaderIndex = (tmdbHeaderIndex + 1) % tmdbHeaders.size
+            }
+        }
+    }
+    val tmdbHeader = tmdbHeaders.getOrNull(tmdbHeaderIndex)
     val image = if (!tmdbHeaderDead && !tmdbHeader.isNullOrBlank()) {
         PosterLoader.model(tmdbHeader) to true
     } else {

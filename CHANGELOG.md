@@ -1,3 +1,12 @@
+## 0.11.93 (continuous build only)
+
+### Fixed (batch: true instant download-all servers, one-to-one reference provider boxes, restored TV search provider control, boxed phone filters, rotating phone detail art)
+- Download-all shows servers instantly: the server list opens on the first downloadable server and appends every new server live while the sweep keeps searching behind it. A stuck provider never gates later servers; rows stay clickable during the search, and tapping a server starts destination/quality/audio/queue from the already-found server instead of re-running the whole lookup
+- Select Provider is one reference dialog in Home and Search on TV: title plus subtitle in full, All Plugins (Global) pill, full-width filter, fixed two-column provider cards; Manage Home Screen Feed stays the same reference two-pane mixer in both places
+- TV Search has its provider control back: a visible provider selector plus Manage feed above the results, opening the same exact dialogs as Home instead of only showing an “All providers” subtitle
+- Phone search filters are compact boxed selectors: Provider, Type, Year and Genre pills each open their own selection box (years/genres searchable multi-pick with Clear), instead of dumping every option as horizontal pills
+- Phone detail header rotates through the same plural TMDB backdrops as TV, changing every 2 seconds; the loading card still uses the settled first image
+
 ## 0.11.92 (continuous build only)
 
 ### Fixed (batch: the sweep never gates, download-all waits, one-line filters, TV box guaranteed wide)

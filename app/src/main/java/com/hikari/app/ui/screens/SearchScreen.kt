@@ -2,6 +2,7 @@ package com.hikari.app.ui.screens
 import com.hikari.app.tv.TvMode
 import com.hikari.app.tv.TvManageFeedDialog
 import com.hikari.app.tv.TvSelectProviderDialog
+import com.hikari.app.tv.TvDesktop
 import com.hikari.app.tv.TvUi
 import com.hikari.app.i18n.tr
 import com.hikari.app.i18n.trTag
@@ -93,6 +94,9 @@ import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.ui.rememberPosterScore
 import com.hikari.app.ui.rememberPosterStyle
 import com.hikari.app.ui.rememberVisibleItems
+import com.hikari.app.ui.components.ChoiceDialog
+import com.hikari.app.ui.components.ChoiceItem
+import com.hikari.app.ui.components.MultiChoiceDialog
 import com.hikari.app.tv.tvPress
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
@@ -531,6 +535,12 @@ fun SearchScreen(
         if (TvMode.current()) {
             com.hikari.app.tv.TvScreenHeader(title = tr("Search"), subtitle = if (selected.isEmpty()) tr("All providers") else if (soleName != null) soleName else tr("%s sources").replace("%s", selected.size.toString()))
         }
+    // Provider-picker state, hoisted above the search field on TV: the
+    // television search tab must show its own provider box trigger (the same
+    // exact Select Provider dialog Home uses), not just the header subtitle.
+    var showProviders by remember { mutableStateOf(false) }
+    var showTvFeed by remember { mutableStateOf(false) }
+    var providerKind by remember { mutableStateOf<ProviderType?>(null) }
         GlassSearchField(
             value = query,
             onValueChange = { vm.setQuery(it); translatedFrom = null },
@@ -596,6 +606,62 @@ fun SearchScreen(
                 }
             }
         )
+        // Television's provider box trigger: same exact Select Provider dialog
+        // as Home, plus the feed mixer. This is the control the TV tab lost —
+        // the header subtitle alone is not a picker.
+        if (searchIsTv && (providers.isNotEmpty() || collections.isNotEmpty())) {
+            val tvScopeLabel = when {
+                selected.isEmpty() -> tr("All providers")
+                soleName != null -> soleName
+                else -> I18n.t("%s sources").replace("%s", selected.size.toString())
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    onClick = { showProviders = true },
+                    shape = RoundedCornerShape(50),
+                    color = TvDesktop.SurfaceCard,
+                    border = BorderStroke(1.dp, TvDesktop.GlassEdge),
+                    modifier = Modifier.tvPress { showProviders = true },
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.Tune,
+                            contentDescription = null,
+                            tint = TvDesktop.TextMuted,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            tvScopeLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TvDesktop.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = tr("Choose providers"),
+                            tint = TvDesktop.TextMuted,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                TextButton(onClick = { showTvFeed = true }) {
+                    Text(tr("Manage feed"), color = TvDesktop.TextMuted)
+                }
+            }
+        }
         // ---- Recent searches ----
         //
         // Shown only while the box is EMPTY: once a search is running or has
@@ -644,7 +710,6 @@ fun SearchScreen(
         }
         // Provider-picker state, hoisted above the two blocks that use it: the
         // dialogs above AND the one-line filter row below both open it.
-        var showProviders by remember { mutableStateOf(false) }
         if (providers.isNotEmpty() || collections.isNotEmpty()) {
             // ---- Where to search: a button, and the picker it opens ----
             //
@@ -658,11 +723,9 @@ fun SearchScreen(
             // because the picker carries its own search. Doing that removed the
             // chips entirely, so what is left here is one line that says WHAT
             // will be searched and one tap to change it.
-            var providerKind by remember { mutableStateOf<ProviderType?>(null) }
             // Television's feed mixer — the same dialog Home uses. The old
             // target (the personal-catalogue folder) was the wrong screen: the
             // TV tab's Manage entry must open the multi-select provider dialog.
-            var showTvFeed by remember { mutableStateOf(false) }
             // (scopeLabel now lives on the filter row's own pill, below.)
             // The scope pill lives in the one-line filter row below (it opens the
             // same picker), so there is no button left here — just the state
@@ -740,6 +803,28 @@ fun SearchScreen(
         // selection + the search box only.
         if (!searchIsTv) {
             // ---- Every filter in ONE slim row ----
+            // Type/year/genre are compact selector pills — NOT one pill per
+            // option. Each opens its own box (like the provider pill opens
+            // the provider box); the endless horizontal option strip is gone.
+            var showTypeFilter by remember { mutableStateOf(false) }
+            var showYearFilter by remember { mutableStateOf(false) }
+            var showGenreFilter by remember { mutableStateOf(false) }
+            val typeLabel = tr("Type") + ": " + when (kindFilter) {
+                SearchKindFilter.MOVIES -> tr("Movies")
+                SearchKindFilter.SERIES -> tr("Series")
+                SearchKindFilter.ANIME -> tr("Anime")
+                else -> tr("Both")
+            }
+            val yearLabel = tr("Year") + ": " + when {
+                yearsFilter.isEmpty() -> tr("Any")
+                yearsFilter.size <= 2 -> yearsFilter.sortedDescending().joinToString(", ")
+                else -> tr("%s years").replace("%s", yearsFilter.size.toString())
+            }
+            val genreLabel = tr("Genre") + ": " + when {
+                genreFilter.isEmpty() -> tr("Any")
+                genreFilter.size == 1 -> trTag(genreFilter.first())
+                else -> I18n.t("%s picked").replace("%s", genreFilter.size.toString())
+            }
             //
             // Provider pill + kind + years + genres ride a single horizontal
             // scroller of small wrap-content pills: every name shows in full
@@ -795,68 +880,74 @@ fun SearchScreen(
                     }
                 }
                 item {
-                    YearChip(
-                        label = tr("Both"),
-                        selected = kindFilter == SearchKindFilter.ALL,
-                        onClick = { kindFilterKey = SearchKindFilter.ALL.key },
+                    FilterSelectPill(
+                        label = typeLabel,
+                        active = kindFilter != SearchKindFilter.ALL,
+                        contentDescription = tr("Choose type"),
+                        onClick = { showTypeFilter = true },
                     )
                 }
                 item {
-                    YearChip(
-                        label = tr("Movies"),
-                        selected = kindFilter == SearchKindFilter.MOVIES,
-                        onClick = { kindFilterKey = SearchKindFilter.MOVIES.key },
+                    FilterSelectPill(
+                        label = yearLabel,
+                        active = yearsFilter.isNotEmpty(),
+                        contentDescription = tr("Choose years"),
+                        onClick = { showYearFilter = true },
                     )
                 }
                 item {
-                    YearChip(
-                        label = tr("Series"),
-                        selected = kindFilter == SearchKindFilter.SERIES,
-                        onClick = { kindFilterKey = SearchKindFilter.SERIES.key },
+                    FilterSelectPill(
+                        label = genreLabel,
+                        active = genreFilter.isNotEmpty(),
+                        contentDescription = tr("Choose genres"),
+                        onClick = { showGenreFilter = true },
                     )
                 }
-                item {
-                    YearChip(
-                        label = tr("Anime"),
-                        selected = kindFilter == SearchKindFilter.ANIME,
-                        onClick = { kindFilterKey = SearchKindFilter.ANIME.key },
-                    )
-                }
-                item {
-                    val picked = when {
-                        yearsFilter.isEmpty() -> tr("Any")
-                        yearsFilter.size <= 3 ->
-                            yearsFilter.sortedDescending().joinToString(", ")
-                        else -> tr("%s years").replace("%s", yearsFilter.size.toString())
-                    }
-                    YearChip(
-                        label = if (yearsFilter.isEmpty()) picked else "$picked \u2715",
-                        selected = yearsFilter.isNotEmpty(),
-                        onClick = { setYears(emptySet()) },
-                    )
-                }
-                items(SEARCH_YEARS) { year ->
-                    YearChip(
-                        label = year.toString(),
-                        selected = year in yearsFilter,
-                        onClick = { toggleYear(year) },
-                    )
-                }
-                item {
-                    GenreChip(
-                        label = if (genreFilter.isEmpty()) tr("Any")
-                        else I18n.t("%s picked").replace("%s", genreFilter.size.toString()) + " \u2715",
-                        selected = genreFilter.isNotEmpty(),
-                        onClick = { setGenres(emptySet()) },
-                    )
-                }
-                items(SEARCH_GENRES) { genre ->
-                    GenreChip(
-                        label = trTag(genre),
-                        selected = genre.trim().lowercase() in genreFilter,
-                        onClick = { toggleGenre(genre) },
-                    )
-                }
+            }
+            if (showTypeFilter) {
+                ChoiceDialog(
+                    title = tr("Type"),
+                    items = listOf(
+                        ChoiceItem(key = SearchKindFilter.ALL.key, label = tr("Both")),
+                        ChoiceItem(key = SearchKindFilter.MOVIES.key, label = tr("Movies")),
+                        ChoiceItem(key = SearchKindFilter.SERIES.key, label = tr("Series")),
+                        ChoiceItem(key = SearchKindFilter.ANIME.key, label = tr("Anime")),
+                    ),
+                    selectedKey = kindFilterKey,
+                    onPick = { key ->
+                        kindFilterKey = key
+                        showTypeFilter = false
+                    },
+                    onDismiss = { showTypeFilter = false },
+                )
+            }
+            if (showYearFilter) {
+                MultiChoiceDialog(
+                    title = tr("Year"),
+                    items = SEARCH_YEARS.map { ChoiceItem(key = it.toString(), label = it.toString()) },
+                    selectedKeys = yearsFilter.map { it.toString() }.toSet(),
+                    onToggle = { key -> key.toIntOrNull()?.let { toggleYear(it) } },
+                    onDismiss = { showYearFilter = false },
+                    searchable = true,
+                    searchPlaceholder = tr("Search years"),
+                    headerContent = {
+                        TextButton(onClick = { setYears(emptySet()) }) { Text(tr("Clear")) }
+                    },
+                )
+            }
+            if (showGenreFilter) {
+                MultiChoiceDialog(
+                    title = tr("Genre"),
+                    items = SEARCH_GENRES.map { ChoiceItem(key = it.trim().lowercase(), label = trTag(it)) },
+                    selectedKeys = genreFilter,
+                    onToggle = { key -> toggleGenre(key) },
+                    onDismiss = { showGenreFilter = false },
+                    searchable = true,
+                    searchPlaceholder = tr("Search genres"),
+                    headerContent = {
+                        TextButton(onClick = { setGenres(emptySet()) }) { Text(tr("Clear")) }
+                    },
+                )
             }
             if ((filterOn || activeEngine.isNotBlank()) && results.isNotEmpty()) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
@@ -1393,6 +1484,48 @@ private val SEARCH_YEARS: List<Int> = run {
  * One year in the search filter strip: small, thin and tappable, drawn like the
  * provider chips around it so the strip reads as one control.
  */
+@Composable
+private fun FilterSelectPill(
+    label: String,
+    active: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+        else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Tune,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+}
 @Composable
 private fun YearChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(

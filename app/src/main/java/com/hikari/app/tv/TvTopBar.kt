@@ -449,7 +449,7 @@ fun TvSelectProviderDialog(
                     tr("Choose a dedicated provider or search across all installed plugins"),
                     style = MaterialTheme.typography.bodySmall,
                     color = TvDesktop.TextMuted,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
                 )
@@ -474,18 +474,6 @@ fun TvSelectProviderDialog(
                             modifier = Modifier.size(18.dp),
                         )
                     },
-                    trailingIcon = if (query.isNotBlank()) {
-                        {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(
-                                    Icons.Filled.Close,
-                                    contentDescription = tr("Clear"),
-                                    tint = TvDesktop.TextMuted,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                    } else null,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
