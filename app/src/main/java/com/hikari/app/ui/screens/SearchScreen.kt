@@ -1,6 +1,5 @@
 package com.hikari.app.ui.screens
 import com.hikari.app.tv.TvMode
-import com.hikari.app.tv.TvManageFeedDialog
 import com.hikari.app.tv.TvSelectProviderDialog
 import com.hikari.app.tv.TvDesktop
 import com.hikari.app.tv.TvUi
@@ -539,7 +538,6 @@ fun SearchScreen(
     // television search tab must show its own provider box trigger (the same
     // exact Select Provider dialog Home uses), not just the header subtitle.
     var showProviders by remember { mutableStateOf(false) }
-    var showTvFeed by remember { mutableStateOf(false) }
     var providerKind by remember { mutableStateOf<ProviderType?>(null) }
         GlassSearchField(
             value = query,
@@ -606,9 +604,8 @@ fun SearchScreen(
                 }
             }
         )
-        // Television's provider box trigger: same exact Select Provider dialog
-        // as Home, plus the feed mixer. This is the control the TV tab lost —
-        // the header subtitle alone is not a picker.
+        // Television's provider box trigger: the same exact Select
+        // Provider dialog as Home — the box only, no feed mixer here.
         if (searchIsTv && (providers.isNotEmpty() || collections.isNotEmpty())) {
             val tvScopeLabel = when {
                 selected.isEmpty() -> tr("All providers")
@@ -655,10 +652,6 @@ fun SearchScreen(
                             modifier = Modifier.size(16.dp),
                         )
                     }
-                }
-                Spacer(Modifier.width(10.dp))
-                TextButton(onClick = { showTvFeed = true }) {
-                    Text(tr("Manage feed"), color = TvDesktop.TextMuted)
                 }
             }
         }
@@ -723,13 +716,10 @@ fun SearchScreen(
             // because the picker carries its own search. Doing that removed the
             // chips entirely, so what is left here is one line that says WHAT
             // will be searched and one tap to change it.
-            // Television's feed mixer — the same dialog Home uses. The old
-            // target (the personal-catalogue folder) was the wrong screen: the
-            // TV tab's Manage entry must open the multi-select provider dialog.
-            // (scopeLabel now lives on the filter row's own pill, below.)
-            // The scope pill lives in the one-line filter row below (it opens the
-            // same picker), so there is no button left here — just the state
-            // and the dialogs it opens.
+            // Television gets the provider box ONLY — no Manage entry here
+            // (the mixer lives in Home). The scope pill lives in the filter
+            // row above (it opens the same picker), so there is no button
+            // left here — just the state and the dialog it opens.
             if (showProviders) {
                 if (searchIsTv) {
                     // Television gets the same big reference-style Select
@@ -746,10 +736,6 @@ fun SearchScreen(
                         onToggleMulti = { key ->
                             val next = if (key in selected) selected - key else selected + key
                             vm.setProviders(next.toList())
-                        },
-                        onManage = {
-                            showProviders = false
-                            showTvFeed = true
                         },
                         onDismiss = { showProviders = false },
                     )
@@ -778,17 +764,6 @@ fun SearchScreen(
                         onDismiss = { showProviders = false },
                     )
                 }
-            }
-            if (showTvFeed) {
-                TvManageFeedDialog(
-                    providers = providers,
-                    selection = selected.toList(),
-                    onSave = { keys ->
-                        showTvFeed = false
-                        vm.setProviders(keys)
-                    },
-                    onDismiss = { showTvFeed = false },
-                )
             }
         }
         // ---- Result filters: kind + year (see the state at the top) ---------

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pointerInput
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,16 +45,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -77,6 +81,9 @@ import com.hikari.app.data.Collection
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.data.Profiles
 import com.hikari.app.i18n.tr
+import com.hikari.app.HikariApp
+import com.hikari.app.data.RepoProvenance
+import com.hikari.app.ui.screens.holdOrTap
 
 /**
  * The television top-right cluster, in the shape of the CloudStream desktop
@@ -371,6 +378,16 @@ fun TvSelectProviderDialog(
     collections: List<Collection> = emptyList(),
 ) {
     var query by remember { mutableStateOf("") }
+    // Repo display names for the "(repo)" duplicate tags — the reference tells
+    // same-named installs apart by repo, never by a raw id suffix.
+    val app = LocalContext.current.applicationContext as HikariApp
+    val repos by remember { app.store.reposFlow() }.collectAsState(initial = emptyList())
+    val repoLabels = remember(providers, repos) {
+        RepoProvenance.nameMap(providers.map { it.config }, repos)
+    }
+    val nameCounts = remember(providers) {
+        providers.groupingBy { it.config.name }.eachCount()
+    }
     val shown = remember(providers, query) {
         val q = query.trim()
         if (q.isBlank()) providers
@@ -512,9 +529,8 @@ fun TvSelectProviderDialog(
                 }
                 items(shown, key = { "tv-sel-" + it.config.id }) { p ->
                         val id = p.config.id
-                        val dupTag = if (shown.count { q -> q.config.name == p.config.name } > 1) {
-                            p.config.id.split("|").drop(1).firstOrNull()?.trim()
-                                ?.takeIf { it.isNotEmpty() }?.let { "($it)" }
+                        val dupTag = if ((nameCounts[p.config.name] ?: 0) > 1) {
+                            repoLabels[id]?.takeIf { it.isNotBlank() }?.let { "($it)" }
                         } else null
                         TvProviderCard(
                             name = p.config.name,
@@ -618,7 +634,7 @@ fun TvManageFeedDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             if (isAdvancedMode) tr("Manage Home Screen Feed") else tr("Select Provider"),
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                             color = TvDesktop.TextPrimary,
                         )
@@ -919,6 +935,11 @@ fun TvProviderCard(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(12.dp)
+    // Fresh lambdas for the gesture below (see PickerRow's note): the touch
+    // hold's pointerInput key never changes, so without these every tap after
+    // the first recomposition would compute from a dead snapshot.
+    val latestClick by rememberUpdatedState(onClick)
+    val latestHold by rememberUpdatedState(onHold)
     Row(
         Modifier
             .fillMaxWidth()
@@ -933,8 +954,23 @@ fun TvProviderCard(
                 else TvDesktop.GlassEdge,
                 shape,
             )
-            .clickable(onClick = onClick)
-            .tvPress(previewPass = true, onClick = onClick, onHold = onHold)
+            .then(
+                when {
+                    // No hold: a plain tap card, TV and touch alike.
+                    onHold == null -> Modifier.clickable(onClick = onClick)
+                    // Television keeps the remote key hold it already had.
+                    TvMode.isTv -> Modifier.clickable(onClick = onClick)
+                        .tvPress(previewPass = true, onClick = onClick, onHold = onHold)
+                    // Touch never reached onHold (tvPress only answers remote
+                    // keys), so a held card did nothing on phones: the press
+                    // is timed here — a tap picks, half a second ticks the
+                    // multi-pick — and clickable stays OFF, or the tap would
+                    // fire twice (once from each handler).
+                    else -> Modifier
+                        .tvPress(previewPass = true, onClick = { latestClick() }, onHold = { latestHold?.invoke() })
+                        .pointerInput(Unit) { holdOrTap({ latestHold?.invoke() }, { latestClick() }) }
+                }
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

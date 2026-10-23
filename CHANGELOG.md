@@ -1,3 +1,10 @@
+## 0.11.94 (continuous build only)
+
+### Fixed (batch: TV provider box rebuilt one-to-one, Search TV box-only, phone hold-to-multi)
+- TV Select Provider rebuilt from the reference: duplicate names carry the repo tag ("(repo)") instead of a raw id suffix, so cards show full names; the same exact box serves Home and Search
+- Search tab on TV is the provider box only: the Manage feed entry is gone there; the mixer lives in Home
+- Phone provider cards answer the half-second hold again: touch hold ticks the multi-pick (TV remote hold unchanged), tap still picks and closes — the hold only ever lived in the remote key path before, so held rows did nothing on phones
+
 ## 0.11.93 (continuous build only)
 
 ### Fixed (batch: true instant download-all servers, one-to-one reference provider boxes, restored TV search provider control, boxed phone filters, rotating phone detail art)
