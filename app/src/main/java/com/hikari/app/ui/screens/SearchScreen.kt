@@ -733,6 +733,7 @@ fun SearchScreen(
                         onPickAll = { showProviders = false; vm.selectAll() },
                         onPick = { key -> showProviders = false; vm.selectProvider(key) },
                         onDismiss = { showProviders = false },
+                        onSave = { keys -> showProviders = false; vm.setProviders(keys) },
                     )
                 } else {
                     ProviderPickerSheet(

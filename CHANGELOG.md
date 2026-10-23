@@ -1,3 +1,11 @@
+## 0.11.97 (continuous build only)
+
+### Fixed (batch: 4-in-a-row boxes, two-pane multi in both, single-line text)
+- Both TV boxes are landscape rectangles with 4 providers per row when the multi toggle is off; compact cards keep icon + name + subtitle on one line each
+- Multi toggle on (Home Manage box AND Search Select box): left pane Active with up/down arrows + remove, right pane all installed plugins with + to add, Save & Close applies the mix
+- Every title, subtitle, label and card line is capped at one line — nothing wraps onto a second line in either box
+- Phone UI untouched
+
 ## 0.11.96 (continuous build only)
 
 ### Fixed (batch: reference-exact provider boxes on every screen + full resume label)

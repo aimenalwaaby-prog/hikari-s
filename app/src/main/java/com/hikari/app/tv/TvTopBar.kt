@@ -473,6 +473,7 @@ fun TvSelectProviderDialog(
     onPickAll: () -> Unit,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit,
     /** The user's own collections, drawn full-width above the provider grid. */
     collections: List<Collection> = emptyList(),
 ) {
@@ -482,6 +483,9 @@ fun TvSelectProviderDialog(
     val selectCfg = LocalConfiguration.current
     val selectW = if (selectCfg.screenWidthDp < 600) (selectCfg.screenWidthDp * 0.92f).dp else minOf((selectCfg.screenWidthDp * 0.65f).dp, 760.dp)
     var providerModalSearch by remember { mutableStateOf("") }
+    val narrow = selectCfg.screenWidthDp < 600
+    var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
+    val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     // Repo display names for the "(repo)" duplicate tags — the reference tells
     // same-named installs apart by the parent folder of the plugin path, which
     // is exactly what the repo name is here.
@@ -505,43 +509,34 @@ fun TvSelectProviderDialog(
 
     RefDialogFrame(
         onDismiss = onDismiss,
-        modifier = Modifier.width(selectW).wrapContentHeight().heightIn(min = 220.dp, max = 620.dp),
+        modifier = Modifier.width(selectW).wrapContentHeight().heightIn(min = 220.dp, max = (selectCfg.screenHeightDp * 0.85f).dp),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().wrapContentHeight().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = tr("Select Provider"),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = tr("Choose a dedicated provider or search across all installed plugins"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            if (!narrow) {
+                // Header (reference: title left, pill right)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = tr("Select Provider"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(text = tr("Choose a dedicated provider or search across all installed plugins"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp)) {
+                        Text(tr("All Plugins (Global)"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
+                    }
                 }
-                FilledTonalButton(
-                    onClick = onPickAll,
-                    shape = RoundedCornerShape(10.dp),
-                ) {
-                    Text(
-                        tr("All Plugins (Global)"),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp,
-                    )
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = tr("Select Provider"), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp)) {
+                            Text(tr("All Plugins (Global)"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
+                        }
+                    }
+                    Text(text = tr("Choose a dedicated provider or search across all installed plugins"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-
             // Search input within modal
             OutlinedTextField(
                 value = providerModalSearch,
@@ -559,43 +554,131 @@ fun TvSelectProviderDialog(
                 shape = RoundedCornerShape(10.dp),
             )
 
-            // Provider grid
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 180.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 440.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(maxLineSpan) }) { col ->
-                    val key = Routes.COLLECTION_PROVIDER_PREFIX + col.id
-                    RefProviderCard(
-                        name = col.name,
-                        repoTag = null,
-                        subtitle = tr("Collection"),
-                        selected = key in selection,
-                        iconUrl = null,
-                        iconName = col.name,
-                        onClick = { onPick(key) },
-                    )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(text = tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(8.dp))
+                Switch(checked = isAdvancedMode, onCheckedChange = { enabled ->
+                    isAdvancedMode = enabled
+                    if (enabled && working.value.isEmpty()) { selection.firstOrNull()?.let { working.value = ArrayList(listOf(it)) } }
+                })
+            }
+
+            if (isAdvancedMode) {
+                val activeSel = working.value.mapNotNull { id -> matchingProviders.firstOrNull { it.config.id == id } }
+                val inactiveSel = matchingProviders.filter { it.config.id !in working.value }
+                if (narrow) {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SelectActivePane(activeSel, working, Modifier.fillMaxWidth())
+                        SelectAvailPane(inactiveSel, working, Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SelectActivePane(activeSel, working, Modifier.weight(1f))
+                        SelectAvailPane(inactiveSel, working, Modifier.weight(1f))
+                    }
                 }
-                items(matchingProviders.size, key = { idx ->
-                    val p = matchingProviders[idx]
-                    "${p.config.name}_${p.config.id}"
-                }) { idx ->
-                    val provider = matchingProviders[idx]
-                    val id = provider.config.id
-                    val repoTag = if (provider.config.name in duplicateNames) {
-                        repoLabels[id]?.takeIf { it.isNotBlank() }
-                    } else null
-                    RefProviderCard(
-                        name = provider.config.name,
-                        repoTag = repoTag,
-                        subtitle = refProviderSubtitle(provider),
-                        selected = id in selection,
-                        iconUrl = provider.config.iconUrl,
-                        iconName = provider.config.name,
-                        onClick = { onPick(id) },
-                    )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Button(onClick = { onSave(working.value.toList()) }) {
+                        Text(tr("Save & Close"), maxLines = 1)
+                    }
+                }
+            } else {
+                LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = if (narrow) 280.dp else 440.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(maxLineSpan) }) { col ->
+                        val key = Routes.COLLECTION_PROVIDER_PREFIX + col.id
+                        RefProviderCard(name = col.name, repoTag = null, subtitle = tr("Collection"), selected = key in selection, iconUrl = null, iconName = col.name, onClick = { onPick(key) })
+                    }
+                    items(matchingProviders.size, key = { idx ->
+                        val p = matchingProviders[idx]
+                        p.config.name + "_" + p.config.id
+                    }) { idx ->
+                        val provider = matchingProviders[idx]
+                        val id = provider.config.id
+                        val repoTag = if (provider.config.name in duplicateNames) { repoLabels[id]?.takeIf { it.isNotBlank() } } else null
+                        RefProviderCard(name = provider.config.name, repoTag = repoTag, subtitle = refProviderSubtitle(provider), selected = id in selection, iconUrl = provider.config.iconUrl, iconName = provider.config.name, onClick = { onPick(id) }, compact = true)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Active side of the Select box multi mixer: number + icon + name, up/down arrows to reorder, X to remove. */
+@Composable
+private fun SelectActivePane(active: List<ContentProvider>, working: androidx.compose.runtime.MutableState<ArrayList<String>>, mod: Modifier) {
+    Column(modifier = mod) {
+        Text(tr("Active Providers Feed"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(modifier = Modifier.height(8.dp))
+        if (active.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 160.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Text(tr("Pick from the other side to build the mix"), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 220.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(active.size, key = { i -> "sel-active-" + active[i].config.id }) { index ->
+                    val p = active[index]
+                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text((index + 1).toString() + ".", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        if (!p.config.iconUrl.isNullOrBlank()) {
+                            AsyncImage(model = p.config.iconUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)))
+                        } else {
+                            Box(modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.Extension, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(p.config.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(refProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { if (index > 0) { val n = ArrayList(working.value); val t = n[index - 1]; n[index - 1] = n[index]; n[index] = t; working.value = n } }, enabled = index > 0, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.ArrowUpward, contentDescription = tr("Move Up"), modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(onClick = { if (index < working.value.lastIndex) { val n = ArrayList(working.value); val t = n[index + 1]; n[index + 1] = n[index]; n[index] = t; working.value = n } }, enabled = index < working.value.lastIndex, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.ArrowDownward, contentDescription = tr("Move Down"), modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(onClick = { working.value = ArrayList(working.value - p.config.id) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Available side of the Select box multi mixer: + adds to the mix. */
+@Composable
+private fun SelectAvailPane(inactive: List<ContentProvider>, working: androidx.compose.runtime.MutableState<ArrayList<String>>, mod: Modifier) {
+    Column(modifier = mod) {
+        Text(tr("Available Plugins"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(modifier = Modifier.height(8.dp))
+        if (inactive.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 160.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Text(tr("All plugins are active"), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 220.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(inactive.size, key = { i -> "sel-avail-" + inactive[i].config.id }) { index ->
+                    val p = inactive[index]
+                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (!p.config.iconUrl.isNullOrBlank()) {
+                            AsyncImage(model = p.config.iconUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)))
+                        } else {
+                            Box(modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.Extension, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(p.config.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(refProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        FilledTonalIconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }) {
+                            Icon(Icons.Filled.Add, contentDescription = tr("Add"))
+                        }
+                    }
                 }
             }
         }
@@ -612,6 +695,7 @@ private fun RefProviderCard(
     iconUrl: String?,
     iconName: String,
     onClick: () -> Unit,
+    compact: Boolean = false,
 ) {
     Surface(
         onClick = onClick,
@@ -626,28 +710,28 @@ private fun RefProviderCard(
         modifier = Modifier.tvPress(previewPass = true, onClick = onClick),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
         ) {
             if (!iconUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = iconUrl,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(28.dp).clip(CircleShape).background(Color.White),
+                    modifier = Modifier.size(if (compact) 22.dp else 28.dp).clip(CircleShape).background(Color.White),
                 )
             } else {
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(if (compact) 22.dp else 28.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = iconName.take(1).uppercase(),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
+                            fontSize = if (compact) 10.sp else 12.sp,
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -661,7 +745,7 @@ private fun RefProviderCard(
                     Text(
                         text = name,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = if (compact) 11.sp else 13.sp,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -680,7 +764,7 @@ private fun RefProviderCard(
                 }
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = if (compact) MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp) else MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -708,6 +792,8 @@ fun TvManageFeedDialog(
     val app = LocalContext.current.applicationContext as HikariApp
     val mcfg = LocalConfiguration.current
     val manageW = if (mcfg.screenWidthDp < 600) (mcfg.screenWidthDp * 0.95f).dp else (mcfg.screenWidthDp * 0.85f).dp
+    val manageNarrow = mcfg.screenWidthDp < 600
+    val advNarrow = manageNarrow
     val scope = rememberCoroutineScope()
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
@@ -759,72 +845,64 @@ fun TvManageFeedDialog(
         modifier = Modifier.width(manageW).fillMaxHeight(0.85f),
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-            // HEADER
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (catalogProvider != null) {
-                            tr("Customize %s").replace("%s", catalogProvider?.config?.name.orEmpty())
-                        } else {
-                            tr("Manage Home Screen Feed")
-                        },
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (catalogProvider != null) {
-                            tr("Enable, disable, and drag to reorder catalogs.")
-                        } else {
-                            tr("Mix, reorder, and customize multiple providers.")
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val cp = catalogProvider
-                if (cp != null) {
-                    val hasCustomOrder = orderedCatalogs[cp.config.id]?.isNotEmpty() == true
-                    if (hasCustomOrder) {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch { app.store.resetCatalogOrder(cp.config.id) }
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
-                            Text(tr("Reset Order"), style = MaterialTheme.typography.labelMedium)
-                        }
+            if (!manageNarrow) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = if (catalogProvider != null) { tr("Customize %s").replace("%s", catalogProvider?.config?.name.orEmpty()) } else { tr("Manage Home Screen Feed") }, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = if (catalogProvider != null) { tr("Enable, disable, and drag to reorder catalogs.") } else { tr("Mix, reorder, and customize multiple providers.") }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            tr("Enable Multi-Provider Feed"),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Switch(
-                            checked = isAdvancedMode,
-                            onCheckedChange = { enabled ->
+                    val cp = catalogProvider
+                    if (cp != null) {
+                        val hasCustomOrder = orderedCatalogs[cp.config.id]?.isNotEmpty() == true
+                        if (hasCustomOrder) {
+                            OutlinedButton(onClick = { scope.launch { app.store.resetCatalogOrder(cp.config.id) } }, shape = RoundedCornerShape(8.dp)) {
+                                Text(tr("Reset Order"), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                            }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(checked = isAdvancedMode, onCheckedChange = { enabled ->
                                 isAdvancedMode = enabled
                                 if (!enabled) {
-                                    val top = working.value.firstOrNull()
-                                        ?: providers.firstOrNull()?.config?.id
-                                    working.value = if (top != null) ArrayList(listOf(top))
-                                    else ArrayList()
+                                    val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
+                                    working.value = if (top != null) ArrayList(listOf(top)) else ArrayList()
                                 }
-                            },
-                        )
+                            })
+                        }
+                    }
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(text = if (catalogProvider != null) { tr("Customize %s").replace("%s", catalogProvider?.config?.name.orEmpty()) } else { tr("Manage Home Screen Feed") }, fontWeight = FontWeight.Bold, fontSize = 19.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = if (catalogProvider != null) { tr("Enable, disable, and drag to reorder catalogs.") } else { tr("Mix, reorder, and customize multiple providers.") }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val cp = catalogProvider
+                    if (cp != null) {
+                        val hasCustomOrder = orderedCatalogs[cp.config.id]?.isNotEmpty() == true
+                        if (hasCustomOrder) {
+                            OutlinedButton(onClick = { scope.launch { app.store.resetCatalogOrder(cp.config.id) } }, shape = RoundedCornerShape(8.dp)) {
+                                Text(tr("Reset Order"), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                            }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(tr("Enable Multi-Provider Feed"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(checked = isAdvancedMode, onCheckedChange = { enabled ->
+                                isAdvancedMode = enabled
+                                if (!enabled) {
+                                    val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
+                                    working.value = if (top != null) ArrayList(listOf(top)) else ArrayList()
+                                }
+                            })
+                        }
                     }
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
-
             if (catalogProvider == null) {
                 val feedCats = listOf("Movies", "Series", "Anime", "Docs", "Live")
                 LazyRow(
@@ -849,132 +927,10 @@ fun TvManageFeedDialog(
                 }
             }
 
-            // MAIN CONTENT (takes remaining space)
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                val cp = catalogProvider
-                if (cp != null) {
-                    // CATALOG TWEAKING SUB-SCREEN
-                    RefCatalogTuneScreen(
-                        provider = cp,
-                        names = sortedNames(cp),
-                        disabled = disabledCatalogs[cp.config.id].orEmpty(),
-                        onToggle = { catalog, enabled ->
-                            scope.launch { app.store.setCatalogEnabled(cp.config.id, catalog, enabled) }
-                        },
-                        onMove = { from, to ->
-                            sortedNames(cp)?.let { current ->
-                                scope.launch { app.store.moveCatalog(cp.config.id, from, to, current) }
-                            }
-                        },
-                    )
-                } else if (!isAdvancedMode) {
-                    // SIMPLE MODE: just a grid of all providers
-                    val filteredProviders = if (providerTypeFilter.isEmpty()) providers
-                    else providers.filter { matches(it) }
-                    val sortedProviders = filteredProviders.sortedBy { it.config.name }
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 250.dp),
-                        modifier = Modifier.fillMaxSize()
-                            .background(
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                RoundedCornerShape(12.dp),
-                            )
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(sortedProviders.size, key = { index ->
-                            "${sortedProviders[index].config.name}_${sortedProviders[index].config.id}_$index"
-                        }) { index ->
-                            val provider = sortedProviders[index]
-                            val isActive = provider.config.id in working.value
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isActive) MaterialTheme.colorScheme.primaryContainer
-                                        else MaterialTheme.colorScheme.surface,
-                                    )
-                                    .clickable {
-                                        working.value = ArrayList(listOf(provider.config.id))
-                                        onSave(listOf(provider.config.id))
-                                    }
-                                    .tvPress(previewPass = true, onClick = {
-                                        working.value = ArrayList(listOf(provider.config.id))
-                                        onSave(listOf(provider.config.id))
-                                    })
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (!provider.config.iconUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = provider.config.iconUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)),
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                } else {
-                                    Box(
-                                        modifier = Modifier.size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(
-                                                if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                                else MaterialTheme.colorScheme.surfaceVariant,
-                                            ),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Extension,
-                                            contentDescription = null,
-                                            tint = if (isActive) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        provider.config.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    val count = catalogNames[provider.config.id]?.size
-                                    Text(
-                                        if (count != null) "$count catalogs"
-                                        else refProviderSubtitle(provider),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                IconButton(onClick = { catalogProvider = provider }) {
-                                    Icon(
-                                        Icons.Filled.Tune,
-                                        contentDescription = tr("Customize Catalogs"),
-                                        tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // ADVANCED MODE: two-column customizable feed
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
+            @Composable
+            fun ActivePane(mod: Modifier) {
                         // Left column: active providers feed
-                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        Column(modifier = mod) {
                             Text(
                                 tr("Active Providers Feed"),
                                 style = MaterialTheme.typography.titleMedium,
@@ -1114,8 +1070,11 @@ fun TvManageFeedDialog(
                             }
                         }
 
+            }
+            @Composable
+            fun AvailPane(mod: Modifier) {
                         // Right column: available plugins
-                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        Column(modifier = mod) {
                             Text(
                                 tr("Available Plugins"),
                                 style = MaterialTheme.typography.titleMedium,
@@ -1237,7 +1196,46 @@ fun TvManageFeedDialog(
                                     }
                                 }
                             }
+                        }            }
+            // MAIN CONTENT (takes remaining space)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                val cp = catalogProvider
+                if (cp != null) {
+                    // CATALOG TWEAKING SUB-SCREEN
+                    RefCatalogTuneScreen(
+                        provider = cp,
+                        names = sortedNames(cp),
+                        disabled = disabledCatalogs[cp.config.id].orEmpty(),
+                        onToggle = { catalog, enabled ->
+                            scope.launch { app.store.setCatalogEnabled(cp.config.id, catalog, enabled) }
+                        },
+                        onMove = { from, to ->
+                            sortedNames(cp)?.let { current ->
+                                scope.launch { app.store.moveCatalog(cp.config.id, from, to, current) }
+                            }
+                        },
+                    )
+                } else if (!isAdvancedMode) {
+                    // SIMPLE MODE: 4 providers per row; a tap picks and closes.
+                    val filteredProviders = if (providerTypeFilter.isEmpty()) providers else providers.filter { matches(it) }
+                    val sortedProviders = filteredProviders.sortedBy { it.config.name }
+                    LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(sortedProviders.size, key = { index -> sortedProviders[index].config.name + "_" + sortedProviders[index].config.id + "_$index" }) { index ->
+                            val provider = sortedProviders[index]
+                            val isActive = provider.config.id in working.value
+                            RefProviderCard(name = provider.config.name, repoTag = null, subtitle = catalogNames[provider.config.id]?.size?.let { it.toString() + " catalogs" } ?: refProviderSubtitle(provider), selected = isActive, iconUrl = provider.config.iconUrl, iconName = provider.config.name, onClick = { working.value = ArrayList(listOf(provider.config.id)); onSave(listOf(provider.config.id)) }, compact = true)
                         }
+                    }
+                } else if (advNarrow) {
+                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ActivePane(Modifier.weight(1f).fillMaxWidth())
+                        AvailPane(Modifier.weight(1f).fillMaxWidth())
+                    }
+                } else {
+                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        ActivePane(Modifier.weight(1f).fillMaxHeight())
+                        AvailPane(Modifier.weight(1f).fillMaxHeight())
+
                     }
                 }
             }
