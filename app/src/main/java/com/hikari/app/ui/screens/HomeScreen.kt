@@ -2246,7 +2246,83 @@ internal fun ProviderPickerSheet(
                         modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 4.dp),
                     )
                 }
-                items(packs, key = { it.key }) { pack ->
+                // One flat cell per card: a pack's own card, then — while its
+                // caret is open — one card per source it publishes. Flat
+                // because a cell cannot be emitted from inside another cell's
+                // content: the `items` lambda below has a LazyGridItemScope
+                // receiver, which has no `item()` member of its own.
+                val packByKey = remember(packs) { packs.associateBy { it.key } }
+                val packCells: List<Pair<String, Int>> = remember(packs, expanded) {
+                    packs.flatMap { pack ->
+                        val self = listOf(pack.key to -1)
+                        if (pack.isPack && pack.key in expanded) {
+                            self + pack.members.mapIndexed { i, _ -> pack.key to i }
+                        } else self
+                    }
+                }
+                items(
+                    packCells,
+                    key = { (k, i) ->
+                        if (i < 0) "pack|$k"
+                        else "packmember|${packByKey[k]?.members?.getOrNull(i)?.config?.id ?: "$k|$i"}"
+                    }
+                ) { (k, i) ->
+                    val pack = packByKey[k] ?: return@items
+                    val member = if (i >= 0) pack.members.getOrNull(i) else null
+                    if (member != null) {
+                        // Every member names its engine AND the repo it was
+                        // installed from ("CloudStream · Codegeasse Repo"), so
+                        // same-named sources are told apart at a glance.
+                        val mkey = member.config.id
+                        val mticked = mkey in working
+                        TvProviderCard(
+                            name = if (pack.cross) pack.memberEngine(i).ifBlank { pack.memberLabel(i) } else pack.memberLabel(i),
+                            supporting = listOf(
+                                member.config.type.groupLabel,
+                                repoLabels[mkey]?.takeIf { it.isNotBlank() },
+                            ).filterNotNull().filter { it.isNotBlank() }
+                                .distinct().joinToString(" · ")
+                                .ifBlank { null },
+                            selected = if (multi) mticked else selection.contains(mkey),
+                            icon = {
+                                TvProviderIcon(
+                                    iconUrl = member.config.iconUrl,
+                                    name = member.config.name,
+                                    size = 28.dp,
+                                )
+                            },
+                            onClick = {
+                                if (multi) {
+                                    working = if (mticked) working - mkey
+                                    else working + mkey
+                                } else {
+                                    onPick(mkey)
+                                }
+                            },
+                            onHold = {
+                                if (!multi) {
+                                    multi = true
+                                    working = (selection + mkey).distinct()
+                                }
+                            },
+                            trailing = {
+                                if (pinOrder.containsKey(mkey) || multi) {
+                                    IconButton(
+                                        onClick = { scope.launch { app.store.togglePinnedProvider(mkey) } },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.PushPin,
+                                            contentDescription = tr("Pin to the top of this list"),
+                                            tint = if (pinOrder.containsKey(mkey)) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    } else {
                     // A stream-only addon is named with its engine so the row
                     // explains itself: it adds servers, its browsing comes from
                     // TMDB (see TmdbBrowse).
@@ -2370,65 +2446,7 @@ internal fun ProviderPickerSheet(
                             }
                         },
                     )
-                    if (pack.isPack && open) {
-                        pack.members.forEachIndexed { i, member ->
-                            val mkey = member.config.id
-                            val mticked = mkey in working
-                            item(key = "packmember|$mkey") {
-                                TvProviderCard(
-                                    name = if (pack.cross) pack.memberEngine(i).ifBlank { pack.memberLabel(i) } else pack.memberLabel(i),
-                                    // Every member names its engine AND the repo
-                                    // it was installed from ("CloudStream ·
-                                    // Codegeasse Repo"), so same-named sources
-                                    // are told apart at a glance.
-                                    supporting = listOf(
-                                        member.config.type.groupLabel,
-                                        repoLabels[mkey]?.takeIf { it.isNotBlank() },
-                                    ).filterNotNull().filter { it.isNotBlank() }
-                                        .distinct().joinToString(" · ")
-                                        .ifBlank { null },
-                                    selected = if (multi) mticked else selection.contains(mkey),
-                                    icon = {
-                                        TvProviderIcon(
-                                            iconUrl = member.config.iconUrl,
-                                            name = member.config.name,
-                                            size = 28.dp,
-                                        )
-                                    },
-                                    onClick = {
-                                        if (multi) {
-                                            working = if (mticked) working - mkey
-                                            else working + mkey
-                                        } else {
-                                            onPick(mkey)
-                                        }
-                                    },
-                                    onHold = {
-                                        if (!multi) {
-                                            multi = true
-                                            working = (selection + mkey).distinct()
-                                        }
-                                    },
-                                    trailing = {
-                                        if (pinOrder.containsKey(mkey) || multi) {
-                                            IconButton(
-                                                onClick = { scope.launch { app.store.togglePinnedProvider(mkey) } },
-                                                modifier = Modifier.size(32.dp),
-                                            ) {
-                                                Icon(
-                                                    Icons.Filled.PushPin,
-                                                    contentDescription = tr("Pin to the top of this list"),
-                                                    tint = if (pinOrder.containsKey(mkey)) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                            }
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    }
+                    } // else: the pack's own card is above; open members are cells above too
                 }
                 if (packs.isEmpty() && query.isNotBlank()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {

@@ -3865,7 +3865,7 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
             ProviderType.CS3, ProviderType.NUVIO, ProviderType.SKYSTREAM,
             ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.ANYMEX_MANGA,
             ProviderType.VEGA, ProviderType.ZANGETSU, ProviderType.SORA,
-            ProviderType.ANYMEX, ProviderType.KOTATSU -> c.extra ?: c.url
+            ProviderType.ANYMEX -> c.extra ?: c.url
             else -> null
         }.orEmpty()
         return raw.takeIf { it.startsWith("http://") || it.startsWith("https://") }
@@ -3891,14 +3891,20 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 ProviderType.HIKARI -> installHikiPlugin(plugin)
                 ProviderType.CS3 -> installCs3Plugin(plugin)
                 ProviderType.SKYSTREAM -> installSkyStreamPlugin(plugin)
-                ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.ANYMEX_MANGA ->
-                    installAniyomiPlugin(plugin)
+                ProviderType.ANIYOMI, ProviderType.MANGA, ProviderType.ANYMEX_MANGA -> {
+                    // Kotatsu and LNReader sources ride the MANGA engine with
+                    // their own id prefixes (see KotatsuRegistry.isKotatsuId /
+                    // LnReaderProvider.isLnReaderId), so they reinstall through
+                    // their own installers, not the Aniyomi one.
+                    val id = p.config.id
+                    if (com.hikari.app.lnreader.LnReaderProvider.isLnReaderId(id)) installLnReaderPlugin(plugin)
+                    else if (com.hikari.app.kotatsu.KotatsuRegistry.isKotatsuId(id)) installKotatsuPlugin(plugin)
+                    else installAniyomiPlugin(plugin)
+                }
                 ProviderType.VEGA -> installVegaPlugin(plugin)
                 ProviderType.ZANGETSU -> installZangetsuPlugin(plugin)
-                ProviderType.LNREADER -> installLnReaderPlugin(plugin)
                 ProviderType.SORA -> installScriptPlugin(plugin, RepoKind.SORA)
                 ProviderType.ANYMEX -> installScriptPlugin(plugin, RepoKind.ANYMEX)
-                ProviderType.KOTATSU -> installKotatsuPlugin(plugin)
                 else -> Result.failure(Exception("Unsupported extension type"))
             }
         } ?: Result.failure(Exception("Timed out"))

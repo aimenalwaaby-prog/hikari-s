@@ -1143,7 +1143,7 @@ fun SearchScreen(
                     )
                 }
                 val typesById = remember(providers) {
-                    providers.associate({ it.config.id }, { it.config.type.groupLabel })
+                    providers.associateBy({ it.config.id }, { it.config.type.groupLabel })
                 }
                 val searchApp = LocalContext.current.applicationContext as HikariApp
                 val searchRepos by remember { searchApp.store.reposFlow() }
@@ -1729,6 +1729,7 @@ private fun PhoneSearchCell(
     }
 }
 
+@Composable
 private fun ProviderScopeButton(
     label: String,
     supporting: String,
