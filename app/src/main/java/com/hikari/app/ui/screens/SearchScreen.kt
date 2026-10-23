@@ -724,19 +724,14 @@ fun SearchScreen(
                 if (searchIsTv) {
                     // Television gets the same big reference-style Select
                     // Provider card as Home (title + All Plugins (Global)
-                    // + filter + 2-column grid), with this screen's own
-                    // collections on top. A tap picks and closes; Close
-                    // saves the set.
+                    // + filter + provider grid), with this screen's own
+                    // collections on top. A tap picks and closes.
                     TvSelectProviderDialog(
                         providers = providers,
                         collections = collections,
                         selection = selected.toList(),
                         onPickAll = { showProviders = false; vm.selectAll() },
                         onPick = { key -> showProviders = false; vm.selectProvider(key) },
-                        onToggleMulti = { key ->
-                            val next = if (key in selected) selected - key else selected + key
-                            vm.setProviders(next.toList())
-                        },
                         onDismiss = { showProviders = false },
                     )
                 } else {

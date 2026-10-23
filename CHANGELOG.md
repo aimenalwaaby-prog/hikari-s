@@ -1,3 +1,11 @@
+## 0.11.95 (continuous build only)
+
+### Fixed (batch: provider box + feed mixer ported one-to-one from the reference client)
+- Both TV dialogs deleted and rewritten from the reference source (ProviderSelectionDialog + HomeManagementDialog): 65%-width Select box with title/subtitle + All Plugins (Global) pill, full-width filter, adaptive provider cards (icon + name + repo tag + "types • domain" subtitle, purple pick), tap picks and closes — the same box in Home and Search
+- Manage Home Screen Feed is now the reference mixer: Enable Multi-Provider Feed switch, Movies/Series/Anime/Docs/Live chips, single grid with catalog counts + Tune button, two-pane Advanced mixer (+ add, drag grip, up/down reorder, expandable per-catalog switches, remove), Back + Save & Close; the Tune sub-screen edits catalogs with switches, arrows and Reset Order
+- Catalog toggles/reorder persist per provider and the Home feed honors them (skipped catalogs never load, custom order curates rows); the mixer opens from the TV header's Manage entry — Search keeps the box only
+- Phone UI untouched
+
 ## 0.11.94 (continuous build only)
 
 ### Fixed (batch: TV provider box rebuilt one-to-one, Search TV box-only, phone hold-to-multi)

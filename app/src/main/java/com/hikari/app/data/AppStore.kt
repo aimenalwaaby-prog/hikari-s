@@ -479,6 +479,16 @@ class AppStore(private val ctx: Context) {
      * of key: choosing one selects the provider ids it holds.
      */
     val PROVIDER_FOLDERS = stringPreferencesKey("providerFolders")
+    /**
+     * Per-provider disabled Home catalogs: provider id → JSON
+     * `{"id": ["catalog", …]}` (the feed mixer's switches).
+     */
+    val DISABLED_CATALOGS = stringPreferencesKey("disabledCatalogs")
+    /**
+     * Per-provider custom catalog order: provider id → JSON
+     * `{"id": ["catalog", …]}` in the user's order (mixer reorder + reset).
+     */
+    val CATALOG_ORDER = stringPreferencesKey("catalogOrder")
         /**
          * May adult material be shown (Settings → Content → NSFW)?
          *
@@ -3264,6 +3274,110 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
         write("PROVIDER_FOLDERS") { prefs ->
             val current = parseProviderFolders(prefs[K.PROVIDER_FOLDERS])
             prefs[K.PROVIDER_FOLDERS] = encodeProviderFolders(current.filterNot { it.name == name })
+        }
+    }
+
+    // ---- Home feed catalog mixer (Manage Home Screen Feed) ----
+
+    /**
+     * Per-provider DISABLED catalogs: provider id → the catalog names the feed
+     * must skip (the mixer's per-row expander switches, and the single screen's
+     * Tune sub-screen). Names, not ids: an extension update can renumber ids,
+     * while the visible name is what the user switched off.
+     */
+    fun disabledCatalogsFlow(): Flow<Map<String, Set<String>>> =
+        store.data.map { parseStringSetMap(it[K.DISABLED_CATALOGS]) }
+            .distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun setCatalogEnabled(providerId: String, catalog: String, enabled: Boolean) {
+        if (providerId.isBlank() || catalog.isBlank()) return
+        write("DISABLED_CATALOGS") { prefs ->
+            val current = parseStringSetMap(prefs[K.DISABLED_CATALOGS]).toMutableMap()
+            val set = current[providerId]?.toMutableSet() ?: mutableSetOf()
+            if (enabled) set.remove(catalog) else set.add(catalog)
+            if (set.isEmpty()) current.remove(providerId) else current[providerId] = set
+            prefs[K.DISABLED_CATALOGS] = encodeStringSetMap(current)
+        }
+    }
+
+    /**
+     * Per-provider custom catalog ORDER: provider id → catalog names in the
+     * user's order (the mixer drag/up-down + Reset Order). Empty/absent = the
+     * extension's own order; unknown names sort last.
+     */
+    fun catalogOrderFlow(): Flow<Map<String, List<String>>> =
+        store.data.map { parseStringListMap(it[K.CATALOG_ORDER]) }
+            .distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun moveCatalog(providerId: String, from: Int, to: Int, current: List<String>) {
+        if (providerId.isBlank() || from == to) return
+        if (from !in current.indices || to !in current.indices) return
+        val next = current.toMutableList()
+        val moved = next.removeAt(from)
+        next.add(to, moved)
+        write("CATALOG_ORDER") { prefs ->
+            val map = parseStringListMap(prefs[K.CATALOG_ORDER]).toMutableMap()
+            map[providerId] = next.toList()
+            prefs[K.CATALOG_ORDER] = encodeStringListMap(map)
+        }
+    }
+
+    suspend fun resetCatalogOrder(providerId: String) {
+        if (providerId.isBlank()) return
+        write("CATALOG_ORDER") { prefs ->
+            val map = parseStringListMap(prefs[K.CATALOG_ORDER]).toMutableMap()
+            map.remove(providerId)
+            prefs[K.CATALOG_ORDER] = encodeStringListMap(map)
+        }
+    }
+
+    private fun encodeStringSetMap(map: Map<String, Set<String>>): String {
+        val obj = JSONObject()
+        for ((k, v) in map) {
+            val arr = JSONArray()
+            for (s in v) arr.put(s)
+            obj.put(k, arr)
+        }
+        return obj.toString()
+    }
+
+    private fun parseStringSetMap(s: String?): Map<String, Set<String>> {
+        if (s.isNullOrBlank()) return emptyMap()
+        return try {
+            val obj = JSONObject(s)
+            val out = HashMap<String, Set<String>>()
+            for (k in obj.keys()) {
+                val arr = obj.optJSONArray(k) ?: continue
+                out[k] = (0 until arr.length()).mapNotNull { arr.optString(it).ifBlank { null } }.toSet()
+            }
+            out
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun encodeStringListMap(map: Map<String, List<String>>): String {
+        val obj = JSONObject()
+        for ((k, v) in map) {
+            val arr = JSONArray()
+            for (s in v) arr.put(s)
+            obj.put(k, arr)
+        }
+        return obj.toString()
+    }
+
+    private fun parseStringListMap(s: String?): Map<String, List<String>> {
+        if (s.isNullOrBlank()) return emptyMap()
+        return try {
+            val obj = JSONObject(s)
+            val out = HashMap<String, List<String>>()
+            for (k in obj.keys()) {
+                val arr = obj.optJSONArray(k) ?: continue
+                out[k] = (0 until arr.length()).mapNotNull { arr.optString(it).ifBlank { null } }
+            }
+            out
+        } catch (e: Exception) {
+            emptyMap()
         }
     }
 

@@ -1,8 +1,20 @@
 package com.hikari.app.tv
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,9 +28,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -30,14 +44,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,14 +69,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,7 +97,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -83,6 +111,7 @@ import com.hikari.app.data.Profiles
 import com.hikari.app.i18n.tr
 import com.hikari.app.HikariApp
 import com.hikari.app.data.RepoProvenance
+import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.ui.screens.holdOrTap
 
 /**
@@ -238,6 +267,8 @@ fun TvHomeHeaderBar(
     onMouse: () -> Unit,
     mouseOn: Boolean,
     onSettings: (() -> Unit)?,
+    /** Opens the Home Screen Feed mixer — Home-only (Search has the box). */
+    onManageFeed: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val accent = Cs3.accent
@@ -305,6 +336,15 @@ fun TvHomeHeaderBar(
                 )
             }
         }
+        onManageFeed?.let { openFeed ->
+            IconButton(onClick = openFeed) {
+                Icon(
+                    Icons.Filled.Tune,
+                    contentDescription = tr("Manage feed"),
+                    tint = accent,
+                )
+            }
+        }
         TvProviderPill(
             name = providerName,
             iconUrl = providerIconUrl,
@@ -354,14 +394,75 @@ fun TvProviderIcon(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Provider box + feed mixer, one-to-one with the CloudStream desktop
+// reference (ProviderSelectionDialog + HomeManagementDialog, same layout,
+// same strings, same ratios). TV-only: the phone picker is
+// HomeScreen.ProviderPickerSheet and is untouched.
+// ---------------------------------------------------------------------------
+
+/** Reference card subtitle: the first two content types, then the host. */
+private fun refProviderSubtitle(p: ContentProvider): String {
+    val types = when (p.config.type) {
+        ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA ->
+            listOf("Anime")
+        ProviderType.IPTV -> listOf("Live")
+        else -> listOf("Movie", "TvSeries")
+    }.take(2).joinToString(", ")
+    val host = runCatching {
+        val u = p.config.url.trim()
+        if (u.isBlank()) "" else java.net.URI(u).host?.removePrefix("www.").orEmpty()
+    }.getOrDefault("")
+    return if (host.isBlank()) types else "$types • $host"
+}
+
+/** Reference feed chip mapping for a provider kind. */
+private fun refFeedCats(type: ProviderType): Set<String> = when (type) {
+    ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA ->
+        setOf("Anime")
+    ProviderType.IPTV -> setOf("Live")
+    ProviderType.MANGA, ProviderType.ANYMEX_MANGA -> emptySet()
+    else -> setOf("Movies", "Series", "Docs")
+}
+
 /**
- * The "Select Provider" box, in the reference shape: title on the left with
- * the "All Plugins (Global)" pill at its right, the filter full-width below,
- * and one card per installed provider in a grid. A tap chooses and closes; a
- * hold toggles that provider into the multi-pick without closing, so the old
- * strip's hold-to-multi lives on here. The grid collapses to its content
- * (bounded above) instead of holding a fixed tall box, so the dialog's bottom
- * is just room for the buttons, never a slab of empty panel.
+ * The reference dialog frame (CloudstreamCustomDialog): 28dp surface with a
+ * fade+scale enter, no platform default width.
+ */
+@Composable
+private fun RefDialogFrame(
+    onDismiss: () -> Unit,
+    modifier: Modifier,
+    content: @Composable () -> Unit,
+) {
+    val transition = remember { MutableTransitionState(false) }
+    transition.targetState = true
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        AnimatedVisibility(
+            visibleState = transition,
+            enter = fadeIn(tween(140)) + scaleIn(tween(140), initialScale = 0.96f),
+            exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.96f),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = modifier,
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+/**
+ * "Select Provider", one-to-one with the reference ProviderSelectionDialog:
+ * title + subtitle on the left, the "All Plugins (Global)" pill top-right, a
+ * full-width filter below, then the providers side by side in an adaptive grid
+ * of icon+name+type cards, the pick tinted purple. A tap picks and closes; the
+ * pill picks global. One box shared by Home and Search on TV.
  */
 @Composable
 fun TvSelectProviderDialog(
@@ -370,207 +471,225 @@ fun TvSelectProviderDialog(
     onPickAll: () -> Unit,
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
-    onToggleMulti: ((String) -> Unit)? = null,
-    onManage: (() -> Unit)? = null,
-    /** The user's own collections (search callers pass theirs; Home passes
-     *  none). Rendered as full-width cards above the provider grid, picked
-     *  by their provider key like anything else. */
+    /** The user's own collections, drawn full-width above the provider grid. */
     collections: List<Collection> = emptyList(),
 ) {
-    var query by remember { mutableStateOf("") }
+    var providerModalSearch by remember { mutableStateOf("") }
     // Repo display names for the "(repo)" duplicate tags — the reference tells
-    // same-named installs apart by repo, never by a raw id suffix.
+    // same-named installs apart by the parent folder of the plugin path, which
+    // is exactly what the repo name is here.
     val app = LocalContext.current.applicationContext as HikariApp
     val repos by remember { app.store.reposFlow() }.collectAsState(initial = emptyList())
     val repoLabels = remember(providers, repos) {
         RepoProvenance.nameMap(providers.map { it.config }, repos)
     }
-    val nameCounts = remember(providers) {
-        providers.groupingBy { it.config.name }.eachCount()
+    val matchingProviders = remember(providers, providerModalSearch) {
+        val list = if (providerModalSearch.isBlank()) providers
+        else providers.filter { it.config.name.contains(providerModalSearch, ignoreCase = true) }
+        list.distinctBy { it.config.id }
     }
-    val shown = remember(providers, query) {
-        val q = query.trim()
-        if (q.isBlank()) providers
-        else providers.filter { it.config.name.contains(q, ignoreCase = true) }
+    val duplicateNames = remember(matchingProviders) {
+        matchingProviders.groupBy { it.config.name }.filterValues { it.size > 1 }.keys
     }
-    val shownCollections = remember(collections, query) {
-        val q = query.trim()
-        if (q.isBlank()) collections
-        else collections.filter { it.name.contains(q, ignoreCase = true) }
+    val shownCollections = remember(collections, providerModalSearch) {
+        if (providerModalSearch.isBlank()) collections
+        else collections.filter { it.name.contains(providerModalSearch, ignoreCase = true) }
     }
-    // Reference width, anchored to the SCREEN — never to the window: a dialog
-    // window that wraps its content made the old fraction-of-parent width
-    // collapse on some TV boxes, which is what rendered this box narrow with
-    // a single column and a truncated title. Two-thirds of the screen,
-    // clamped, always fits title + pill + two cards side by side.
-    val screenW = LocalConfiguration.current.screenWidthDp.dp
-    val dlgW = (screenW * 0.66f).coerceIn(600.dp, 880.dp)
-    // Wide reference card (desktop Select Provider): the platform-default
-    // AlertDialog width is what truncated the title to "Select ..." and
-    // clipped the All Plugins pill on TV.
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+
+    RefDialogFrame(
+        onDismiss = onDismiss,
+        modifier = Modifier.fillMaxWidth(0.65f).wrapContentHeight().heightIn(min = 220.dp, max = 620.dp),
     ) {
-        Surface(
-            shape = RoundedCornerShape(TvDesktop.CornerLarge),
-            color = TvDesktop.SurfaceElevated,
-            tonalElevation = 0.dp,
-            modifier = Modifier.width(dlgW),
+        Column(
+            modifier = Modifier.fillMaxWidth().wrapContentHeight().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-            Column(Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
                     Text(
-                        tr("Select Provider"),
-                        fontWeight = FontWeight.Bold,
+                        text = tr("Select Provider"),
                         style = MaterialTheme.typography.titleLarge,
-                        color = TvDesktop.TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
-                    Spacer(Modifier.width(8.dp))
-                    val allSelected = selection.isEmpty()
-                    Surface(
-                        onClick = onPickAll,
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (allSelected) Cs3.accent.copy(alpha = 0.28f)
-                        else TvDesktop.SurfaceCard,
-                        modifier = Modifier.tvPress(previewPass = true, onClick = onPickAll)
-                            .border(
-                                1.dp,
-                                if (allSelected) Cs3.accent
-                                else TvDesktop.GlassEdge,
-                                RoundedCornerShape(10.dp),
-                            ),
-                    ) {
-                        // Reference pill: the label alone, no icons.
-                        Text(
-                            tr("All Plugins (Global)"),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (allSelected) Cs3.accent
-                            else TvDesktop.TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
+                    Text(
+                        text = tr("Choose a dedicated provider or search across all installed plugins"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Text(
-                    tr("Choose a dedicated provider or search across all installed plugins"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TvDesktop.TextMuted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    placeholder = {
-                        Text(
-                            tr("Filter providers…"),
-                            color = TvDesktop.TextMuted,
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = null,
-                            tint = TvDesktop.TextMuted,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    },
+                FilledTonalButton(
+                    onClick = onPickAll,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                )
-                Spacer(Modifier.height(8.dp))
-                LazyVerticalGrid(
-                    // Fixed two columns, exactly like the reference (AniKoto +
-                    // Aniilight side by side): an adaptive cell could collapse
-                    // to one column whenever the window measured small, which
-                    // is the single-column box from the user's report.
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 440.dp),
                 ) {
-                    items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(maxLineSpan) }) { col ->
-                    val key = com.hikari.app.ui.navigation.Routes.COLLECTION_PROVIDER_PREFIX + col.id
-                    TvProviderCard(
-                        name = col.name,
-                        supporting = tr("Collection"),
-                        selected = key in selection,
-                        icon = {
-                            TvProviderIcon(
-                                iconUrl = null,
-                                name = col.name,
-                                size = 34.dp,
-                            )
-                        },
-                        onClick = { onPick(key) },
-                        onHold = onToggleMulti?.let { toggle -> { toggle(key) } },
+                    Text(
+                        tr("All Plugins (Global)"),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
                     )
                 }
-                items(shown, key = { "tv-sel-" + it.config.id }) { p ->
-                        val id = p.config.id
-                        val dupTag = if ((nameCounts[p.config.name] ?: 0) > 1) {
-                            repoLabels[id]?.takeIf { it.isNotBlank() }?.let { "($it)" }
-                        } else null
-                        TvProviderCard(
-                            name = p.config.name,
-                            supporting = tvProviderSubtitle(p),
-                            tag = dupTag,
-                            selected = id in selection,
-                            icon = {
-                                TvProviderIcon(
-                                    iconUrl = p.config.iconUrl,
-                                    name = p.config.name,
-                                    size = 28.dp,
-                                )
-                            },
-                            onClick = { onPick(id) },
-                            onHold = onToggleMulti?.let { toggle -> { toggle(id) } },
-                        )
-                    }
+            }
+
+            // Search input within modal
+            OutlinedTextField(
+                value = providerModalSearch,
+                onValueChange = { providerModalSearch = it },
+                placeholder = { Text(tr("Filter providers..."), fontSize = 13.sp) },
+                singleLine = true,
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(10.dp),
+            )
+
+            // Provider grid
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 180.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 440.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(maxLineSpan) }) { col ->
+                    val key = Routes.COLLECTION_PROVIDER_PREFIX + col.id
+                    RefProviderCard(
+                        name = col.name,
+                        repoTag = null,
+                        subtitle = tr("Collection"),
+                        selected = key in selection,
+                        iconUrl = null,
+                        iconName = col.name,
+                        onClick = { onPick(key) },
+                    )
                 }
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (onManage != null) {
-                        TextButton(onClick = onManage) { Text(tr("Manage feed")) }
-                    }
-                    TextButton(onClick = onDismiss) { Text(tr("Close")) }
+                items(matchingProviders.size, key = { idx ->
+                    val p = matchingProviders[idx]
+                    "${p.config.name}_${p.config.id}"
+                }) { idx ->
+                    val provider = matchingProviders[idx]
+                    val id = provider.config.id
+                    val repoTag = if (provider.config.name in duplicateNames) {
+                        repoLabels[id]?.takeIf { it.isNotBlank() }
+                    } else null
+                    RefProviderCard(
+                        name = provider.config.name,
+                        repoTag = repoTag,
+                        subtitle = refProviderSubtitle(provider),
+                        selected = id in selection,
+                        iconUrl = provider.config.iconUrl,
+                        iconName = provider.config.name,
+                        onClick = { onPick(id) },
+                    )
                 }
             }
         }
     }
 }
 
+/** One reference Select-Provider card: 28dp round icon + name/tag + subtitle. */
+@Composable
+private fun RefProviderCard(
+    name: String,
+    repoTag: String?,
+    subtitle: String,
+    selected: Boolean,
+    iconUrl: String?,
+    iconName: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+        ),
+        modifier = Modifier.tvPress(previewPass = true, onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (!iconUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = iconUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(28.dp).clip(CircleShape).background(Color.White),
+                )
+            } else {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = iconName.take(1).uppercase(),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = name,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (!repoTag.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "($repoTag)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 /**
- * "Manage Home Screen Feed", in the reference shape: an "Enable
- * Multi-Provider Feed" switch, type chips (Movies/Series/Anime/Docs/Live),
+ * "Manage Home Screen Feed", one-to-one with the reference
+ * HomeManagementDialog: an "Enable Multi-Provider Feed" switch, type chips,
  * and either a single-provider grid (switch off — a tap picks and closes) or
- * the Active/Available two-pane feed mixer (switch on — reorder with arrows,
- * add/remove, Save & Close applies the mix).
+ * the Active/Available two-pane feed mixer (switch on — reorder with arrows or
+ * drag, expand rows to toggle catalogs, add/remove, Save & Close applies the
+ * mix). Home-only on TV.
  */
 @Composable
 fun TvManageFeedDialog(
@@ -579,78 +698,109 @@ fun TvManageFeedDialog(
     onSave: (List<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val app = LocalContext.current.applicationContext as HikariApp
+    val scope = rememberCoroutineScope()
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
-    var typeFilter by remember { mutableStateOf(setOf<String>()) }
-    // Per-provider catalog counts for the "N catalogs" subtitles (reference
-    // rows name the count, not the engine). Loaded concurrently off the tap
-    // path; a provider that does not answer in time keeps its type subtitle.
-    val catalogCounts = remember { mutableStateMapOf<String, Int>() }
+    var catalogProvider by remember { mutableStateOf<ContentProvider?>(null) }
+    var providerTypeFilter by remember { mutableStateOf(emptySet<String>()) }
+    val disabledCatalogs by remember { app.store.disabledCatalogsFlow() }
+        .collectAsState(initial = emptyMap())
+    val orderedCatalogs by remember { app.store.catalogOrderFlow() }
+        .collectAsState(initial = emptyMap())
+    val allRepos by remember { app.store.reposFlow() }.collectAsState(initial = emptyList())
+    val repoNameById = remember(providers, allRepos) {
+        RepoProvenance.nameMap(providers.map { it.config }, allRepos)
+    }
+    // Per-provider catalog names for the counts, the expander toggles and the
+    // Tune sub-screen — loaded off the tap path like the reference keeps them
+    // in memory, a provider that does not answer in time keeps its plain row.
+    val catalogNames = remember { mutableStateMapOf<String, List<String>>() }
     LaunchedEffect(providers) {
         providers.forEach { p ->
             launch {
-                val n = withTimeoutOrNull(8_000L) {
-                    runCatching { p.catalogs().size }.getOrDefault(0)
+                val names = withTimeoutOrNull(8_000L) {
+                    runCatching { p.homeCatalogs().map { it.name }.distinct() }.getOrDefault(null)
                 }
-                if (n != null) catalogCounts[p.config.id] = n
+                if (names != null) catalogNames[p.config.id] = names
             }
         }
     }
     fun matches(p: ContentProvider): Boolean {
-        if (typeFilter.isEmpty()) return true
-        return tvFeedCats(p.config.type).any { it in typeFilter }
+        if (providerTypeFilter.isEmpty()) return true
+        return refFeedCats(p.config.type).any { it in providerTypeFilter }
     }
-    val feedCats = listOf("Movies", "Series", "Anime", "Docs", "Live")
-    Dialog(
-        onDismissRequest = {
-            // Reference guard: closing the single screen while several are
-            // active keeps the top one rather than the multi set.
+    fun sortedNames(p: ContentProvider): List<String>? {
+        val names = catalogNames[p.config.id] ?: return null
+        val order = orderedCatalogs[p.config.id].orEmpty()
+        return if (order.isEmpty()) names
+        else names.sortedBy { order.indexOf(it).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
+    }
+
+    RefDialogFrame(
+        onDismiss = {
             if (!isAdvancedMode && working.value.size > 1) {
                 val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
                 if (top != null) onSave(listOf(top)) else onDismiss()
-            } else onDismiss()
+            } else {
+                catalogProvider = null
+                onDismiss()
+            }
         },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth(0.85f).fillMaxHeight(0.85f),
     ) {
-        Surface(
-            shape = RoundedCornerShape(TvDesktop.CornerLarge),
-            color = TvDesktop.SurfaceElevated,
-            tonalElevation = 0.dp,
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .fillMaxHeight(0.85f),
-        ) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
+        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            // HEADER
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // HEADER
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            if (isAdvancedMode) tr("Manage Home Screen Feed") else tr("Select Provider"),
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = TvDesktop.TextPrimary,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            if (isAdvancedMode) tr("Mix, reorder, and customize multiple providers.")
-                            else tr("Choose a provider to display on your Home Screen."),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TvDesktop.TextMuted,
-                        )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (catalogProvider != null) {
+                            tr("Customize %s").replace("%s", catalogProvider?.config?.name.orEmpty())
+                        } else if (isAdvancedMode) {
+                            tr("Manage Home Screen Feed")
+                        } else {
+                            tr("Select Provider")
+                        },
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (catalogProvider != null) {
+                            tr("Enable, disable, and drag to reorder catalogs.")
+                        } else if (isAdvancedMode) {
+                            tr("Mix, reorder, and customize multiple providers.")
+                        } else {
+                            tr("Choose a provider to display on your Home Screen.")
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val cp = catalogProvider
+                if (cp != null) {
+                    val hasCustomOrder = orderedCatalogs[cp.config.id]?.isNotEmpty() == true
+                    if (hasCustomOrder) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch { app.store.resetCatalogOrder(cp.config.id) }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text(tr("Reset Order"), style = MaterialTheme.typography.labelMedium)
+                        }
                     }
+                } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             tr("Enable Multi-Provider Feed"),
                             style = MaterialTheme.typography.labelLarge,
-                            color = TvDesktop.TextPrimary,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Switch(
@@ -660,225 +810,423 @@ fun TvManageFeedDialog(
                                 if (!enabled) {
                                     val top = working.value.firstOrNull()
                                         ?: providers.firstOrNull()?.config?.id
-                                    working.value = if (top != null) ArrayList(listOf(top)) else ArrayList()
+                                    working.value = if (top != null) ArrayList(listOf(top))
+                                    else ArrayList()
                                 }
                             },
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
-                // TYPE CHIPS
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (catalogProvider == null) {
+                val feedCats = listOf("Movies", "Series", "Anime", "Docs", "Live")
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    feedCats.forEach { c ->
-                        val on = c in typeFilter
-                        Surface(
-                            onClick = { typeFilter = if (on) typeFilter - c else typeFilter + c },
-                            shape = RoundedCornerShape(50),
-                            color = if (on) Cs3.accent.copy(alpha = 0.28f) else TvDesktop.SurfaceCard,
-                            border = BorderStroke(
-                                1.dp,
-                                if (on) Cs3.accent else TvDesktop.GlassEdge,
-                            ),
-                        ) {
-                            Text(
-                                c,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (on) TvDesktop.TextPrimary else TvDesktop.TextMuted,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            )
-                        }
+                    items(feedCats) { category ->
+                        FilterChip(
+                            selected = category in providerTypeFilter,
+                            onClick = {
+                                providerTypeFilter = if (category in providerTypeFilter) {
+                                    providerTypeFilter - category
+                                } else {
+                                    providerTypeFilter + category
+                                }
+                            },
+                            label = { Text(category) },
+                        )
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                // CONTENT
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (!isAdvancedMode) {
-                        // Single-provider grid: a tap picks and closes.
-                        val filtered = providers.filter { matches(it) }.sortedBy { it.config.name }
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 250.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(TvDesktop.SurfaceCard.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            items(filtered, key = { "tv-feed-single-" + it.config.id }) { p ->
-                                val active = p.config.id in working.value
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (active) Cs3.accent.copy(alpha = 0.22f) else TvDesktop.SurfaceElevated)
-                                        .clickable {
-                                            working.value = ArrayList(listOf(p.config.id))
-                                            onSave(listOf(p.config.id))
-                                        }
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    TvProviderIcon(iconUrl = p.config.iconUrl, name = p.config.name, size = 32.dp)
+            }
+
+            // MAIN CONTENT (takes remaining space)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                val cp = catalogProvider
+                if (cp != null) {
+                    // CATALOG TWEAKING SUB-SCREEN
+                    RefCatalogTuneScreen(
+                        provider = cp,
+                        names = sortedNames(cp),
+                        disabled = disabledCatalogs[cp.config.id].orEmpty(),
+                        onToggle = { catalog, enabled ->
+                            scope.launch { app.store.setCatalogEnabled(cp.config.id, catalog, enabled) }
+                        },
+                        onMove = { from, to ->
+                            sortedNames(cp)?.let { current ->
+                                scope.launch { app.store.moveCatalog(cp.config.id, from, to, current) }
+                            }
+                        },
+                    )
+                } else if (!isAdvancedMode) {
+                    // SIMPLE MODE: just a grid of all providers
+                    val filteredProviders = if (providerTypeFilter.isEmpty()) providers
+                    else providers.filter { matches(it) }
+                    val sortedProviders = filteredProviders.sortedBy { it.config.name }
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 250.dp),
+                        modifier = Modifier.fillMaxSize()
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                RoundedCornerShape(12.dp),
+                            )
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(sortedProviders.size, key = { index ->
+                            "${sortedProviders[index].config.name}_${sortedProviders[index].config.id}_$index"
+                        }) { index ->
+                            val provider = sortedProviders[index]
+                            val isActive = provider.config.id in working.value
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isActive) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surface,
+                                    )
+                                    .clickable {
+                                        working.value = ArrayList(listOf(provider.config.id))
+                                        onSave(listOf(provider.config.id))
+                                    }
+                                    .tvPress(previewPass = true, onClick = {
+                                        working.value = ArrayList(listOf(provider.config.id))
+                                        onSave(listOf(provider.config.id))
+                                    })
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (!provider.config.iconUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = provider.config.iconUrl,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)),
+                                    )
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            p.config.name,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.Medium,
-                                            color = TvDesktop.TextPrimary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
+                                } else {
+                                    Box(
+                                        modifier = Modifier.size(32.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(
+                                                if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                                else MaterialTheme.colorScheme.surfaceVariant,
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Extension,
+                                            contentDescription = null,
+                                            tint = if (isActive) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp),
                                         )
-                                        // Reference names the catalog count, not the engine.
-                                        val singleCount = catalogCounts[p.config.id]
-                                        Text(
-                                            if (singleCount != null) "$singleCount catalogs"
-                                            else tvProviderSubtitle(p),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TvDesktop.TextMuted,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        provider.config.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val count = catalogNames[provider.config.id]?.size
+                                    Text(
+                                        if (count != null) "$count catalogs"
+                                        else refProviderSubtitle(provider),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                IconButton(onClick = { catalogProvider = provider }) {
+                                    Icon(
+                                        Icons.Filled.Tune,
+                                        contentDescription = tr("Customize Catalogs"),
+                                        tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // ADVANCED MODE: two-column customizable feed
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        // Left column: active providers feed
+                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            Text(
+                                tr("Active Providers Feed"),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            if (working.value.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize()
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                            RoundedCornerShape(12.dp),
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        tr("No active providers"),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                var draggingProviderName by remember { mutableStateOf<String?>(null) }
+                                var providerDragAccumulatedY by remember { mutableStateOf(0f) }
+                                var providerDragInitialIndex by remember { mutableStateOf(0) }
+                                var providerSlotHeightPx by remember { mutableStateOf(0f) }
+                                val fallbackProviderHeight = with(LocalDensity.current) { 68.dp.toPx() }
+                                val effectiveSlotHeight =
+                                    if (providerSlotHeightPx > 0f) providerSlotHeightPx
+                                    else fallbackProviderHeight
+                                val currentTargetIndex = if (draggingProviderName != null && effectiveSlotHeight > 0f) {
+                                    (providerDragInitialIndex + kotlin.math.round(providerDragAccumulatedY / effectiveSlotHeight).toInt())
+                                        .coerceIn(0, working.value.lastIndex)
+                                } else providerDragInitialIndex
+                                val currentActive by rememberUpdatedState(working.value.toList())
+                                val currentEffectiveSlotHeight by rememberUpdatedState(effectiveSlotHeight)
+                                val currentDragAccumulatedY by rememberUpdatedState(providerDragAccumulatedY)
+                                val currentDragInitialIndex by rememberUpdatedState(providerDragInitialIndex)
+                                val onDropProvider by rememberUpdatedState {
+                                    val fromIdx = currentDragInitialIndex
+                                    val slotH = currentEffectiveSlotHeight
+                                    val accY = currentDragAccumulatedY
+                                    val toIdx = if (slotH > 0f) {
+                                        (fromIdx + kotlin.math.round(accY / slotH).toInt())
+                                            .coerceIn(0, currentActive.lastIndex)
+                                    } else fromIdx
+                                    draggingProviderName = null
+                                    providerDragAccumulatedY = 0f
+                                    if (fromIdx != toIdx && fromIdx in currentActive.indices && toIdx in currentActive.indices) {
+                                        val next = ArrayList(currentActive)
+                                        val moved = next.removeAt(fromIdx)
+                                        next.add(toIdx, moved)
+                                        working.value = next
+                                    }
+                                }
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize()
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                            RoundedCornerShape(12.dp),
+                                        )
+                                        .padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    itemsIndexed(
+                                        working.value.toList(),
+                                        key = { index, id -> "tv-feed-active-$id-$index" },
+                                    ) { index, id ->
+                                        val provider = providers.firstOrNull { it.config.id == id }
+                                            ?: return@itemsIndexed
+                                        RefActiveProviderItem(
+                                            index = index,
+                                            totalActive = working.value.size,
+                                            provider = provider,
+                                            catalogCount = catalogNames[id]?.size,
+                                            catalogNames = sortedNames(provider),
+                                            disabled = disabledCatalogs[id].orEmpty(),
+                                            isDraggingThis = draggingProviderName == id,
+                                            dragOffsetY = providerDragAccumulatedY,
+                                            targetShiftY = when {
+                                                draggingProviderName == id -> providerDragAccumulatedY
+                                                draggingProviderName != null && providerDragInitialIndex < currentTargetIndex &&
+                                                    index in (providerDragInitialIndex + 1)..currentTargetIndex -> -effectiveSlotHeight
+                                                draggingProviderName != null && providerDragInitialIndex > currentTargetIndex &&
+                                                    index in currentTargetIndex until providerDragInitialIndex -> effectiveSlotHeight
+                                                else -> 0f
+                                            },
+                                            onHeightMeasured = { h ->
+                                                if (providerSlotHeightPx == 0f && h > 0f) {
+                                                    providerSlotHeightPx = h + 8f
+                                                }
+                                            },
+                                            onDragStart = {
+                                                draggingProviderName = id
+                                                providerDragInitialIndex = currentActive.indexOf(id)
+                                                providerDragAccumulatedY = 0f
+                                            },
+                                            onDragEnd = { onDropProvider() },
+                                            onDragCancel = {
+                                                draggingProviderName = null
+                                                providerDragAccumulatedY = 0f
+                                            },
+                                            onDragDelta = { dy -> providerDragAccumulatedY += dy },
+                                            onMoveUp = {
+                                                if (index > 0) {
+                                                    val next = ArrayList(working.value)
+                                                    val tmp = next[index - 1]
+                                                    next[index - 1] = next[index]
+                                                    next[index] = tmp
+                                                    working.value = next
+                                                }
+                                            },
+                                            onMoveDown = {
+                                                if (index < working.value.lastIndex) {
+                                                    val next = ArrayList(working.value)
+                                                    val tmp = next[index + 1]
+                                                    next[index + 1] = next[index]
+                                                    next[index] = tmp
+                                                    working.value = next
+                                                }
+                                            },
+                                            onRemove = { working.value = ArrayList(working.value - id) },
+                                            onToggleCatalog = { catalog, enabled ->
+                                                scope.launch {
+                                                    app.store.setCatalogEnabled(id, catalog, enabled)
+                                                }
+                                            },
+                                            onMoveCatalog = { from, to ->
+                                                sortedNames(provider)?.let { current ->
+                                                    scope.launch {
+                                                        app.store.moveCatalog(id, from, to, current)
+                                                    }
+                                                }
+                                            },
                                         )
                                     }
                                 }
                             }
                         }
-                    } else {
-                        // Active/Available two-pane mixer.
-                        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            // Active feed.
-                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                Text(tr("Active Providers Feed"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = TvDesktop.TextPrimary)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                if (working.value.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard, RoundedCornerShape(12.dp)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(tr("No active providers"), color = TvDesktop.TextMuted)
-                                    }
-                                } else {
-                                    LazyColumn(
-                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard, RoundedCornerShape(12.dp)).padding(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        itemsIndexed(working.value.toList(), key = { _, id -> "tv-feed-active-$id" }) { index, id ->
-                                            val p = providers.firstOrNull { it.config.id == id } ?: return@itemsIndexed
-                                            Surface(
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = TvDesktop.SurfaceElevated,
-                                                border = BorderStroke(0.5.dp, TvDesktop.GlassEdge),
-                                            ) {
+
+                        // Right column: available plugins
+                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            Text(
+                                tr("Available Plugins"),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            val filteredInactive = providers
+                                .filter { it.config.id !in working.value && matches(it) }
+                                .sortedBy { it.config.name }
+                            val duplicateInactiveNames = remember(filteredInactive) {
+                                filteredInactive.groupBy { it.config.name }
+                                    .filterValues { it.size > 1 }.keys
+                            }
+                            if (filteredInactive.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize()
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            RoundedCornerShape(12.dp),
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        tr("All plugins are active"),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize()
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            RoundedCornerShape(12.dp),
+                                        )
+                                        .padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    items(filteredInactive.size, key = { index ->
+                                        "tv-feed-avail-${filteredInactive[index].config.id}-$index"
+                                    }) { index ->
+                                        val provider = filteredInactive[index]
+                                        val repoTag = if (provider.config.name in duplicateInactiveNames) {
+                                            repoNameById[provider.config.id]?.takeIf { it.isNotBlank() }
+                                        } else null
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            if (!provider.config.iconUrl.isNullOrBlank()) {
+                                                AsyncImage(
+                                                    model = provider.config.iconUrl,
+                                                    contentDescription = null,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.size(32.dp)
+                                                        .clip(RoundedCornerShape(8.dp)),
+                                                )
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier.size(32.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    Icon(
+                                                        Icons.Filled.Extension,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                            }
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Row(
-                                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                                    modifier = Modifier.fillMaxWidth(),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                 ) {
                                                     Text(
-                                                        (index + 1).toString() + ".",
-                                                        style = MaterialTheme.typography.titleMedium,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = TvDesktop.TextMuted,
-                                                        modifier = Modifier.padding(end = 10.dp, start = 4.dp),
+                                                        provider.config.name,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f, fill = false),
                                                     )
-                                                    TvProviderIcon(iconUrl = p.config.iconUrl, name = p.config.name, size = 40.dp)
-                                                    Spacer(modifier = Modifier.width(16.dp))
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(p.config.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                        val activeCount = catalogCounts[id]
+                                                    if (!repoTag.isNullOrBlank()) {
+                                                        Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            if (activeCount != null) "Catalogs: $activeCount active"
-                                                            else tvProviderSubtitle(p),
-                                                            style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis
+                                                            "($repoTag)",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
                                                         )
                                                     }
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        modifier = Modifier.background(TvDesktop.SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(50)).padding(horizontal = 4.dp),
-                                                    ) {
-                                                        IconButton(
-                                                            onClick = {
-                                                                val cur = ArrayList(working.value)
-                                                                if (index > 0) {
-                                                                    val tmp = cur[index - 1]
-                                                                    cur[index - 1] = cur[index]
-                                                                    cur[index] = tmp
-                                                                    working.value = cur
-                                                                }
-                                                            },
-                                                            enabled = index > 0,
-                                                            modifier = Modifier.size(28.dp),
-                                                        ) {
-                                                            Icon(Icons.Filled.ArrowUpward, contentDescription = tr("Move Up"), tint = TvDesktop.TextMuted, modifier = Modifier.size(16.dp))
-                                                        }
-                                                        IconButton(
-                                                            onClick = {
-                                                                val cur = ArrayList(working.value)
-                                                                if (index < cur.lastIndex) {
-                                                                    val tmp = cur[index + 1]
-                                                                    cur[index + 1] = cur[index]
-                                                                    cur[index] = tmp
-                                                                    working.value = cur
-                                                                }
-                                                            },
-                                                            enabled = index < working.value.lastIndex,
-                                                            modifier = Modifier.size(28.dp),
-                                                        ) {
-                                                            Icon(Icons.Filled.ArrowDownward, contentDescription = tr("Move Down"), tint = TvDesktop.TextMuted, modifier = Modifier.size(16.dp))
-                                                        }
-                                                    }
-                                                    Spacer(modifier = Modifier.width(12.dp))
-                                                    IconButton(
-                                                        onClick = { working.value = ArrayList(working.value - id) },
-                                                        modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f), RoundedCornerShape(50)),
-                                                    ) {
-                                                        Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                                                    }
                                                 }
+                                                val availCount = catalogNames[provider.config.id]?.size
+                                                Text(
+                                                    if (availCount != null) "$availCount catalogs available"
+                                                    else refProviderSubtitle(provider),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                            // Available plugins.
-                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                Text(tr("Available Plugins"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = TvDesktop.TextPrimary)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                val inactive = providers.filter { it.config.id !in working.value && matches(it) }.sortedBy { it.config.name }
-                                if (inactive.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(tr("All plugins are active"), color = TvDesktop.TextMuted)
-                                    }
-                                } else {
-                                    LazyColumn(
-                                        modifier = Modifier.fillMaxSize().background(TvDesktop.SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).padding(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        items(inactive, key = { "tv-feed-avail-" + it.config.id }) { p ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(TvDesktop.SurfaceElevated).padding(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                TvProviderIcon(iconUrl = p.config.iconUrl, name = p.config.name, size = 32.dp)
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(p.config.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = TvDesktop.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                    val availCount = catalogCounts[p.config.id]
-                                                    Text(
-                                                        if (availCount != null) "$availCount catalogs available"
-                                                        else tvProviderSubtitle(p),
-                                                        style = MaterialTheme.typography.bodySmall, color = TvDesktop.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                                FilledTonalIconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }) {
-                                                    Icon(Icons.Filled.Add, contentDescription = tr("Add"))
-                                                }
+                                            FilledTonalIconButton(onClick = {
+                                                working.value =
+                                                    ArrayList((working.value + provider.config.id).distinct())
+                                            }) {
+                                                Icon(Icons.Filled.Add, contentDescription = tr("Add"))
                                             }
                                         }
                                     }
@@ -887,133 +1235,522 @@ fun TvManageFeedDialog(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
-                // BOTTOM ACTION BAR
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    Button(onClick = { onSave(working.value.toList()) }) {
-                        Text(tr("Save & Close"))
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // BOTTOM ACTION BAR
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (catalogProvider != null) {
+                    OutlinedButton(onClick = { catalogProvider = null }) {
+                        Text(tr("Back"))
                     }
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Button(onClick = {
+                    if (!isAdvancedMode && working.value.size > 1) {
+                        val top = working.value.firstOrNull()
+                            ?: providers.firstOrNull()?.config?.id
+                        if (top != null) onSave(listOf(top)) else onDismiss()
+                    } else {
+                        catalogProvider = null
+                        onSave(working.value.toList())
+                    }
+                }) {
+                    Text(tr("Save & Close"))
+                }
+            }
+        }
+    }
+
+}
+
+/** Catalog enable/disable + reorder sub-screen ("Customize X"). */
+@Composable
+private fun RefCatalogTuneScreen(
+    provider: ContentProvider,
+    names: List<String>?,
+    disabled: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+    onMove: (Int, Int) -> Unit,
+) {
+    if (names == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    if (names.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                tr("No catalogs available for this provider."),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    var draggingKey by remember { mutableStateOf<String?>(null) }
+    var dragAccumulatedY by remember { mutableStateOf(0f) }
+    var dragInitialIndex by remember { mutableStateOf(0) }
+    var slotHeightPx by remember { mutableStateOf(0f) }
+    val fallbackHeight = with(LocalDensity.current) { 56.dp.toPx() }
+    val effectiveSlotHeight = if (slotHeightPx > 0f) slotHeightPx else fallbackHeight
+    val currentTargetIndex = if (draggingKey != null && effectiveSlotHeight > 0f) {
+        (dragInitialIndex + kotlin.math.round(dragAccumulatedY / effectiveSlotHeight).toInt())
+            .coerceIn(0, names.lastIndex)
+    } else dragInitialIndex
+    val currentNames by rememberUpdatedState(names)
+    val currentEffectiveSlotHeight by rememberUpdatedState(effectiveSlotHeight)
+    val currentDragAccumulatedY by rememberUpdatedState(dragAccumulatedY)
+    val currentDragInitialIndex by rememberUpdatedState(dragInitialIndex)
+    val onDrop by rememberUpdatedState {
+        val fromIdx = currentDragInitialIndex
+        val slotH = currentEffectiveSlotHeight
+        val accY = currentDragAccumulatedY
+        val toIdx = if (slotH > 0f) {
+            (fromIdx + kotlin.math.round(accY / slotH).toInt())
+                .coerceIn(0, currentNames.lastIndex)
+        } else fromIdx
+        draggingKey = null
+        dragAccumulatedY = 0f
+        if (fromIdx != toIdx && fromIdx in currentNames.indices && toIdx in currentNames.indices) {
+            onMove(fromIdx, toIdx)
+        }
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize()
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                RoundedCornerShape(12.dp),
+            )
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        itemsIndexed(names, key = { index, cat -> "${provider.config.id}_$cat-$index" }) { index, catalog ->
+            val catalogKey = "${provider.config.id}_$catalog-$index"
+            val isEnabled = catalog !in disabled
+            val isDraggingThis = draggingKey == catalogKey
+            val targetShiftY = when {
+                isDraggingThis -> dragAccumulatedY
+                draggingKey != null && dragInitialIndex < currentTargetIndex &&
+                    index in (dragInitialIndex + 1)..currentTargetIndex -> -effectiveSlotHeight
+                draggingKey != null && dragInitialIndex > currentTargetIndex &&
+                    index in currentTargetIndex until dragInitialIndex -> effectiveSlotHeight
+                else -> 0f
+            }
+            val animatedShiftY by animateFloatAsState(
+                targetValue = targetShiftY,
+                animationSpec = androidx.compose.animation.core.spring(
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+                ),
+            )
+            val elevation by animateDpAsState(if (isDraggingThis) 12.dp else 0.dp)
+            val scale by animateFloatAsState(if (isDraggingThis) 1.02f else 1.0f)
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isDraggingThis) {
+                    MaterialTheme.colorScheme.surfaceVariant
+                } else if (isEnabled) {
+                    MaterialTheme.colorScheme.surface
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                },
+                border = BorderStroke(
+                    if (isDraggingThis) 1.5.dp else 0.5.dp,
+                    if (isDraggingThis) MaterialTheme.colorScheme.primary
+                    else Color.White.copy(alpha = 0.08f),
+                ),
+                shadowElevation = elevation,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { coordinates ->
+                        if (coordinates.size.height > 0 && slotHeightPx == 0f) {
+                            slotHeightPx = coordinates.size.height.toFloat() + 8f
+                        }
+                    }
+                    .zIndex(if (isDraggingThis) 100f else 1f)
+                    .scale(scale)
+                    .graphicsLayer {
+                        translationY = if (isDraggingThis) dragAccumulatedY else animatedShiftY
+                    },
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier.size(32.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (isDraggingThis) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                else Color.Transparent,
+                            )
+                            .pointerInput(catalogKey) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        draggingKey = catalogKey
+                                        dragInitialIndex = index
+                                        dragAccumulatedY = 0f
+                                    },
+                                    onDragEnd = { onDrop() },
+                                    onDragCancel = {
+                                        draggingKey = null
+                                        dragAccumulatedY = 0f
+                                    },
+                                ) { change, dragAmount ->
+                                    change.consume()
+                                    dragAccumulatedY += dragAmount.y
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.DragIndicator,
+                            contentDescription = tr("Hold and drag to reorder"),
+                            tint = if (isDraggingThis) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${index + 1}.",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.width(32.dp),
+                    )
+                    Text(
+                        text = catalog,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isEnabled) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                RoundedCornerShape(50),
+                            )
+                            .padding(horizontal = 4.dp),
+                    ) {
+                        IconButton(
+                            onClick = { onMove(index, index - 1) },
+                            enabled = index > 0,
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ArrowUpward,
+                                contentDescription = tr("Move Up"),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        IconButton(
+                            onClick = { onMove(index, index + 1) },
+                            enabled = index < names.lastIndex,
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ArrowDownward,
+                                contentDescription = tr("Move Down"),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = { onToggle(catalog, it) },
+                    )
                 }
             }
         }
     }
 }
 
-/** Reference feed categories for a provider kind (the Manage dialog chips). */
-private fun tvFeedCats(type: ProviderType): Set<String> = when (type) {
-    ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA -> setOf("Anime")
-    ProviderType.IPTV -> setOf("Live")
-    ProviderType.MANGA, ProviderType.ANYMEX_MANGA -> emptySet()
-    else -> setOf("Movies", "Series", "Docs")
-}
-
-/** Reference Select-Provider card subtitle: "Types • domain". */
-private fun tvProviderSubtitle(p: ContentProvider): String {
-    val t = when (p.config.type) {
-        ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA -> "Anime"
-        ProviderType.IPTV -> "Live"
-        else -> "Movies • Series"
-    }
-    val d = runCatching {
-        val u = p.config.url.trim()
-        if (u.isBlank()) "" else java.net.URI(u).host?.removePrefix("www.").orEmpty()
-    }.getOrDefault("")
-    return if (d.isBlank()) t else "$t • $d"
-}
-
+/** One Active-pane row: grip, number, icon, name/counts, arrows, caret, remove. */
 @Composable
-fun TvProviderCard(
-    name: String,
-    supporting: String?,
-    selected: Boolean,
-    icon: @Composable () -> Unit,
-    onClick: () -> Unit,
-    onHold: (() -> Unit)? = null,
-    /** Duplicate-name tag ("(repo)") — the reference disambiguates twins. */
-    tag: String? = null,
-    /** Phone picker actions (pin, pack caret) — null on TV, which has none. */
-    trailing: (@Composable () -> Unit)? = null,
+private fun RefActiveProviderItem(
+    index: Int,
+    totalActive: Int,
+    provider: ContentProvider,
+    catalogCount: Int?,
+    catalogNames: List<String>?,
+    disabled: Set<String>,
+    isDraggingThis: Boolean,
+    dragOffsetY: Float,
+    targetShiftY: Float,
+    onHeightMeasured: (Float) -> Unit,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+    onDragDelta: (Float) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onRemove: () -> Unit,
+    onToggleCatalog: (String, Boolean) -> Unit,
+    onMoveCatalog: (Int, Int) -> Unit,
 ) {
-    val shape = RoundedCornerShape(12.dp)
-    // Fresh lambdas for the gesture below (see PickerRow's note): the touch
-    // hold's pointerInput key never changes, so without these every tap after
-    // the first recomposition would compute from a dead snapshot.
-    val latestClick by rememberUpdatedState(onClick)
-    val latestHold by rememberUpdatedState(onHold)
-    Row(
-        Modifier
+    var isExpanded by remember { mutableStateOf(false) }
+    val elevation by animateDpAsState(if (isDraggingThis) 24.dp else 0.dp)
+    val scale by animateFloatAsState(if (isDraggingThis) 1.03f else 1.0f)
+    val animatedShiftY by animateFloatAsState(
+        targetValue = targetShiftY,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+    )
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+    val currentOnDragCancel by rememberUpdatedState(onDragCancel)
+    val currentOnDragDelta by rememberUpdatedState(onDragDelta)
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (isDraggingThis) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.98f)
+        else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            if (isDraggingThis) 2.dp else 0.5.dp,
+            if (isDraggingThis) MaterialTheme.colorScheme.primary
+            else Color.White.copy(alpha = 0.08f),
+        ),
+        shadowElevation = elevation,
+        modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(
-                if (selected) Cs3.accent.copy(alpha = 0.28f)
-                else TvDesktop.SurfaceCard.copy(alpha = 0.45f)
-            )
-            .border(
-                1.dp,
-                if (selected) Cs3.accent
-                else TvDesktop.GlassEdge,
-                shape,
-            )
-            .then(
-                when {
-                    // No hold: a plain tap card, TV and touch alike.
-                    onHold == null -> Modifier.clickable(onClick = onClick)
-                    // Television keeps the remote key hold it already had.
-                    TvMode.isTv -> Modifier.clickable(onClick = onClick)
-                        .tvPress(previewPass = true, onClick = onClick, onHold = onHold)
-                    // Touch never reached onHold (tvPress only answers remote
-                    // keys), so a held card did nothing on phones: the press
-                    // is timed here — a tap picks, half a second ticks the
-                    // multi-pick — and clickable stays OFF, or the tap would
-                    // fire twice (once from each handler).
-                    else -> Modifier
-                        .tvPress(previewPass = true, onClick = { latestClick() }, onHold = { latestHold?.invoke() })
-                        .pointerInput(Unit) { holdOrTap({ latestHold?.invoke() }, { latestClick() }) }
+            .onGloballyPositioned { coordinates ->
+                if (coordinates.size.height > 0) {
+                    onHeightMeasured(coordinates.size.height.toFloat())
                 }
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            }
+            .zIndex(if (isDraggingThis) 100f else 1f)
+            .scale(scale)
+            .graphicsLayer {
+                translationY = if (isDraggingThis) dragOffsetY else animatedShiftY
+            },
     ) {
-        icon()
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+                .clickable(enabled = !isDraggingThis) { isExpanded = !isExpanded },
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Drag grip handle
+                Box(
+                    modifier = Modifier.size(32.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (isDraggingThis) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            else Color.Transparent,
+                        )
+                        .pointerInput(provider.config.id) {
+                            detectDragGestures(
+                                onDragStart = { currentOnDragStart() },
+                                onDragEnd = { currentOnDragEnd() },
+                                onDragCancel = { currentOnDragCancel() },
+                            ) { change, dragAmount ->
+                                change.consume()
+                                currentOnDragDelta(dragAmount.y)
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.DragIndicator,
+                        contentDescription = tr("Hold and drag to reorder"),
+                        tint = if (isDraggingThis) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    name,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                    fontWeight = FontWeight.SemiBold,
-                    color = TvDesktop.TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    text = "${index + 1}.",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 10.dp, start = 4.dp),
                 )
-                if (!tag.isNullOrBlank()) {
-                    Spacer(Modifier.width(4.dp))
+                if (!provider.config.iconUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = provider.config.iconUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)),
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                } else {
+                    Box(
+                        modifier = Modifier.size(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Extension,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        tag,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Cs3.accent,
+                        provider.config.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val total = catalogCount
+                    Text(
+                        if (total != null) "Catalogs: ${total - disabled.size}/$total active"
+                        else refProviderSubtitle(provider),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-            if (!supporting.isNullOrBlank()) {
-                Text(
-                    supporting,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TvDesktop.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            RoundedCornerShape(50),
+                        )
+                        .padding(horizontal = 4.dp),
+                ) {
+                    IconButton(onClick = onMoveUp, enabled = index > 0, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.ArrowUpward,
+                            contentDescription = tr("Move Up"),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = onMoveDown,
+                        enabled = index < totalActive - 1,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.ArrowDownward,
+                            contentDescription = tr("Move Down"),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Icon(
+                    imageVector = if (isExpanded) Icons.Filled.KeyboardArrowUp
+                    else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = tr("Expand"),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp),
                 )
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.background(
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                        RoundedCornerShape(50),
+                    ),
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = tr("Remove"),
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
             }
-        }
-        if (trailing != null) {
-            Spacer(Modifier.width(2.dp))
-            trailing()
+            // Expandable catalog section
+            if (isExpanded) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(
+                        tr("Toggle Catalogs"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val sorted = catalogNames
+                    if (sorted == null) {
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        }
+                    } else if (sorted.isEmpty()) {
+                        Text(
+                            tr("No catalogs available."),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        sorted.forEachIndexed { catIdx, catalog ->
+                            val isEnabled = catalog !in disabled
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onToggleCatalog(catalog, !isEnabled) }
+                                    .padding(vertical = 8.dp, horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "${catIdx + 1}. $catalog",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isEnabled) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            RoundedCornerShape(50),
+                                        )
+                                        .padding(horizontal = 4.dp),
+                                ) {
+                                    IconButton(
+                                        onClick = { onMoveCatalog(catIdx, catIdx - 1) },
+                                        enabled = catIdx > 0,
+                                        modifier = Modifier.size(24.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ArrowUpward,
+                                            contentDescription = tr("Move Up"),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onMoveCatalog(catIdx, catIdx + 1) },
+                                        enabled = catIdx < sorted.lastIndex,
+                                        modifier = Modifier.size(24.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ArrowDownward,
+                                            contentDescription = tr("Move Down"),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Switch(
+                                    checked = isEnabled,
+                                    onCheckedChange = { onToggleCatalog(catalog, it) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

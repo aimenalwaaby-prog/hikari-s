@@ -424,6 +424,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
     }
 
     /**
+     * Rebuilds the feed even when the pick did not change — the feed mixer's
+     * catalog switches and reorder write to the store, not the pick, so saving
+     * the same mix still needs a fresh load for the toggles to show.
+     */
+    fun refreshFeed() {
+        viewModelScope.launch { loadInternal(forceRefresh = true) }
+    }
+
+    /**
      * The row stream for the current pick(s) — EXTENSION catalogs only.
      *
      * Collections are deliberately NOT flattened into shelves here any more.
@@ -1074,6 +1083,7 @@ fun HomeScreen(nav: NavHostController) {
                             onMouse = { com.hikari.app.tv.MouseMode.toggle() },
                             mouseOn = com.hikari.app.tv.MouseMode.enabled,
                             onSettings = openSettings,
+                            onManageFeed = { showTvManageFeed = true },
                         )
                     } else {
                         HomeHeader(
@@ -1542,10 +1552,9 @@ fun HomeScreen(nav: NavHostController) {
         )
     }
 
-    // Television: the CloudStream-desktop-style provider box — filter field,
-    // "All Plugins (Global)" pill in the title, one card per extension. A tap
-    // chooses and closes; a hold toggles the multi-pick and keeps the box
-    // open; Manage feed opens the feed mixer.
+    // Television: the CloudStream-desktop Select Provider box — title, the
+    // "All Plugins (Global)" pill, filter, one card per extension. A tap
+    // chooses and closes; the mixer opens from the header's Manage entry.
     if (showTvProviderBox) {
         TvSelectProviderDialog(
             providers = activeProviders,
@@ -1557,16 +1566,6 @@ fun HomeScreen(nav: NavHostController) {
             onPick = { id ->
                 showTvProviderBox = false
                 vm.selectProvider(id)
-            },
-            onToggleMulti = { id ->
-                vm.setSelection(
-                    if (id in selection) selection - id
-                    else (selection + id).distinct()
-                )
-            },
-            onManage = {
-                showTvProviderBox = false
-                showTvManageFeed = true
             },
             onDismiss = { showTvProviderBox = false },
         )
@@ -1581,6 +1580,9 @@ fun HomeScreen(nav: NavHostController) {
             onSave = { ids ->
                 showTvManageFeed = false
                 vm.setSelection(ids)
+                // Catalog switches/reorder write to the store, not the pick:
+                // rebuild even when the mix itself did not change.
+                vm.refreshFeed()
             },
             onDismiss = { showTvManageFeed = false },
         )

@@ -26,6 +26,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
@@ -2620,8 +2621,17 @@ class ContentRepository(private val manager: ProviderManager) {
         if (!providerCatalogsEnabled && useTmdbFallback && isTmdbHomeFallbackProvider(p)) {
             return tmdbHomeRows(p)
         }
-        val catalogs = p.homeCatalogs()
+        // The feed mixer (Manage Home Screen Feed): skipped catalogs never
+        // load, and a custom order curates them — see AppStore.catalogOrderFlow.
+        val mixerDisabled = runCatching { HikariApp.instance.store.disabledCatalogsFlow().first()[p.config.id] }
+            .getOrDefault(null).orEmpty()
+        val mixerOrder = runCatching { HikariApp.instance.store.catalogOrderFlow().first()[p.config.id] }
+            .getOrDefault(null).orEmpty()
+        val unordered = p.homeCatalogs()
+            .filter { it.name !in mixerDisabled }
             .distinctBy { it.type to it.id }
+        val catalogs = (if (mixerOrder.isEmpty()) unordered
+        else unordered.sortedBy { mixerOrder.indexOf(it.name).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE })
             .take(24)
         val rows: List<CatalogRow> = coroutineScope {
             catalogs.map { c ->
