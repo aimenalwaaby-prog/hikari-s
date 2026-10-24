@@ -3853,10 +3853,10 @@ fun DetailScreen(
                for (ep in eps) {
                     // The picker's own answers first: reuse the cached per-episode
                     // servers so a picked entry can never miss just because the
-                    // second search timed out. Only episodes with no cache hit
+                   // second search timed out. Only episodes with no cache hit
                     // pay for a fresh lookup, with the same origin-only fallback.
-                    val epKey = dlEpKey(ep)
-                    var servers = dlCache[epKey]?.filter { s -> !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", ignoreCase = true) }.orEmpty()
+                    val epCacheKey = dlEpKey(ep)
+                    var servers = dlCache[epCacheKey]?.filter { s -> !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", ignoreCase = true) }.orEmpty()
                     if (servers.isEmpty()) {
                         servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
                     }
@@ -3871,7 +3871,7 @@ fun DetailScreen(
                         runCatching { com.hikari.app.data.Logs.log("Download", "batch origin-only empty — sweeping all extensions") }
                         servers = runCatching { vm.serversForBatch(batchItem, ep, false) }.getOrDefault(emptyList())
                     }
-                    if (servers.isNotEmpty()) dlCache[epKey] = servers
+                    if (servers.isNotEmpty()) dlCache[epCacheKey] = servers
                     if (servers.isEmpty()) {
                         failed.add(epTag(ep))
                         continue
