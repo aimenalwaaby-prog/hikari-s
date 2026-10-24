@@ -9220,9 +9220,35 @@ class PlayerActivity : ComponentActivity() {
                             list.paddingLeft, list.paddingTop, list.paddingRight, want
                         )
                     }
+                    // The header grows AFTER open (title logo lands async,
+                    // the found-line wraps, the search bar shows/hides) but
+                    // the room was measured before any of that — so re-fit
+                    // the scroller itself to the live window/header/footer
+                    // here. Only the scroller height ever changes, never the
+                    // rows, and only when the number actually differs, so it
+                    // settles instead of looping.
+                    val scroller = verticalScrollerOf(list)
+                    if (scroller != null) {
+                        val hh = serverHeader.height.takeIf { it > 0 } ?: 0
+                        if (hh > 0) {
+                            val avail = (windowSize().y - hh - fh - (12 * density).toInt())
+                                .coerceAtLeast((110 * density).toInt())
+                            val lp = scroller.layoutParams
+                            if (lp != null && lp.height != avail) {
+                                lp.height = avail
+                                scroller.layoutParams = lp
+                            }
+                        }
+                    }
                 }
             }
             padFooterClearance?.invoke()
+            // Header growth must re-fit even when no row paints: the logo
+            // arriving (or a wrap/show-hide above) changes nothing in the
+            // list, so no rebuild fires — this listener covers exactly that.
+            serverHeader.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                if (dialog.isShowing) runCatching { padFooterClearance?.invoke() }
+            }
             // The footer may not be measured yet on this frame: converge again
             // once it is, so the pad always matches its real height and the
             // last row parks above it instead of under it.

@@ -1,3 +1,8 @@
+## 0.11.101 (continuous build only)
+
+### Fixed (batch: server sheet re-fits itself while open)
+- The Sources sheet now re-fits its scroller to the live window/header/footer on every paint and on every header layout change: the title logo landing late, the found-line wrapping, or the search bar showing/hiding used to grow the header after the room was measured and push the last row back under the window edge — now the scroller shrinks to match instead, so the last row stays reachable no matter when anything loads
+
 ## 0.11.100 (continuous build only)
 
 ### Fixed (batch: adaptive server-sheet clearance, compact TV Play pill, rail Tune removal, batch-download scope fallback, family chips + feed search)
