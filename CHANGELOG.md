@@ -1,3 +1,13 @@
+## 0.11.103 (continuous build only)
+
+### Fixed (batch: TV detail restyled to the reference client + thin focus + plugin icons)
+- TV detail hero now mirrors the reference client: blue provider name above the wordmark, smaller logo/title, one compact meta line (year, type, cert chip inline, runtime, genres), small IMDb/TMDB badges, two-line overview with its own small More button, and a white Play pill with small square Save/Download buttons (trailer last)
+- TV D-pad focus ring is thin (1.5dp) with a narrow halo and light tint, hugging the card edge instead of painting a thick yellow frame
+- TV home has a glassy full-bleed ambient backdrop behind the whole feed (the featured title's own backdrop, dimmed) — the smaller hero card keeps its own treatment on top
+- TV side-panel episode cards set text at 0.85 so titles don't crowd the still
+- Server sheet re-fit ignores sub-3dp wobble and can't re-enter itself, so the last row parks above the footer instead of jittering while servers land
+- TV extension rows show a brighter letter tile when the plugin icon is missing or fails to load, instead of a blank dark square
+
 ## 0.11.102 (continuous build only)
 
 ### Fixed (batch: download-all reuse, single scope ask, sheet footer, no-stall sweep, IPTV cert)

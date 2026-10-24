@@ -131,7 +131,7 @@ fun Modifier.cs3Focus(corner: androidx.compose.ui.unit.Dp = Cs3.CornerCard): Mod
     return this
         .onFocusChanged { focused = it.isFocused }
         .border(
-            width = 2.dp,
+            width = 1.dp,
             color = if (focused) accent else Color.Transparent,
             shape = RoundedCornerShape(corner),
         )
@@ -479,12 +479,15 @@ fun Cs3EpisodeCard(
     onPlay: () -> Unit,
     onDownload: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /** Detail side-panel cards are narrow (0.37 of the hero): their text
+     *  rides at 0.85 so the 19.5sp title doesn't crowd the still. */
+    textScale: Float = 1f,
 ) {
     val accent = Cs3.accent
     // Adaptive TV type: the card's text rides the viewport scale (see
     // TvUi.scale) so a dense stick screen doesn't set 19sp titles into a
     // card half the height, and a 4K panel doesn't whisper.
-    val ts = TvUi.scale()
+    val ts = TvUi.scale() * textScale.coerceIn(0.5f, 1.5f)
     Box(
         modifier = modifier
             .aspectRatio(16f / 9f)
@@ -1203,25 +1206,31 @@ fun Cs3PluginCard(
 
 @Composable
 private fun Cs3PluginIcon(iconUrl: String?, name: String) {
-    if (!iconUrl.isNullOrBlank()) {
-        coil.compose.AsyncImage(
-            model = iconUrl,
-            contentDescription = name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Cs3.SurfaceElevated),
-        )
-    } else {
+    // A repo plugin whose icon URL is missing OR dead (hotlink-guarded CDN,
+    // expired file) used to paint a blank dark square. The letter fallback
+    // now covers both: blank shows it at once, dead swaps to it when the
+    // retries give up (see PosterImage.onFinalError).
+    var iconDead by remember(iconUrl) { mutableStateOf(false) }
+    if (iconUrl.isNullOrBlank() || iconDead) {
         Box(
             modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Cs3.SurfaceElevated),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = name.trim().firstOrNull()?.uppercase() ?: "?",
-                color = Cs3.TextMuted,
+                color = Cs3.TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
         }
+    } else {
+        PosterImage(
+            model = iconUrl,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
+            onFinalError = { iconDead = true },
+            modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Cs3.SurfaceElevated),
+        )
     }
 }
 

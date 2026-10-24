@@ -8310,6 +8310,11 @@ class PlayerActivity : ComponentActivity() {
         // re-parks the list end above the footer's measured height instead of
         // trusting the one-time pad from open.
         var padFooterClearance: (() -> Unit)? = null
+        // Re-entrancy + settle guard for the fit below: the header/footer
+        // layout listeners and the re-fit call each other, and a 1-2px
+        // rounding wobble must not keep the sheet resizing forever (the
+        // jitter report). Changes under 3dp are ignored.
+        var fittingSheet = false
         fun rebuildList() {
             // Poison rows (or a session the chooser has not adopted yet) keep
             // `rendered` at 0 across many paints, and every paint used to
@@ -9222,10 +9227,14 @@ class PlayerActivity : ComponentActivity() {
             // every rebuild while servers keep landing — a one-time pad is
             // what late arrivals slid back under.
             padFooterClearance = {
+                if (fittingSheet) return@post
                 runCatching {
+                    fittingSheet = true
+                    try {
                     val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
                     val want = fh + (12 * density).toInt()
-                    if (list.paddingBottom != want) {
+                    val minDelta = (3 * density).toInt().coerceAtLeast(3)
+                    if (abs(list.paddingBottom - want) >= minDelta) {
                         list.setPadding(
                             list.paddingLeft, list.paddingTop, list.paddingRight, want
                         )
@@ -9235,8 +9244,8 @@ class PlayerActivity : ComponentActivity() {
                     // the room was measured before any of that — so re-fit
                     // the scroller itself to the live window/header/footer
                     // here. Only the scroller height ever changes, never the
-                    // rows, and only when the number actually differs, so it
-                    // settles instead of looping.
+                    // rows, and only when the number moves by at least 3dp,
+                    // so rounding wobble settles instead of looping.
                     val scroller = verticalScrollerOf(list)
                     if (scroller != null) {
                         val hh = serverHeader.height.takeIf { it > 0 } ?: 0
@@ -9244,11 +9253,14 @@ class PlayerActivity : ComponentActivity() {
                             val avail = (windowSize().y - hh - fh - (12 * density).toInt())
                                 .coerceAtLeast((110 * density).toInt())
                             val lp = scroller.layoutParams
-                            if (lp != null && lp.height != avail) {
+                            if (lp != null && abs(lp.height - avail) >= minDelta) {
                                 lp.height = avail
                                 scroller.layoutParams = lp
                             }
                         }
+                    }
+                    } finally {
+                        fittingSheet = false
                     }
                 }
             }

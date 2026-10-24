@@ -70,7 +70,9 @@ import kotlinx.coroutines.launch
 internal class TvFocusIndication(
     private val ring: Color,
     private val cornerRadius: Dp = 20.dp,
-    private val ringWidth: Dp = 4.dp,
+    // Thin by design: a 4dp band plus halo read as a thick yellow frame that
+    // sat outside the card bounds. 1.5dp hugs the edge like the reference.
+    private val ringWidth: Dp = 1.5.dp,
 ) : IndicationNodeFactory {
 
     override fun create(interactionSource: InteractionSource): DelegatableNode =
@@ -144,7 +146,10 @@ private class TvFocusNode(
         // covering it — and the clamp is what guarantees the halo below still
         // fits inside the bounds.
         val stroke = minOf(ringWidth.toPx(), minSide * 0.10f)
-        val inset = minOf(stroke * 1.6f, minSide * 0.14f)
+        // Hug the edge: the old 1.6x inset floated a thick band well inside
+        // the card and read as misaligned with the box. 1.0x keeps the thin
+        // ring exactly on the boundary.
+        val inset = minOf(stroke * 1.0f, minSide * 0.10f)
         val inner = Size(
             (size.width - inset * 2f).coerceAtLeast(1f),
             (size.height - inset * 2f).coerceAtLeast(1f),
@@ -156,18 +161,18 @@ private class TvFocusNode(
         //    poster changing shade is visible from the sofa even before the ring
         //    is.
         drawRoundRect(
-            color = ring.copy(alpha = if (pressed) 0.26f else 0.13f),
+            color = ring.copy(alpha = if (pressed) 0.15f else 0.07f),
             topLeft = spot,
             size = inner,
             cornerRadius = radius,
         )
-        // 2. A wide, soft halo: the reason the ring survives busy artwork.
+        // 2. A narrow, soft halo: the reason the ring survives busy artwork.
         drawRoundRect(
-            color = ring.copy(alpha = 0.34f),
+            color = ring.copy(alpha = 0.15f),
             topLeft = spot,
             size = inner,
             cornerRadius = radius,
-            style = Stroke(width = stroke * 2.4f),
+            style = Stroke(width = stroke * 1.5f),
         )
         // 3. The crisp ring.
         drawRoundRect(
@@ -193,7 +198,9 @@ private class TvFocusNode(
 @Composable
 fun Modifier.tvFocusRing(
     corner: Dp = 12.dp,
-    width: Dp = 2.dp,
+    // Thin like the indication above: 2dp stacked next to a component's own
+    // border read as a double frame (the Stremio-chip photo).
+    width: Dp = 1.dp,
     color: Color = Cs3.accent,
 ): Modifier {
     if (!TvMode.isTv) return this

@@ -390,3 +390,40 @@ private fun TvHeroDots(count: Int, active: Int, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/**
+ * The television home's ambient backdrop: the first featured title's own
+ * TMDB backdrop, full-bleed behind the whole feed with a glass dim over it,
+ * so shelves read over art like the desktop client. ONE image, fetched once
+ * per feed — the hero card's own rotation stays the only other art on
+ * screen, with its own treatment untouched on top.
+ */
+@Composable
+fun TvHomeBackdrop(
+    items: List<MediaItem>,
+    modifier: Modifier = Modifier,
+) {
+    if (items.isEmpty()) return
+    val first = items.first()
+    var tmdbArt by remember(items) { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(items) {
+        tmdbArt = runCatching {
+            com.hikari.app.data.TmdbScreenshots.backdropsFor(first).firstOrNull()
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+    val fallback = remember(first) { Artwork.tvHeroModel(first) }
+    val wide = tmdbArt != null || fallback.second
+    val model = if (tmdbArt != null) com.hikari.app.ui.PosterLoader.model(tmdbArt) else fallback.first
+    if (model == null) return
+    val bg = MaterialTheme.colorScheme.background
+    Box(modifier = modifier.fillMaxSize()) {
+        // The desktop tonal treatment (edge scrims melting into the page),
+        // then a uniform glass dim so shelf text reads over bright art.
+        Cs3BackdropArt(model = model, wide = wide, modifier = Modifier.fillMaxSize())
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(bg.copy(alpha = 0.45f))
+        )
+    }
+}

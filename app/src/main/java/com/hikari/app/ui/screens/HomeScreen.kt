@@ -133,6 +133,7 @@ import com.hikari.app.data.TmdbSpec
 import com.hikari.app.data.WatchProgress
 import com.hikari.app.data.Profiles
 import com.hikari.app.tv.TvCinematicHero
+import com.hikari.app.tv.TvHomeBackdrop
 import com.hikari.app.tv.TvHomeHeaderBar
 import com.hikari.app.tv.TvManageFeedDialog
 import com.hikari.app.tv.TvMode
@@ -1027,6 +1028,12 @@ fun HomeScreen(nav: NavHostController) {
     val feedState = com.hikari.app.ui.components.keptListState("home", itemKeys = feedKeys)
 
     Box(Modifier.fillMaxSize()) {
+        // Television ambient art behind the whole feed (see TvHomeBackdrop):
+        // the featured title's own backdrop, glass-dimmed — the smaller hero
+        // card keeps its own treatment on top.
+        if (TvMode.current()) {
+            TvHomeBackdrop(items = featured)
+        }
         LazyColumn(
             state = feedState,
             modifier = Modifier.fillMaxSize(),

@@ -4636,7 +4636,7 @@ fun DetailScreen(
                     val tvPlayRow: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { topPad ->
                     Row(
                         Modifier.padding(top = topPad),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Button(
@@ -4647,9 +4647,10 @@ fun DetailScreen(
                                 containerColor = Color.White,
                                 contentColor = Color.Black,
                             ),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
                             modifier = Modifier
                                 .focusRequester(playFocus)
-                                .height(48.dp)
+                                .height(46.dp)
                                 .tvPress(
                                     previewPass = true,
                                     onClick = { tryPlay(detailBtnEp) }
@@ -4657,18 +4658,13 @@ fun DetailScreen(
                         ) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            // Single line, always: "Resume S1 E5" wrapped onto
-                            // two lines and came out as a tall pill beside the
-                            // fixed Download/Save buttons (screenshot-proven).
-                            // The label alone shrinks — and ADAPTIVELY: a long
-                            // episode number ("Resume E2650") steps down
-                            // further so it still fits instead of cutting off.
-                            // The pill itself is untouched.
-                            // No weight on the label: it used to claim every
-                            // spare dp of the button's width and stretched the
-                            // white pill across the whole hero. The adaptive
-                            // size below is what fits long labels, so the pill
-                            // stays a compact reference pill.
+                            // Single line, always: the label alone shrinks —
+                            // and ADAPTIVELY: a long episode number
+                            // ("Resume E2650") steps down further so it still
+                            // fits instead of cutting off. No weight on the
+                            // label: it used to claim every spare dp of the
+                            // button's width and stretch the white pill
+                            // across the whole hero.
                             Text(
                                 detailActionLabel,
                                 maxLines = 1,
@@ -4679,8 +4675,48 @@ fun DetailScreen(
                                 ),
                             )
                         }
-                        // Trailer beside Play, like the reference layout: opens
-                        // the title's own trailer instead of scrolling for it.
+                        // Save square FIRST, like the reference client's row
+                        // (Play, heart, download): it mirrors the phone row's
+                        // library toggle below.
+                        if (isSaved) {
+                            FilledTonalButton(
+                                onClick = openLibrary,
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.size(48.dp).tvPress(
+                                    previewPass = true,
+                                    onClick = openLibrary,
+                                )
+                            ) {
+                                Icon(Icons.Filled.Favorite, contentDescription = null)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = openLibrary,
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.size(48.dp).tvPress(
+                                    previewPass = true,
+                                    onClick = openLibrary,
+                                )
+                            ) {
+                                Icon(Icons.Filled.FavoriteBorder, contentDescription = tr("Save"))
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = { openDlChoice() },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.size(48.dp).tvPress(
+                                previewPass = true,
+                                onClick = { openDlChoice() }
+                            )
+                        ) {
+                            // Material glyph, not the drawable: the drawable's
+                            // own white fill ignored the button's content color
+                            // and vanished on some TV themes (the "button with
+                            // no icon" report).
+                            Icon(Icons.Filled.Download, contentDescription = tr("Download"))
+                        }
+                        // Trailer LAST: the title's own trailer instead of
+                        // scrolling for it.
                         extras?.trailers?.firstOrNull()?.let { tvTrailer ->
                             FilledTonalButton(
                                 onClick = {
@@ -4690,7 +4726,8 @@ fun DetailScreen(
                                         (m?.title ?: title) + " — " + tvTrailer.name
                                     )
                                 },
-                                modifier = Modifier.tvPress(
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.size(48.dp).tvPress(
                                     previewPass = true,
                                     onClick = {
                                         openYouTubeVideo(
@@ -4704,54 +4741,17 @@ fun DetailScreen(
                                 Icon(Icons.Filled.OndemandVideo, contentDescription = tr("Trailer"))
                             }
                         }
-                        FilledTonalButton(
-                            onClick = { openDlChoice() },
-                            modifier = Modifier.tvPress(
-                                previewPass = true,
-                                onClick = { openDlChoice() }
-                            )
-                        ) {
-                            // Material glyph, not the drawable: the drawable's
-                            // own white fill ignored the button's content color
-                            // and vanished on some TV themes (the "button with
-                            // no icon" report).
-                            Icon(Icons.Filled.Download, contentDescription = tr("Download"))
-                        }
-                        // Save, mirroring the phone row's library toggle below:
-                        // the reference TV layout puts Play + Save side by
-                        // side, and the TV hero only had Play + Download.
-                        if (isSaved) {
-                            FilledTonalButton(
-                                onClick = openLibrary,
-                                modifier = Modifier.tvPress(
-                                    previewPass = true,
-                                    onClick = openLibrary,
-                                )
-                            ) {
-                                Icon(Icons.Filled.Favorite, contentDescription = null)
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = openLibrary,
-                                modifier = Modifier.tvPress(
-                                    previewPass = true,
-                                    onClick = openLibrary,
-                                )
-                            ) {
-                                Icon(Icons.Filled.FavoriteBorder, contentDescription = tr("Save"))
-                            }
-                        }
                     }
                     }
     val heroBlock: @Composable () -> Unit = {
         if (isTvLayout) {
             // TV detail is a single cinematic hero: artwork, title, metadata,
             // overview and the primary action live in the same focusable scene.
-            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.52f else 0.66f).dp
+            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.52f else 0.60f).dp
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(tvHeight.coerceAtLeast(380.dp))
+                    .height(tvHeight.coerceAtLeast(340.dp))
                     
                     .onSizeChanged { headerPx = it.height }
             ) {
@@ -4769,9 +4769,10 @@ fun DetailScreen(
                 // Do not paint an opaque page-background strip at the bottom of
                 // the hero. The fixed cinematic backdrop must remain visible behind
                 // the episode content as the single continuous image.
-                IconButton(onClick = { nav.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(18.dp).tvPress(
+                // Circular glass back button, like the reference client.
+                IconButton(onClick = { nav.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(18.dp).size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)).border(1.dp, Color.White.copy(alpha = 0.30f), CircleShape).tvPress(
                     previewPass = true, onClick = { nav.popBackStack() })) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"), tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"), tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 // In poster mode the episode shelf moves OUT of the hero. This leaves
                 // the whole lower part of the screen for episodes instead of squeezing them
@@ -5037,51 +5038,81 @@ fun DetailScreen(
                         .padding(
                             start = 42.dp,
                             end = 12.dp,
-                            top = if (episodePosterStyle) 0.dp else 82.dp,
+                            top = if (episodePosterStyle) 0.dp else 68.dp,
                             bottom = if (episodePosterStyle) 12.dp else 0.dp,
                         )
                 ) {
+                    // Provider eyebrow, like the reference client's blue
+                    // extension name above the wordmark.
+                    val tvProviderName = remember(providers, livePid) {
+                        providers.firstOrNull { it.config.id == livePid }
+                            ?.config?.name?.trim().takeUnless { it.isNullOrEmpty() }
+                    }
+                    if (!tvProviderName.isNullOrBlank()) {
+                        Text(
+                            tvProviderName,
+                            color = Color(0xFF4DA3FF),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
                     if (!heroLogo.isNullOrBlank()) {
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxWidth(if (episodePosterStyle) 0.62f else 0.58f).heightIn(max = 108.dp))
+                            modifier = Modifier.fillMaxWidth(if (episodePosterStyle) 0.62f else 0.58f).heightIn(max = 84.dp))
                     } else {
-                        Text(artTitle, fontSize = 34.sp * tvTypeScale, lineHeight = 40.sp * tvTypeScale, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 28.sp * tvTypeScale, lineHeight = 34.sp * tvTypeScale, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                    // Row 1: year, type, runtime + cert chip — the reference's
-                    // primary meta line (no production row, no extra badges).
-                    val tvMeta = buildList {
+                    // One meta line, like the reference client: year, type,
+                    // cert chip inline, runtime, genres — a single small row
+                    // (no production row, no extra badges).
+                    val tvMetaHead = buildList {
                         m?.year?.let { add(it.toString()) }
                         when (m?.type) {
                             com.hikari.app.data.MediaType.MOVIE -> add(tr("Movie"))
                             com.hikari.app.data.MediaType.SERIES -> add(tr("TV Series"))
                             else -> {}
                         }
-                        extras?.details?.runtimeMinutes?.takeIf { it > 0 }?.let { mins ->
-                            add(if (mins >= 60) (mins / 60).toString()+"h "+(mins % 60).toString()+"m" else mins.toString()+"m")
-                        }
-                    }.joinToString("   •   ")
+                    }.joinToString("  •  ")
+                    val tvRuntime = extras?.details?.runtimeMinutes?.takeIf { it > 0 }?.let { mins ->
+                        if (mins >= 60) (mins / 60).toString() + "h " + (mins % 60).toString() + "m" else mins.toString() + "m"
+                    }
+                    val tvGenreLine = m?.genres?.takeIf { it.isNotEmpty() }?.take(3)?.joinToString(", ")
+                    val tvMetaTail = listOfNotNull(tvRuntime, tvGenreLine).joinToString("  •  ")
                     val tvCert = extras?.details?.certification?.trim()?.takeIf { it.isNotEmpty() }
-                    if (tvMeta.isNotBlank() || !tvCert.isNullOrBlank()) {
+                    if (tvMetaHead.isNotBlank() || !tvCert.isNullOrBlank() || tvMetaTail.isNotBlank()) {
                         Row(
-                            Modifier.fillMaxWidth().padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            Modifier.fillMaxWidth().padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (tvMeta.isNotBlank()) Text(
-                                tvMeta,
-                                fontSize = 15.sp * tvTypeScale,
+                            if (tvMetaHead.isNotBlank()) Text(
+                                tvMetaHead,
+                                fontSize = 13.sp * tvTypeScale,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.88f),
+                                maxLines = 1,
                             )
                             if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
+                            if (tvMetaTail.isNotBlank()) Text(
+                                (if (tvMetaHead.isNotBlank() || !tvCert.isNullOrBlank()) "•  " else "") + tvMetaTail,
+                                fontSize = 13.sp * tvTypeScale,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.72f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
                         }
                     }
-                    // Row 2: the reference's ratings row — IMDb + TMDB badges
-                    // only (plus the AniList badge for anime), then genres.
-                    // Every other source is gone from TV.
+                    // The reference's ratings row: small IMDb + TMDB badges
+                    // only (plus the AniList badge for anime). Genres moved
+                    // up into the meta line; every other source is gone.
                     if (showDetailRating) {
                         val tvBadges = ratings
                             .filter {
@@ -5096,51 +5127,51 @@ fun DetailScreen(
                                     else -> 2
                                 }
                             }
-                        val tvGenres = m?.genres?.takeIf { it.isNotEmpty() }
-                        if (tvBadges.isNotEmpty() || !tvGenres.isNullOrEmpty()) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (tvBadges.isNotEmpty()) {
-                                    Cs3RatingBadges(ratings = tvBadges, cert = null, onRatingClick = { ratingInfo = it })
-                                }
-                                if (!tvGenres.isNullOrEmpty()) {
-                                    Text(
-                                        (if (tvBadges.isNotEmpty()) "•  " else "") + tvGenres.take(4).joinToString(", "),
-                                        fontSize = 15.sp * tvTypeScale,
-                                        fontWeight = FontWeight.Medium,
-                                        color = Color.White.copy(alpha = 0.72f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                    )
-                                }
-                            }
+                        if (tvBadges.isNotEmpty()) {
+                            Cs3RatingBadges(
+                                ratings = tvBadges,
+                                cert = null,
+                                onRatingClick = { ratingInfo = it },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            )
                         }
                     }
                     if (!displayOverview.isNullOrBlank()) {
-                        // Full text on tap: collapsed two lines by default, the
-                        // whole overview when opened — never a horizontal
-                        // scroll to read the end (same report as the badges).
+                        // Two lines like the reference client, with its own
+                        // small More button underneath — tapping text or
+                        // button toggles the full overview.
                         var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
                         Text(
-                            displayOverview!! + if (!tvOverviewFull && displayOverview.length > 140) "  [more]" else "",
-                            fontSize = 16.sp * tvTypeScale,
-                            lineHeight = 24.sp * tvTypeScale,
+                            displayOverview!!,
+                            fontSize = 14.sp * tvTypeScale,
+                            lineHeight = 20.sp * tvTypeScale,
                             color = Color.White.copy(alpha = 0.88f),
-                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else 3,
+                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else 2,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
                                 .clickable { tvOverviewFull = !tvOverviewFull },
                         )
+                        TextButton(
+                            onClick = { tvOverviewFull = !tvOverviewFull },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(top = 6.dp).tvPress(
+                                previewPass = true,
+                                onClick = { tvOverviewFull = !tvOverviewFull }
+                            )
+                        ) {
+                            Text(
+                                if (tvOverviewFull) tr("Less") else tr("More"),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.9f),
+                                maxLines = 1,
+                            )
+                        }
                     }
                     // The reference's action row sits below the plot: white
-                    // Play/Resume pill + library, download and trailer
-                    // squares — for series as well as movies, so the next
-                    // episode is one tap away without scrolling.
-                    tvPlayRow(12.dp)
+                    // Play/Resume pill + save and download squares — for
+                    // series as well as movies, so the next episode is one
+                    // tap away without scrolling.
+                    tvPlayRow(10.dp)
                 }
             }
         } else {
@@ -9250,6 +9281,7 @@ private fun TvCs3EpisodeCard(
         onPlay = onPlay,
         onDownload = onDownload,
         modifier = modifier,
+        textScale = 0.85f,
     )
 }
 
