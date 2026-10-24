@@ -9227,8 +9227,7 @@ class PlayerActivity : ComponentActivity() {
             // every rebuild while servers keep landing — a one-time pad is
             // what late arrivals slid back under.
             padFooterClearance = {
-                if (fittingSheet) return@post
-                runCatching {
+                if (!fittingSheet) runCatching {
                     fittingSheet = true
                     try {
                     val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
