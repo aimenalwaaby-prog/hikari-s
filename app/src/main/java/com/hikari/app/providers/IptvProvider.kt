@@ -184,13 +184,42 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
         private fun isManifestText(text: String): Boolean =
             runCatching { com.hikari.app.data.JsonPlaylist.looksLikeStremioManifest(text) }.getOrDefault(false)
 
-        /** Reads the playlist body from a URL or a file. Blocking — call from IO. */
+       /** Reads the playlist body from a URL or a file. Blocking — call from IO. */
+        /** Last fetch failure, so a dead host can be named instead of retried
+         *  blindly. Written by [readSource] on the same call that returns null. */
+        @Volatile
+        private var lastReadError: Throwable? = null
+        /** True when [t] or any cause is a TLS/certificate failure: expired,
+         *  self-signed or incomplete chain (the WITV-style host). Only the
+         *  first line is ever shown, never the stack. */
+        private fun isSslCause(t: Throwable?): Boolean {
+            var c = t
+            var depth = 0
+            while (c != null && depth < 12) {
+                val n = c.javaClass.name
+                if (c is javax.net.ssl.SSLHandshakeException || c is javax.net.ssl.SSLException || c is java.security.cert.CertificateException || n.contains("CertPathValidator") || n.contains("Trust anchor")) return true
+                c = c.cause
+                depth++
+            }
+            return false
+        }
         private fun readSource(url: String): String? {
             val u = url.trim()
             if (u.startsWith("http://") || u.startsWith("https://")) {
-                val body = runCatching {
-                    Http.fetchStringRobust(u, HEADERS).getOrNull()
-                }.getOrNull() ?: return null
+                val res = runCatching { Http.fetchStringRobust(u, HEADERS) }.getOrNull()
+                if (res == null) {
+                    lastReadError = Exception("fetch failed")
+                    return null
+                }
+                val err = res.exceptionOrNull()
+                if (err != null) {
+                    lastReadError = err
+                    return null
+                }
+                val body = res.getOrNull() ?: run {
+                    lastReadError = Exception("empty body")
+                    return null
+                }
                 return if (body.length > MAX_BYTES) body.take(MAX_BYTES) else body
             }
             val f = File(u)
@@ -272,10 +301,12 @@ class IptvProvider(override val config: ProviderConfig) : ContentProvider {
             }
         }.getOrNull()
         if (list == null) {
-            iptvErrors[config.id] = if (selfCheckUrl.startsWith("http")) {
-                "Could not download this playlist — the host may be down, or the link may have expired."
-            } else {
+            iptvErrors[config.id] = if (!selfCheckUrl.startsWith("http")) {
                 "This playlist file is missing from the app's storage — re-add it."
+            } else if (isSslCause(lastReadError)) {
+                "Playlist unavailable — secure connection failed (certificate). The host is down or its certificate expired."
+            } else {
+                "Could not download this playlist — the host may be down, or the link may have expired."
             }
             return@withLock cached ?: emptyList()
         }

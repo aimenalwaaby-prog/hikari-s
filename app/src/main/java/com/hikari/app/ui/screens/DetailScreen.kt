@@ -2469,8 +2469,8 @@ fun DetailScreen(
             ?.firstOrNull()
     }
 
-    val openStreams: (Episode?, Long, Boolean) -> Unit = openStreamsCall@{ ep, startPos, wantsDownload ->
-        if (playScopeAskOn && !wantsDownload && !scopeAskArmed) {
+   val openStreams: (Episode?, Long, Boolean) -> Unit = openStreamsCall@{ ep, startPos, wantsDownload ->
+        if (playScopeAskOn && !scopeAskArmed) {
             pendingNarrowTo = null
             scopeAskPending = Triple(ep, startPos, wantsDownload)
             scopeAskShow = true
@@ -3560,8 +3560,18 @@ fun DetailScreen(
     // claimed the dialog, checked after the tap's own pick has run.
     var dlQualityClaimed by remember { mutableStateOf(false) }
     var dlChecked by remember { mutableStateOf(setOf<String>()) }
-    var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
+   var dlTargets by remember { mutableStateOf(listOf<Episode>()) }
     var dlServers by remember { mutableStateOf(listOf<StreamSource>()) }
+    // Per-episode downloadable cache: the picker sweep's own answers, keyed by
+    // episode. The queue reuses these instead of re-searching from scratch, so a
+    // picked server can never miss at queue time just because the second search
+    // timed out or the origin died between the two passes.
+    val dlCache = remember { mutableStateMapOf<String, List<StreamSource>>() }
+    fun dlEpKey(ep: Episode): String = ep.id.ifBlank { "s" + ep.season + "e" + ep.number }
+    // Normalized server name: case-insensitive, without the quality/audio tail
+    // ("PlayIMDb | 1080p FHD | Original-Audio" vs "PlayIMDb | 1080p FHD") and
+    // without dedup counts (" (2)"), so the same mirror matches across passes.
+    fun normDlName(n: String): String = n.lowercase().trim().substringBefore("|").trim().replace(Regex("\\s*\\(\\d+\\)\\s*$"), "").trim()
     var dlBusy by remember { mutableStateOf(false) }
     // True while the batch union is still growing. Rows stay clickable the
     // whole time: the list opens on the first server instead of after the
@@ -3684,10 +3694,11 @@ fun DetailScreen(
         dlBusy = false
         dlMsg = null
     }
-    fun resolveFirstServer(eps: List<Episode>, originOnly: Boolean) {
+   fun resolveFirstServer(eps: List<Episode>, originOnly: Boolean) {
         if (eps.isEmpty() || dlBusy) return
         dlLookupJob?.cancel()
         dlTargets = eps
+        dlCache.clear()
         dlOriginOnly = originOnly
         val gen = dlGen + 1
         dlGen = gen
@@ -3733,17 +3744,20 @@ fun DetailScreen(
                 // every server the running lookup finds is published
                 // through [publishLive] while slower providers — and later
                 // episodes — keep searching behind it.
-                suspend fun sweep(useOrigin: Boolean) {
+               suspend fun sweep(useOrigin: Boolean) {
                     for ((i, ep) in eps.withIndex()) {
                         if (gen != dlGen) return
                         if (union.isEmpty()) {
                             dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
                         }
+                        val epKey = dlEpKey(ep)
                         val servers = runCatching {
                             vm.serversForBatch(batchItem, ep, useOrigin, onServers = { prog ->
+                                dlCache[epKey] = prog
                                 withContext(Dispatchers.Main) { publishLive(prog) }
                             })
                         }.getOrDefault(emptyList())
+                        if (servers.isNotEmpty()) dlCache[epKey] = servers
                         publishLive(servers)
                     }
                 }
@@ -3810,12 +3824,17 @@ fun DetailScreen(
     // Only servers with a real URL can win (a blank match used to queue
     // an unplayable task), and an empty list returns null instead of
     // crashing on [0].
-    fun matchDlServer(servers: List<StreamSource>, srv: StreamSource): StreamSource? {
-        val usable = servers.filter { it.url.isNotBlank() }
+   fun matchDlServer(servers: List<StreamSource>, srv: StreamSource): StreamSource? {
+        // Only servers that can actually download can win: same downloadable
+        // rule the sweep filters by (no torrents, no external opens, no blank
+        // urls). The normalized-name step lets the same mirror match across
+        // passes even when its quality/audio tail differs.
+        val usable = servers.filter { s -> !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", ignoreCase = true) }
         if (usable.isEmpty()) return null
         return usable.firstOrNull { it.name == srv.name && it.providerId == srv.providerId }
             ?: usable.firstOrNull { it.providerId == srv.providerId }
             ?: usable.firstOrNull { it.name == srv.name }
+            ?: usable.firstOrNull { normDlName(it.name) == normDlName(srv.name) }
             ?: usable[0]
     }
     fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, preferredHeight: Int, preferredBandwidth: Long, preferredAudio: String = "") {
@@ -3831,11 +3850,16 @@ fun DetailScreen(
             var done = 0
             val failed = ArrayList<String>()
             try {
-                for (ep in eps) {
-                    // A hung provider costs this episode a retry, never the
-                    // whole batch: two bounded lookups, then the episode is
-                    // reported as skipped instead of silently dropped.
-                    var servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
+               for (ep in eps) {
+                    // The picker's own answers first: reuse the cached per-episode
+                    // servers so a picked entry can never miss just because the
+                    // second search timed out. Only episodes with no cache hit
+                    // pay for a fresh lookup, with the same origin-only fallback.
+                    val epKey = dlEpKey(ep)
+                    var servers = dlCache[epKey]?.filter { s -> !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", ignoreCase = true) }.orEmpty()
+                    if (servers.isEmpty()) {
+                        servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
+                    }
                     if (servers.isEmpty()) {
                         runCatching { delay(1500L) }
                         servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
@@ -3847,6 +3871,7 @@ fun DetailScreen(
                         runCatching { com.hikari.app.data.Logs.log("Download", "batch origin-only empty — sweeping all extensions") }
                         servers = runCatching { vm.serversForBatch(batchItem, ep, false) }.getOrDefault(emptyList())
                     }
+                    if (servers.isNotEmpty()) dlCache[epKey] = servers
                     if (servers.isEmpty()) {
                         failed.add(epTag(ep))
                         continue
@@ -6528,10 +6553,10 @@ fun DetailScreen(
         RatingDetailDialog(info) { ratingInfo = null }
     }
 
-    if (scopeAskShow) {
+   if (scopeAskShow) {
         val originName = providers.firstOrNull { it.config.id == livePid }?.config?.name?.ifBlank { null } ?: livePid
         ChoiceDialog(
-            title = tr("Where should playback search?"),
+            title = if (scopeAskPending?.third == true) tr("Where should download search?") else tr("Where should playback search?"),
             items = listOf(
                 com.hikari.app.ui.components.ChoiceItem(key = "origin", label = tr("This extension only"), supporting = originName),
                 com.hikari.app.ui.components.ChoiceItem(key = "selected", label = tr("My selected servers"), supporting = tr("Your Server search choices")),

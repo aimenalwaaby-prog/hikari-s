@@ -1442,13 +1442,13 @@ class ContentRepository(private val manager: ProviderManager) {
     private val ORIGIN_HEAD_START_MS = 250L
     private val SAME_ENGINE_HEAD_START_MS = 400L
 
-    /** Ceiling on how long the other repos are held back while the provider the
-     *  title was opened from is still working (see [awaitOriginHeadStart]). The
-     *  point is that the origin gets the engines and the network to itself for
-     *  as long as it genuinely needs, without a slow/failing origin stalling
-     *  the whole list: whichever comes first — the origin finishing, or this
-     *  cap — releases the rest. */
-    private val ORIGIN_SETTLE_MAX_MS = 8_000L
+   /** Ceiling on how long the other repos are held back while the provider the
+    *  title was opened from is still working (see [awaitOriginHeadStart]). The
+    *  point is that the origin gets the engines and the network to itself for
+     *  a short moment to itself, without a slow/failing origin stalling
+    *  the whole list: whichever comes first — the origin finishing, or this
+    *  cap — releases the rest. */
+    private val ORIGIN_SETTLE_MAX_MS = 2_000L
 
     /** A provider call that took at least this long gets its own log line even
      *  when it succeeded — see [fetchStreams]. A call that answers in a second

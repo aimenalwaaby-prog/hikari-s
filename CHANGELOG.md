@@ -1,3 +1,12 @@
+## 0.11.102 (continuous build only)
+
+### Fixed (batch: download-all reuse, single scope ask, sheet footer, no-stall sweep, IPTV cert)
+- Download-all reuses the picker sweep's own per-episode answers at queue time and matches the same mirror across passes (normalized name + provider), so a picked server queues for every picked episode instead of reporting "no server for E1, E2"
+- Single-episode download now asks This extension / My selected servers like Play does, instead of silently riding one scope
+- Sources footer stays on screen: the room counts the full header (status + server header) and re-fits when the footer itself changes height, so Skip/Cancel are never cut off
+- Stuck origin no longer holds the family back: same-engine repos release after 2s instead of 8s, with no sweep-time increase — loaded servers keep painting while the slow one continues behind
+- Bad IPTV certificate shows one friendly line and stays per-provider instead of a full stack trace that blocks the list
+
 ## 0.11.101 (continuous build only)
 
 ### Fixed (batch: server sheet re-fits itself while open)

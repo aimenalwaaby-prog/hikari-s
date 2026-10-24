@@ -7043,11 +7043,21 @@ class PlayerActivity : ComponentActivity() {
 
         /** The height of the hint line for a window of [width] px, measured (see
          *  [roomFor] for why it is measured rather than guessed). */
-        fun headerHeightFor(width: Int): Int {
+       fun headerHeightFor(width: Int): Int {
             if (root.childCount == 0) return 0
             val spec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             headerRow.measure(spec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-            return headerRow.measuredHeight
+            // The Sources header is TWO lines: the status row plus the server
+            // header (logo/title/episode pill/found count/progress). Measuring
+            // only the status row under-counted the room by the header's height
+            // and pushed the footer pills (Skip/Cancel) off the bottom edge.
+            var h = headerRow.measuredHeight
+            val hv = headerView
+            if (hv != null) {
+                hv.measure(spec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                h += hv.measuredHeight
+            }
+            return h
         }
 
         /**
@@ -9246,7 +9256,13 @@ class PlayerActivity : ComponentActivity() {
             // Header growth must re-fit even when no row paints: the logo
             // arriving (or a wrap/show-hide above) changes nothing in the
             // list, so no rebuild fires — this listener covers exactly that.
-            serverHeader.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+           serverHeader.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                if (dialog.isShowing) runCatching { padFooterClearance?.invoke() }
+            }
+            // Footer height changes too (Skip shows for play, hides for
+            // download; font scale; first measure): re-fit on those as well, so
+            // the footer itself never sits past the window edge.
+            serverFooter.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 if (dialog.isShowing) runCatching { padFooterClearance?.invoke() }
             }
             // The footer may not be measured yet on this frame: converge again
