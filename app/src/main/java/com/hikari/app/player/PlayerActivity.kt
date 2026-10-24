@@ -9176,23 +9176,11 @@ class PlayerActivity : ComponentActivity() {
             // Header growth must re-fit even when no row paints: the logo
             // arriving (or a wrap/show-hide above) changes nothing in the
             // list, so no rebuild fires — this listener covers exactly that.
-           serverHeader.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            serverHeader.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 if (dialog.isShowing) runCatching { padFooterClearance?.invoke() }
             }
-            // Footer height changes too (Skip shows for play, hides for
-            // download; font scale; first measure): re-fit on those as well, so
-            // the footer itself never sits past the window edge.
-            serverFooter.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                if (dialog.isShowing) runCatching { padFooterClearance?.invoke() }
-            }
-            // The footer may not be measured yet on this frame: converge again
-            // once it is, so the pad always matches its real height and the
-            // last row parks above it instead of under it.
-            serverFooter.post {
-                if (!dialog.isShowing) return@post
-                padFooterClearance?.invoke()
-                list.requestLayout()
-            }
+            // Batch 137: no footer pills anymore — nothing to re-fit against.
+            // The header listener above stays: the logo still lands late.
             list.requestLayout()
             (list.parent as? View)?.requestLayout()
             verticalScrollerOf(list)?.requestLayout()
