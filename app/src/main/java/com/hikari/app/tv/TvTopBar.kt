@@ -275,8 +275,6 @@ fun TvHomeHeaderBar(
     onMouse: () -> Unit,
     mouseOn: Boolean,
     onSettings: (() -> Unit)?,
-    /** Opens the Home Screen Feed mixer — Home-only (Search has the box). */
-    onManageFeed: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val accent = Cs3.accent
@@ -340,15 +338,6 @@ fun TvHomeHeaderBar(
                 Icon(
                     Icons.Filled.Settings,
                     contentDescription = tr("Settings"),
-                    tint = accent,
-                )
-            }
-        }
-        onManageFeed?.let { openFeed ->
-            IconButton(onClick = openFeed, modifier = Modifier.tvFocusRing(12.dp)) {
-                Icon(
-                    Icons.Filled.Tune,
-                    contentDescription = tr("Manage feed"),
                     tint = accent,
                 )
             }
@@ -425,13 +414,8 @@ private fun refProviderSubtitle(p: ContentProvider): String {
 }
 
 /** Reference feed chip mapping for a provider kind. */
-private fun refFeedCats(type: ProviderType): Set<String> = when (type) {
-    ProviderType.ANIYOMI, ProviderType.FORK_VIDEO, ProviderType.ANYMEX, ProviderType.SORA ->
-        setOf("Anime")
-    ProviderType.IPTV -> setOf("Live")
-    ProviderType.MANGA, ProviderType.ANYMEX_MANGA -> emptySet()
-    else -> setOf("Movies", "Series", "Docs")
-}
+/** Engine-family chip label for a provider (Nuvio, Hikari, CloudStream, ...). */
+private fun providerFamilyLabel(type: ProviderType): String = type.groupLabel
 
 /**
  * The reference dialog frame (CloudstreamCustomDialog): 28dp surface with a
@@ -841,6 +825,7 @@ fun TvManageFeedDialog(
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
     var catalogProvider by remember { mutableStateOf<ContentProvider?>(null) }
     var providerTypeFilter by remember { mutableStateOf(emptySet<String>()) }
+    var manageQuery by remember { mutableStateOf("") }
     val disabledCatalogs by remember { app.store.disabledCatalogsFlow() }
         .collectAsState(initial = emptyMap())
     val orderedCatalogs by remember { app.store.catalogOrderFlow() }
@@ -864,8 +849,10 @@ fun TvManageFeedDialog(
         }
     }
     fun matches(p: ContentProvider): Boolean {
-        if (providerTypeFilter.isEmpty()) return true
-        return refFeedCats(p.config.type).any { it in providerTypeFilter }
+        if (providerTypeFilter.isNotEmpty() && p.config.type.groupLabel !in providerTypeFilter) return false
+        val q = manageQuery.trim()
+        if (q.isBlank()) return true
+        return p.config.name.contains(q, ignoreCase = true) || p.config.id.contains(q, ignoreCase = true)
     }
     fun sortedNames(p: ContentProvider): List<String>? {
         val names = catalogNames[p.config.id] ?: return null
@@ -946,7 +933,28 @@ fun TvManageFeedDialog(
             }
             Spacer(modifier = Modifier.height(24.dp))
             if (catalogProvider == null) {
-                val feedCats = listOf("Movies", "Series", "Anime", "Docs", "Live")
+                // Family chips (All + every installed engine family) with a
+                // fast name search above them: tapping a family shows only
+                // that family's extensions; All clears the filter.
+                val feedCats = remember(providers) {
+                    listOf("All") + providers.map { providerFamilyLabel(it.config.type) }.distinct().sorted()
+                }
+                OutlinedTextField(
+                    value = manageQuery,
+                    onValueChange = { manageQuery = it },
+                    placeholder = { Text(tr("Search extensions..."), fontSize = 13.sp) },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(10.dp),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -954,11 +962,14 @@ fun TvManageFeedDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     items(feedCats) { category ->
+                        val catSelected = if (category == "All") providerTypeFilter.isEmpty() else category in providerTypeFilter
                         FilterChip(
                             modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(50.dp),
-                            selected = category in providerTypeFilter,
+                            selected = catSelected,
                             onClick = {
-                                providerTypeFilter = if (category in providerTypeFilter) {
+                                providerTypeFilter = if (category == "All") {
+                                    emptySet()
+                                } else if (category in providerTypeFilter) {
                                     providerTypeFilter - category
                                 } else {
                                     providerTypeFilter + category
@@ -1260,7 +1271,7 @@ fun TvManageFeedDialog(
                     )
                 } else if (!isAdvancedMode) {
                     // SIMPLE MODE: 4 providers per row; a tap picks and closes.
-                    val filteredProviders = if (providerTypeFilter.isEmpty()) providers else providers.filter { matches(it) }
+                    val filteredProviders = providers.filter { matches(it) }
                     val sortedProviders = filteredProviders.sortedBy { it.config.name }
                     LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(sortedProviders.size, key = { index -> sortedProviders[index].config.name + "_" + sortedProviders[index].config.id + "_$index" }) { index ->

@@ -3691,6 +3691,9 @@ fun DetailScreen(
         dlOriginOnly = originOnly
         val gen = dlGen + 1
         dlGen = gen
+        // Same downloadable rule the sweep filters by (see serversForBatch).
+        fun dlOk(s: StreamSource) =
+            !s.isTorrent && !s.externalUrl && s.ytId.isNullOrBlank() && s.url.startsWith("http", ignoreCase = true)
         val seen = LinkedHashSet<String>()
         val union = ArrayList<StreamSource>()
         dlServers = emptyList()
@@ -3700,13 +3703,18 @@ fun DetailScreen(
         showDlChoice = false
         showDlSelect = false
         showDlServer = true
-        fun publishLive(servers: List<StreamSource>) {
-            if (gen != dlGen) return
-            var changed = false
-            for (s in servers) {
-                // One row per server, not one row per episode carrying it:
-                // the same mirror repeats across episodes with a different
-                // URL, and printing it N times is what made a small sweep
+    fun publishLive(servers: List<StreamSource>) {
+        if (gen != dlGen) return
+        var changed = false
+        for (s in servers) {
+            // The picker lists only what can actually download (same rule
+            // the sweep filters by): a torrent, external or blank-URL row
+            // used to sit in the picker and then toast "No downloadable
+            // server found" the moment it was picked.
+            if (!dlOk(s)) continue
+            // One row per server, not one row per episode carrying it:
+            // the same mirror repeats across episodes with a different
+            // URL, and printing it N times is what made a small sweep
                 // look like dozens of rows.
                 if (seen.add(s.providerId + "|" + s.name)) {
                     union.add(s)
@@ -3721,21 +3729,34 @@ fun DetailScreen(
         var job: Job? = null
         job = scope.launch {
             try {
-                for ((i, ep) in eps.withIndex()) {
-                    if (gen != dlGen) return@launch
-                    if (union.isEmpty()) {
-                        dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
+                // Bounded per episode (see serversForBatch), and live:
+                // every server the running lookup finds is published
+                // through [publishLive] while slower providers — and later
+                // episodes — keep searching behind it.
+                suspend fun sweep(useOrigin: Boolean) {
+                    for ((i, ep) in eps.withIndex()) {
+                        if (gen != dlGen) return
+                        if (union.isEmpty()) {
+                            dlMsg = "Finding servers (" + (i + 1) + "/" + eps.size + ")…"
+                        }
+                        val servers = runCatching {
+                            vm.serversForBatch(batchItem, ep, useOrigin, onServers = { prog ->
+                                withContext(Dispatchers.Main) { publishLive(prog) }
+                            })
+                        }.getOrDefault(emptyList())
+                        publishLive(servers)
                     }
-                    // Bounded per episode (see serversForBatch), and live:
-                    // every server the running lookup finds is published
-                    // through [publishLive] while slower providers — and later
-                    // episodes — keep searching behind it.
-                    val servers = runCatching {
-                        vm.serversForBatch(batchItem, ep, originOnly, onServers = { prog ->
-                            withContext(Dispatchers.Main) { publishLive(prog) }
-                        })
-                    }.getOrDefault(emptyList())
-                    publishLive(servers)
+                }
+                sweep(originOnly)
+                if (gen != dlGen) return@launch
+                if (union.isEmpty() && originOnly) {
+                    // "This extension" has nothing for this title (the origin
+                    // itself answered empty): fall back to the all-extensions
+                    // sweep before giving up, so a dead origin never sinks
+                    // the batch picker.
+                    dlOriginOnly = false
+                    dlMsg = "This extension has nothing — searching all extensions…"
+                    sweep(false)
                 }
                 if (gen != dlGen) return@launch
                 if (union.isEmpty()) {
@@ -4603,6 +4624,7 @@ fun DetailScreen(
                             ),
                             modifier = Modifier
                                 .focusRequester(playFocus)
+                                .height(48.dp)
                                 .tvPress(
                                     previewPass = true,
                                     onClick = { tryPlay(detailBtnEp) }
@@ -4617,12 +4639,16 @@ fun DetailScreen(
                             // episode number ("Resume E2650") steps down
                             // further so it still fits instead of cutting off.
                             // The pill itself is untouched.
+                            // No weight on the label: it used to claim every
+                            // spare dp of the button's width and stretched the
+                            // white pill across the whole hero. The adaptive
+                            // size below is what fits long labels, so the pill
+                            // stays a compact reference pill.
                             Text(
                                 detailActionLabel,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Visible,
-                                modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.labelLarge.copy(
                                     fontSize = 13.sp * (11f / detailActionLabel.length.toFloat()).coerceIn(0.45f, 1f)
                                 ),

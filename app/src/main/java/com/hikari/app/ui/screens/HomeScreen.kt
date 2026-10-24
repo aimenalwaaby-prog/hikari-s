@@ -1081,7 +1081,6 @@ fun HomeScreen(nav: NavHostController) {
                             onMouse = { com.hikari.app.tv.MouseMode.toggle() },
                             mouseOn = com.hikari.app.tv.MouseMode.enabled,
                             onSettings = openSettings,
-                            onManageFeed = { showTvManageFeed = true },
                         )
                     } else {
                         HomeHeader(

@@ -1,3 +1,12 @@
+## 0.11.100 (continuous build only)
+
+### Fixed (batch: adaptive server-sheet clearance, compact TV Play pill, rail Tune removal, batch-download scope fallback, family chips + feed search)
+- Server sheet last row now always scrolls fully into view: the footer clearance is re-measured from the footer's real height on every list paint (late arrivals included), and the ghost sheet no longer carries halo padding that pushed its end past the window edge
+- TV detail Play pill is a compact reference pill again (fixed 48dp height, wrap-content label): the label's weight was claiming the whole hero width and stretching the white pill edge to edge; long labels still fit via the adaptive font size
+- Removed the Tune/Manage-feed icon between the globe and the provider pill in the TV home header — the provider pill opens the same box, so it was a duplicate entry
+- Multi-download no longer reports "No downloadable server found" after picking a server: the batch picker lists only downloadable servers (torrent/external/blank-URL rows excluded), and an empty this-extension scope falls back to the all-extensions sweep before giving up — the exact LINK CLICK/1Shows case from the log
+- Manage Home Screen Feed chips are now engine families (All, Nuvio, Hikari, CloudStream, ...) instead of Movies/Series/Anime/Docs, with a search field above them to find an extension by name fast
+
 ## 0.11.99 (continuous build only)
 
 ### Fixed (batch: dup pill removal, TV focus visibility, smaller hero, catalog read marks)

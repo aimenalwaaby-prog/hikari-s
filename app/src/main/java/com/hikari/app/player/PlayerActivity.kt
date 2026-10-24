@@ -7098,12 +7098,16 @@ class PlayerActivity : ComponentActivity() {
         // exactly panelW x panelH in the middle of it. Ghost mode skips the
         // box: the scroll list goes straight onto the root at the same size,
         // so rows float over the art instead of inside a dark panel.
-        if (ghostPanel) {
-            (scroll.parent as? ViewGroup)?.removeView(scroll)
-            root.addView(scroll, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, panelH + 2 * halo
-            ))
-        } else {
+            if (ghostPanel) {
+                (scroll.parent as? ViewGroup)?.removeView(scroll)
+                // Ghost has no curved silhouette (no bend, no glow), so the
+                // halo padding a panel needs would only push the list end
+                // and the footer past the window edge — the half-cut last
+                // row. The scroller is exactly the room.
+                root.addView(scroll, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, panelH
+                ))
+            } else {
             root.addView(panel, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, panelH + 2 * halo
             ))
@@ -8291,6 +8295,11 @@ class PlayerActivity : ComponentActivity() {
         // one (see the empty branch below).
         var stateRowView: View? = null
 
+        // Adaptive footer clearance (assigned once the footer exists below):
+        // late servers keep arriving while the sheet is open, so every paint
+        // re-parks the list end above the footer's measured height instead of
+        // trusting the one-time pad from open.
+        var padFooterClearance: (() -> Unit)? = null
         fun rebuildList() {
             // Poison rows (or a session the chooser has not adopted yet) keep
             // `rendered` at 0 across many paints, and every paint used to
@@ -8563,6 +8572,9 @@ class PlayerActivity : ComponentActivity() {
             // does a full rebuild instead.
             builtSig = if (rendered == 0 && onScreenRows == 0 && sources.isNotEmpty()) ArrayList() else sig
             builtSelected = currentIndex
+            // Adaptive: re-park the list end above the footer on every paint,
+            // so servers that land after open never slide back under it.
+            runCatching { padFooterClearance?.invoke() }
         }
 
 // The chip strip's live sync: All + every engine that has landed, in
@@ -9196,28 +9208,28 @@ class PlayerActivity : ComponentActivity() {
             rebuildList()
             rebuildChips()
             // The last row must scroll fully clear of the footer (Skip/Cancel):
-            // pad the list's own bottom by the footer's measured height, so the
-            // final server parks above it instead of under it.
-            runCatching {
-                val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
-                list.setPadding(
-                    list.paddingLeft, list.paddingTop, list.paddingRight,
-                    fh + (12 * density).toInt()
-                )
+            // the clearance is the footer's measured height, re-applied on
+            // every rebuild while servers keep landing — a one-time pad is
+            // what late arrivals slid back under.
+            padFooterClearance = {
+                runCatching {
+                    val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
+                    val want = fh + (12 * density).toInt()
+                    if (list.paddingBottom != want) {
+                        list.setPadding(
+                            list.paddingLeft, list.paddingTop, list.paddingRight, want
+                        )
+                    }
+                }
             }
+            padFooterClearance?.invoke()
             // The footer may not be measured yet on this frame: converge again
             // once it is, so the pad always matches its real height and the
             // last row parks above it instead of under it.
             serverFooter.post {
                 if (!dialog.isShowing) return@post
-                runCatching {
-                    val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
-                    list.setPadding(
-                        list.paddingLeft, list.paddingTop, list.paddingRight,
-                        fh + (12 * density).toInt()
-                    )
-                    list.requestLayout()
-                }
+                padFooterClearance?.invoke()
+                list.requestLayout()
             }
             list.requestLayout()
             (list.parent as? View)?.requestLayout()
