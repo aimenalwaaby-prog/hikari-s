@@ -114,17 +114,20 @@ fun MediaRow(
     onShowAll: (() -> Unit)? = null,
     /** Poster hold-menu play target (detail autoplay); plain detail open when null. */
     onQuickPlay: ((MediaItem) -> Unit)? = null,
+    /** Home rows draw no Show All entry (user request): the shelf headers
+     *  stay clean and titles stay one tap away. Collection rows keep theirs. */
+    showViewAll: Boolean = true,
     /** ScrollKeeper slot for this row's horizontal scroll (see ScrollKeeper):
      *  Back from a title lands where the row was. Blank keeps a plain state. */
     keeperKey: String = "",
 ) {
     val style = rememberPosterStyle()
     if (TvMode.current()) {
-        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = onShowAll, vertical = !style.isCinema(true), keeperKey = keeperKey)
+        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = if (showViewAll) onShowAll else null, vertical = !style.isCinema(true), keeperKey = keeperKey)
         return
     }
     if (style.isCinema(false)) {
-        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = onShowAll, keeperKey = keeperKey)
+        com.hikari.app.tv.TvCinemaRow(title = title, providerName = providerName, items = items, onOpen = onClick, onShowAll = if (showViewAll) onShowAll else null, keeperKey = keeperKey)
         return
     }
     Column(Modifier.padding(top = 20.dp)) {
@@ -159,7 +162,7 @@ fun MediaRow(
                     )
                 }
             }
-            if (onShowAll != null) {
+            if (onShowAll != null && showViewAll) {
                 TextButton(onClick = onShowAll) {
                     Text(tr("Show All"), fontWeight = FontWeight.SemiBold)
                 }

@@ -1,3 +1,13 @@
+## 0.11.104 (continuous build only)
+
+### Fixed (batch: provider-pick feed, TV-stuck-on-phone, Show All removal, server pill removal, bigger phone rows)
+- Picking an extension can no longer show another provider's rows or an empty feed with no error: the single-pick filter matches on the provider ID only (display names change with renames and repo tags), so a name mismatch no longer drops every row silently
+- Phone can no longer get stuck in the TV layout: a failed touchscreen query during device detection no longer counts as "no touchscreen" (only a positive absence does), so load-time PackageManager flakiness can't flip a phone to TV + cinema cards mid-session; the Layout setting also applies instantly instead of waiting for the store round-trip, and the startup log now records the stored mode for diagnosis
+- TV shelf art retries like everywhere else: cinema/vertical cards use the self-healing PosterImage instead of a raw request, so one failed fetch no longer parks a card on its placeholder forever
+- Removed the Show All entry from home shelves (TV View All pill + phone button); collection rows keep theirs
+- Removed the SOURCES count pill from the server page entirely (it remeasured on every count change — the jitter source); the live found line stays
+- Phone server rows read bigger: taller touch target, roomier padding, larger title/meta; TV metrics unchanged
+
 ## 0.11.103 (continuous build only)
 
 ### Fixed (batch: TV detail restyled to the reference client + thin focus + plugin icons)

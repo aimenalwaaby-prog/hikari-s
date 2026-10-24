@@ -6217,6 +6217,14 @@ class PlayerActivity : ComponentActivity() {
         onExternal: () -> Unit,
     ): View {
         val density = resources.displayMetrics.density
+        // Phone rows read a little bigger (user request): taller touch
+        // target, roomier padding, larger title/meta. Television keeps its
+        // own metrics.
+        val phoneBig = !com.hikari.app.tv.TvMode.isTv
+        val rowMinDp = if (phoneBig) 64 else 56
+        val rowPadVDp = if (phoneBig) 11 else 9
+        val titleSp = if (phoneBig) 14f else 13f
+        val metaSp = if (phoneBig) 11f else 10.5f
         val glass = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = 12f * density
@@ -6236,10 +6244,10 @@ class PlayerActivity : ComponentActivity() {
                 isFocusableInTouchMode = true
                 if (foreground == null) foreground = tvFocusRing()
             }
-            minimumHeight = (56 * density).roundToInt()
+            minimumHeight = (rowMinDp * density).roundToInt()
             setPadding(
-                (10 * density).toInt(), (9 * density).toInt(),
-                (10 * density).toInt(), (9 * density).toInt()
+                (10 * density).toInt(), (rowPadVDp * density).toInt(),
+                (10 * density).toInt(), (rowPadVDp * density).toInt()
             )
             background = RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), glass, glass)
             setOnClickListener { onPlay() }
@@ -6287,7 +6295,7 @@ class PlayerActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             addView(TextView(this@PlayerActivity).apply {
                 text = serverLabel(src)
-                dpText(13f)
+                dpText(titleSp)
                 includeFontPadding = false
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFDCE3EE.toInt())
@@ -6300,7 +6308,7 @@ class PlayerActivity : ComponentActivity() {
             if (metaLine.isNotBlank()) {
                 addView(TextView(this@PlayerActivity).apply {
                     text = metaLine
-                    dpText(10.5f)
+                    dpText(metaSp)
                     includeFontPadding = false
                     setTextColor(0xFF98A3B5.toInt())
                     setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
@@ -8976,7 +8984,6 @@ class PlayerActivity : ComponentActivity() {
         }
         val logoModel = PosterLoader.model(intent.getStringExtra("titleLogo")?.takeIf { it.isNotBlank() })
         var foundLine: TextView? = null
-        var sourcesPill: TextView? = null
         var searchBar: ProgressBar? = null
         val serverHeader = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -9052,29 +9059,8 @@ class PlayerActivity : ComponentActivity() {
             setTextColor(0xFFD5DCE8.toInt())
             setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
         }
-        /**
-         * The SOURCES pill restyled for [label] without ever clipping: the
-         * shared styler fixes the pill width from the label's glyphs, and the
-         * live count outgrows the opening width ("0 SOURCES" → "128
-         * SOURCES") — so the measured width stays as the floor and the pill
-         * wraps wider instead of slicing its own text at the panel's edge.
-         */
-        fun restyleSourcesPill(tv: TextView, label: String) {
-            styleChipPill(tv, label, true)
-            (tv.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-                tv.minWidth = lp.width
-                lp.width = LinearLayout.LayoutParams.WRAP_CONTENT
-                tv.layoutParams = lp
-            }
-        }
-        sourcesPill = TextView(this)
-        restyleSourcesPill(sourcesPill!!, "0 SOURCES")
         foundRow.addView(foundLine, LinearLayout.LayoutParams(
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-        ))
-        foundRow.addView(sourcesPill, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
         ))
         serverHeader.addView(foundRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -9330,7 +9316,6 @@ class PlayerActivity : ComponentActivity() {
             hintTicker = lifecycleScope.launch {
                 var shown = ""
                 var shownFound = ""
-                var shownPill = ""
                 var shownSearching: Boolean? = null
                 while (dialog.isShowing) {
                     val text = crossSearchHint() ?: baseHint
@@ -9354,11 +9339,6 @@ class PlayerActivity : ComponentActivity() {
                     if (foundText != shownFound) {
                         shownFound = foundText
                         foundLine?.text = foundText
-                    }
-                    val pillText = "$n SOURCES"
-                    if (pillText != shownPill) {
-                        shownPill = pillText
-                        sourcesPill?.let { restyleSourcesPill(it, pillText) }
                     }
                     if (searchingNow != shownSearching) {
                         shownSearching = searchingNow

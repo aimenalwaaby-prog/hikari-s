@@ -530,7 +530,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
         // The ONE extension this pick is about, when the pick is a single
         // extension — [rows] below is then held to that extension's rows only.
         val soloPick = kept.singleOrNull()?.takeIf { !isCollectionKey(it) && !isTrackerKey(it) }
-        val soloName = soloPick?.let { manager.byId(it)?.config?.name }
         lastLoadedCollection = folderCollection
         val cached = homeCache[key]
         if (folderCollection != null) {
@@ -589,9 +588,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
                 // registered through two engines) would otherwise let another
                 // provider's rows through the id filter — which is exactly the
                 // reported "no matter what provider I am selecting, it loads all
-                // providers' catalogs".
-                val rows = if (soloPick == null || soloName == null) incoming else incoming.filter {
-                    it.providerId == soloPick && it.providerName == soloName
+                // providers' catalogs". Matched on the provider ID ONLY: the
+                // display name is not a key (renames, "(repo)" tags and engine
+                // label variants all change it), and requiring it dropped the
+                // whole feed with no error — the "pick an extension, nothing
+                // loads" report.
+                val rows = if (soloPick == null) incoming else incoming.filter {
+                    it.providerId == soloPick
                 }
                 if (rows.size != incoming.size) {
                     com.hikari.app.data.Logs.log(
@@ -1242,6 +1245,8 @@ fun HomeScreen(nav: NavHostController) {
                         providerName = row.providerName,
                         items = row.items,
                         keeperKey = "homeRow:" + row.key.ifBlank { "${row.providerName}|${row.title}" },
+                        // No Show All entry on home shelves (user request).
+                        showViewAll = false,
                         onClick = { item ->
                             Routes.safeNavigate(
                                 nav,

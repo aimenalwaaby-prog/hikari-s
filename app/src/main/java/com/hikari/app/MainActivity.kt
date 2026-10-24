@@ -146,17 +146,17 @@ class MainActivity : AppCompatActivity() {
         // already be the right layout, and Compose cannot await DataStore.
         TvMode.detect(this)
         (application as HikariApp).syncTvDeviceFlag()
-        TvMode.setOverride(
-            runCatching {
-                kotlinx.coroutines.runBlocking {
-                    kotlinx.coroutines.withTimeoutOrNull(3_000L) { store.tvMode() }
-                }
-            }.getOrNull() ?: TvMode.AUTO
-        )
+        val storedTvMode = runCatching {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(3_000L) { store.tvMode() }
+            }
+        }.getOrNull() ?: TvMode.AUTO
+        TvMode.setOverride(storedTvMode)
         com.hikari.app.data.Logs.log(
             "App",
             "layout: " + (if (TvMode.isTv) "television" else "phone/tablet") +
-                " (" + TvMode.describe(this) + ")",
+                " (stored=" + storedTvMode + " override=" + TvMode.override +
+                " " + TvMode.describe(this) + ")",
         )
         // A tracker sign-in that came back through the DEVICE'S BROWSER lands
         // here as the launch intent (see [handleTrackerRedirect] and the

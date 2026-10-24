@@ -117,12 +117,24 @@ object TvMode {
      */
     fun detect(context: Context): Boolean {
         val pm = context.packageManager
+        // A failed touchscreen query must NEVER flip a phone into the TV
+        // layout: under load (hundreds of providers refreshing at boot)
+        // PackageManager calls can throw, and [hasFeature] answers false on
+        // ANY failure — so plain `!touchscreen` read "no touchscreen, must be
+        // a TV" the moment the query flaked instead of the device lacking one
+        // (the phone stuck in the TV layout + cinema cards until a restart).
+        // Only a POSITIVE absence counts now (null = "could not ask").
+        val touchscreen: Boolean? = try {
+            pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        } catch (t: Throwable) {
+            null
+        }
         deviceIsTv = !hasFeature(pm, FEATURE_TYPE_PC) && (
             tvUiMode(context) ||
                 hasFeature(pm, PackageManager.FEATURE_LEANBACK) ||
                 hasFeature(pm, FEATURE_FIRE_TV) ||
                 hasFeature(pm, FEATURE_TYPE_TELEVISION) ||
-                !hasFeature(pm, PackageManager.FEATURE_TOUCHSCREEN)
+                touchscreen == false
             )
         detected = true
         return deviceIsTv

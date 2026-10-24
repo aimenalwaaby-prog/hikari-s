@@ -3093,6 +3093,11 @@ private fun TvDeviceCard(app: HikariApp) {
                 selectedKey = mode,
                 onPick = { pick ->
                     menuOpen = false
+                    // Apply instantly, not on the store round-trip: the choice
+                    // re-lays-out the app on this frame even if the DataStore
+                    // write is still in flight (the "Automatic stays TV until
+                    // restart" report).
+                    TvMode.setOverride(pick)
                     scope.launch { runCatching { app.store.setTvMode(pick) } }
                 },
                 onDismiss = { menuOpen = false },
