@@ -259,6 +259,19 @@ object MangaStore {
         ping()
     }
 
+    /** Catalog-level mark without a chapter list (catalog tiles never load
+     *  chapters): NONE when nothing was ever opened, READING when any tracked
+     *  chapter is unfinished, COMPLETED when every tracked chapter finished.
+     *  Best-effort — a title with newer untracked chapters still reads as
+     *  completed — but it answers "which one is reading and completed" from
+     *  outside, on the catalog tile itself. */
+    fun catalogReadState(mangaKey: String): MangaReadState {
+        if (mangaKey.isBlank()) return MangaReadState.NONE
+        val per = chapterReadMap()[mangaKey] ?: return MangaReadState.NONE
+        if (per.isEmpty()) return MangaReadState.NONE
+        return if (per.values.any { !it.finished }) MangaReadState.READING else MangaReadState.COMPLETED
+    }
+
     /** Manga-level mark from its chapters: none started, some in progress, or all finished. */
     fun mangaReadState(mangaKey: String, chapterUrls: List<String>): MangaReadState {
         val per = chapterReadMap()[mangaKey] ?: return MangaReadState.NONE

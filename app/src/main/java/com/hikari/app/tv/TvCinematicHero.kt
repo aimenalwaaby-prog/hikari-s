@@ -128,10 +128,11 @@ fun TvCinematicHero(
         // viewport (capped well below fullscreen) so shelves stay visible
         // under it, the way the reference client's home looks. The user's own
         // hero-size setting still scales it from here.
-        val h = (((maxHeight * 0.36f).value * scale.coerceIn(0.5f, 1.5f)).coerceIn(140f, 460f)).dp
+        val h = (((maxHeight * 0.24f).value * scale.coerceIn(0.5f, 1.5f)).coerceIn(120f, 300f)).dp
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 20.dp)
                 .height(h)
                 .clip(RoundedCornerShape(TvDesktop.CornerLarge))
                 .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(TvDesktop.CornerLarge))
@@ -157,7 +158,8 @@ fun TvCinematicHero(
                         else -> false
                     }
                 }
-                .clickable { onOpen(item) },
+                .clickable { onOpen(item) }
+                .tvFocusRing(TvDesktop.CornerLarge),
         ) {
             // Stepping between titles crossfades the art (the reference's
             // screen-state crossfade): an instant swap reads as a flicker on a
@@ -289,6 +291,7 @@ fun TvCinematicHero(
                     // a glance across the room.
                     Button(
                         onClick = { onOpen(item) },
+                        modifier = Modifier.tvFocusRing(24.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.White,
                             contentColor = Color.Black,
@@ -303,6 +306,7 @@ fun TvCinematicHero(
                         val saved = item.uniqueId in bookmarkedIds
                         OutlinedButton(
                             onClick = { onToggleBookmark(item) },
+                            modifier = Modifier.tvFocusRing(24.dp),
                             shape = RoundedCornerShape(24.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Color.White,
@@ -324,6 +328,7 @@ fun TvCinematicHero(
                     } else {
                         OutlinedButton(
                             onClick = { onOpen(item) },
+                            modifier = Modifier.tvFocusRing(24.dp),
                             shape = RoundedCornerShape(24.dp),
                         ) {
                             Text(tr("View Details"), fontWeight = FontWeight.Bold)

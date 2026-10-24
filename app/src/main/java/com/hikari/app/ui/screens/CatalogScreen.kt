@@ -46,7 +46,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +84,8 @@ import com.hikari.app.data.MediaType
 import com.hikari.app.data.ProviderType
 import com.hikari.app.i18n.I18n
 import com.hikari.app.manga.MangaProvider
+import com.hikari.app.manga.MangaReadState
+import com.hikari.app.manga.MangaStore
 import com.hikari.app.providers.ContentProvider
 import com.hikari.app.providers.IptvProvider
 import com.hikari.app.ui.Artwork
@@ -1112,6 +1116,34 @@ private fun CatalogCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 2.dp, start = 2.dp, end = 2.dp)
             )
+            // Reading/Completed mark on manga + novel tiles (the detail page
+            // marks chapters the same way): the key scheme is the reader's
+            // own (provider + url), so a title opened once already carries
+            // its mark here without loading any chapter list.
+            if (item.rawType == "manga" || item.rawType == "novel") {
+                val mangaRev = remember { mutableIntStateOf(0) }
+                DisposableEffect(item.providerId, item.id) {
+                    val l: () -> Unit = { mangaRev.intValue++ }
+                    MangaStore.addListener(l)
+                    onDispose { MangaStore.removeListener(l) }
+                }
+                val readState = remember(mangaRev.intValue, item.providerId, item.id) {
+                    MangaStore.catalogReadState(item.providerId + "|" + item.id)
+                }
+                if (readState != MangaReadState.NONE) {
+                    val done = readState == MangaReadState.COMPLETED
+                    Text(
+                        if (done) tr("Completed") else tr("Reading"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (done) androidx.compose.ui.graphics.Color(0xFF81C784)
+                        else MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp, start = 2.dp, end = 2.dp)
+                    )
+                }
+            }
         }
     }
 }

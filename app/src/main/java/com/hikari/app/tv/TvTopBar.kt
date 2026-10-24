@@ -82,6 +82,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -166,6 +168,7 @@ fun TvProviderPill(
         color = TvDesktop.SurfaceCard,
         modifier = modifier
             .tvPress(previewPass = true, onClick = onClick)
+            .tvFocusRing(50.dp)
             .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(50)),
     ) {
         Row(
@@ -205,6 +208,7 @@ fun TvProfilePill(
         color = TvDesktop.SurfaceCard,
         modifier = modifier
             .tvPress(previewPass = true, onClick = onClick)
+            .tvFocusRing(50.dp)
             .border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(50)),
     ) {
         Row(
@@ -299,7 +303,7 @@ fun TvHomeHeaderBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = onMouse) {
+        IconButton(onClick = onMouse, modifier = Modifier.tvFocusRing(12.dp)) {
             Icon(
                 Icons.Filled.Mouse,
                 contentDescription = tr("Mouse cursor"),
@@ -307,12 +311,12 @@ fun TvHomeHeaderBar(
                 modifier = Modifier.size(if (mouseOn) 26.dp else 24.dp),
             )
         }
-        IconButton(onClick = onSearch) {
+        IconButton(onClick = onSearch, modifier = Modifier.tvFocusRing(12.dp)) {
             Icon(Icons.Filled.Search, contentDescription = tr("Search"), tint = accent)
         }
         selected?.let { pid ->
             val translateOn = com.hikari.app.data.Translator.isOn(pid)
-            IconButton(onClick = onTranslate) {
+            IconButton(onClick = onTranslate, modifier = Modifier.tvFocusRing(12.dp)) {
                 Text(
                     tr("A\u3042"),
                     fontSize = 14.sp,
@@ -323,7 +327,7 @@ fun TvHomeHeaderBar(
             }
         }
         if (selected != null) {
-            IconButton(onClick = onVerify) {
+            IconButton(onClick = onVerify, modifier = Modifier.tvFocusRing(12.dp)) {
                 Icon(
                     Icons.Filled.Public,
                     contentDescription = tr("Open this extension's site in a web view"),
@@ -332,7 +336,7 @@ fun TvHomeHeaderBar(
             }
         }
         onSettings?.let { open ->
-            IconButton(onClick = open) {
+            IconButton(onClick = open, modifier = Modifier.tvFocusRing(12.dp)) {
                 Icon(
                     Icons.Filled.Settings,
                     contentDescription = tr("Settings"),
@@ -341,7 +345,7 @@ fun TvHomeHeaderBar(
             }
         }
         onManageFeed?.let { openFeed ->
-            IconButton(onClick = openFeed) {
+            IconButton(onClick = openFeed, modifier = Modifier.tvFocusRing(12.dp)) {
                 Icon(
                     Icons.Filled.Tune,
                     contentDescription = tr("Manage feed"),
@@ -487,6 +491,8 @@ fun TvSelectProviderDialog(
     var providerModalSearch by remember { mutableStateOf("") }
     val narrow = selectCfg.screenWidthDp < 600
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
+    val dlgFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { dlgFocus.requestFocus() } }
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     // Repo display names for the "(repo)" duplicate tags — the reference tells
     // same-named installs apart by the parent folder of the plugin path, which
@@ -524,7 +530,7 @@ fun TvSelectProviderDialog(
                         Text(text = tr("Select Provider"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(text = tr("Choose a dedicated provider or search across all installed plugins"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp)) {
+                    FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp), modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(10.dp)) {
                         Text(tr("All Plugins (Global)"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
                     }
                 }
@@ -532,7 +538,7 @@ fun TvSelectProviderDialog(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(text = tr("Select Provider"), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp)) {
+                        FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp), modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(10.dp)) {
                             Text(tr("All Plugins (Global)"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
                         }
                     }
@@ -559,7 +565,7 @@ fun TvSelectProviderDialog(
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(text = tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Spacer(modifier = Modifier.width(8.dp))
-                Switch(checked = isAdvancedMode, onCheckedChange = { enabled ->
+                Switch(checked = isAdvancedMode, modifier = Modifier.tvFocusRing(50.dp), onCheckedChange = { enabled ->
                     isAdvancedMode = enabled
                     if (enabled && working.value.isEmpty()) { selection.firstOrNull()?.let { working.value = ArrayList(listOf(it)) } }
                 })
@@ -580,7 +586,7 @@ fun TvSelectProviderDialog(
                     }
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    Button(onClick = { onSave(working.value.toList()) }) {
+                    Button(onClick = { onSave(working.value.toList()) }, modifier = Modifier.tvFocusRing(12.dp)) {
                         Text(tr("Save & Close"), maxLines = 1)
                     }
                 }
@@ -634,13 +640,13 @@ private fun SelectActivePane(active: List<ContentProvider>, working: androidx.co
                             Text(p.config.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(refProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        IconButton(onClick = { if (index > 0) { val n = ArrayList(working.value); val t = n[index - 1]; n[index - 1] = n[index]; n[index] = t; working.value = n } }, enabled = index > 0, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = { if (index > 0) { val n = ArrayList(working.value); val t = n[index - 1]; n[index - 1] = n[index]; n[index] = t; working.value = n } }, enabled = index > 0, modifier = Modifier.size(28.dp).tvFocusRing(50.dp)) {
                             Icon(Icons.Filled.ArrowUpward, contentDescription = tr("Move Up"), modifier = Modifier.size(16.dp))
                         }
-                        IconButton(onClick = { if (index < working.value.lastIndex) { val n = ArrayList(working.value); val t = n[index + 1]; n[index + 1] = n[index]; n[index] = t; working.value = n } }, enabled = index < working.value.lastIndex, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = { if (index < working.value.lastIndex) { val n = ArrayList(working.value); val t = n[index + 1]; n[index + 1] = n[index]; n[index] = t; working.value = n } }, enabled = index < working.value.lastIndex, modifier = Modifier.size(28.dp).tvFocusRing(50.dp)) {
                             Icon(Icons.Filled.ArrowDownward, contentDescription = tr("Move Down"), modifier = Modifier.size(16.dp))
                         }
-                        IconButton(onClick = { working.value = ArrayList(working.value - p.config.id) }, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = { working.value = ArrayList(working.value - p.config.id) }, modifier = Modifier.size(28.dp).tvFocusRing(50.dp)) {
                             Icon(Icons.Filled.Close, contentDescription = tr("Remove"), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -677,7 +683,7 @@ private fun SelectAvailPane(inactive: List<ContentProvider>, working: androidx.c
                             Text(p.config.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(refProviderSubtitle(p), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        FilledTonalIconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }) {
+                        FilledTonalIconButton(onClick = { working.value = ArrayList((working.value + p.config.id).distinct()) }, modifier = Modifier.tvFocusRing(50.dp)) {
                             Icon(Icons.Filled.Add, contentDescription = tr("Add"))
                         }
                     }
@@ -744,7 +750,7 @@ private fun RefProviderCard(
             if (selected) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
         ),
-        modifier = Modifier.tvPress(previewPass = true, onClick = onClick),
+        modifier = Modifier.tvPress(previewPass = true, onClick = onClick).tvFocusRing(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 6.dp else 10.dp),
@@ -829,6 +835,8 @@ fun TvManageFeedDialog(
     val manageNarrow = mcfg.screenWidthDp < 600
     val advNarrow = manageNarrow
     val scope = rememberCoroutineScope()
+    val dlgFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { dlgFocus.requestFocus() } }
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
     var catalogProvider by remember { mutableStateOf<ContentProvider?>(null) }
@@ -890,7 +898,7 @@ fun TvManageFeedDialog(
                     if (cp != null) {
                         val hasCustomOrder = orderedCatalogs[cp.config.id]?.isNotEmpty() == true
                         if (hasCustomOrder) {
-                            OutlinedButton(onClick = { scope.launch { app.store.resetCatalogOrder(cp.config.id) } }, shape = RoundedCornerShape(8.dp)) {
+                            OutlinedButton(onClick = { scope.launch { app.store.resetCatalogOrder(cp.config.id) } }, shape = RoundedCornerShape(8.dp), modifier = Modifier.tvFocusRing(8.dp)) {
                                 Text(tr("Reset Order"), style = MaterialTheme.typography.labelMedium, maxLines = 1)
                             }
                         }
@@ -898,7 +906,7 @@ fun TvManageFeedDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Switch(checked = isAdvancedMode, onCheckedChange = { enabled ->
+                            Switch(checked = isAdvancedMode, modifier = Modifier.tvFocusRing(50.dp), onCheckedChange = { enabled ->
                                 isAdvancedMode = enabled
                                 if (!enabled) {
                                     val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
@@ -917,7 +925,7 @@ fun TvManageFeedDialog(
                     if (cp != null) {
                         val hasCustomOrder = orderedCatalogs[cp.config.id]?.isNotEmpty() == true
                         if (hasCustomOrder) {
-                            OutlinedButton(onClick = { scope.launch { app.store.resetCatalogOrder(cp.config.id) } }, shape = RoundedCornerShape(8.dp)) {
+                            OutlinedButton(onClick = { scope.launch { app.store.resetCatalogOrder(cp.config.id) } }, shape = RoundedCornerShape(8.dp), modifier = Modifier.tvFocusRing(8.dp)) {
                                 Text(tr("Reset Order"), style = MaterialTheme.typography.labelMedium, maxLines = 1)
                             }
                         }
@@ -925,7 +933,7 @@ fun TvManageFeedDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(tr("Enable Multi-Provider Feed"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Switch(checked = isAdvancedMode, onCheckedChange = { enabled ->
+                            Switch(checked = isAdvancedMode, modifier = Modifier.tvFocusRing(50.dp), onCheckedChange = { enabled ->
                                 isAdvancedMode = enabled
                                 if (!enabled) {
                                     val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
@@ -947,6 +955,7 @@ fun TvManageFeedDialog(
                 ) {
                     items(feedCats) { category ->
                         FilterChip(
+                            modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(50.dp),
                             selected = category in providerTypeFilter,
                             onClick = {
                                 providerTypeFilter = if (category in providerTypeFilter) {
@@ -1223,7 +1232,7 @@ fun TvManageFeedDialog(
                                             FilledTonalIconButton(onClick = {
                                                 working.value =
                                                     ArrayList((working.value + provider.config.id).distinct())
-                                            }) {
+                                            }, modifier = Modifier.tvFocusRing(50.dp)) {
                                                 Icon(Icons.Filled.Add, contentDescription = tr("Add"))
                                             }
                                         }
@@ -1279,7 +1288,7 @@ fun TvManageFeedDialog(
             // BOTTOM ACTION BAR
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (catalogProvider != null) {
-                    OutlinedButton(onClick = { catalogProvider = null }) {
+                    OutlinedButton(onClick = { catalogProvider = null }, modifier = Modifier.tvFocusRing(12.dp)) {
                         Text(tr("Back"))
                     }
                     Spacer(modifier = Modifier.width(12.dp))
@@ -1664,7 +1673,7 @@ private fun RefActiveProviderItem(
                         )
                         .padding(horizontal = 4.dp),
                 ) {
-                    IconButton(onClick = onMoveUp, enabled = index > 0, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onMoveUp, enabled = index > 0, modifier = Modifier.size(28.dp).tvFocusRing(50.dp)) {
                         Icon(
                             Icons.Filled.ArrowUpward,
                             contentDescription = tr("Move Up"),
@@ -1674,7 +1683,7 @@ private fun RefActiveProviderItem(
                     IconButton(
                         onClick = onMoveDown,
                         enabled = index < totalActive - 1,
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(28.dp).tvFocusRing(50.dp),
                     ) {
                         Icon(
                             Icons.Filled.ArrowDownward,
@@ -1696,7 +1705,7 @@ private fun RefActiveProviderItem(
                     modifier = Modifier.background(
                         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
                         RoundedCornerShape(50),
-                    ),
+                    ).tvFocusRing(50.dp),
                 ) {
                     Icon(
                         Icons.Filled.Close,
@@ -1733,6 +1742,7 @@ private fun RefActiveProviderItem(
                                 modifier = Modifier.fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { onToggleCatalog(catalog, !isEnabled) }
+                                    .tvFocusRing(8.dp)
                                     .padding(vertical = 8.dp, horizontal = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,

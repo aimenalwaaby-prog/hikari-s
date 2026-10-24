@@ -1,3 +1,11 @@
+## 0.11.99 (continuous build only)
+
+### Fixed (batch: dup pill removal, TV focus visibility, smaller hero, catalog read marks)
+- Removed the two duplicate "1Shows" floating pills (TV hero side + phone one below the provider rail): both opened the same picker as the header/rail pill, which stays the single entry; TV-only duplication gone, phone portrait keeps its only picker entry
+- TV D-pad focus is now always visible: explicit accent ring on every provider-box control (cards, filter chips, multi toggle, arrow/remove/add buttons, Save & Close, Back), the home header pills and buttons, and the hero box and buttons — plus the dialog grabs initial focus on open so the remote starts somewhere visible
+- TV home hero is a smaller rectangle with side margins and a lower cap, TMDB art top-anchored crop so it fits perfectly instead of covering the whole home
+- Manga and novel catalog tiles show Reading / Completed under the type line, from the same chapter marks the reader writes — visible from outside without opening the title
+
 ## 0.11.98 (continuous build only)
 
 ### Fixed (batch: adaptive provider text, full TV D-pad, hardened download-all)

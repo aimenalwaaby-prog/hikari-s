@@ -2,6 +2,8 @@ package com.hikari.app.tv
 
 import android.view.KeyEvent
 import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.HoverInteraction
@@ -14,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -175,6 +178,33 @@ private class TvFocusNode(
             style = Stroke(width = stroke),
         )
     }
+}
+
+/**
+ * An explicit, always-visible focus ring for television controls — an accent
+ * border that appears the moment the remote lands on the element, independent
+ * of the [TvFocusIndication] pipeline (which needs the interaction source to
+ * report focus). Small controls whose own indication is subtle (a toggle
+ * switch, a filter chip, a 28dp arrow button) wear this so the remote's
+ * position is unmistakable at every corner of every TV screen. The unfocused
+ * state draws a transparent border of the same width, so focusing never moves
+ * layout. No-op off television (plain pass-through, zero cost on phones).
+ */
+@Composable
+fun Modifier.tvFocusRing(
+    corner: Dp = 12.dp,
+    width: Dp = 2.dp,
+    color: Color = Cs3.accent,
+): Modifier {
+    if (!TvMode.isTv) return this
+    var focused by remember { mutableStateOf(false) }
+    return this
+        .onFocusChanged { focused = it.isFocused }
+        .border(
+            width = width,
+            color = if (focused) color else Color.Transparent,
+            shape = RoundedCornerShape(corner),
+        )
 }
 
 /**

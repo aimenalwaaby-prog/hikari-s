@@ -1413,6 +1413,10 @@ fun HomeScreen(nav: NavHostController) {
         // buttons and could not be tapped at all. [LocalTaskbarInset] is exactly
         // the room the bar covers, so the pill lifts itself by that and then
         // keeps its own 14dp of air above the bar.
+        // TV hides this floating pill: the header's provider pill + the
+        // Manage box are the one place providers are picked there, and this
+        // second opener only duplicated them over the hero.
+        if (!TvMode.current()) {
         Surface(
             onClick = { showPicker = true },
             shape = RoundedCornerShape(50),
@@ -1448,6 +1452,7 @@ fun HomeScreen(nav: NavHostController) {
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
+        }
         }
 
         // Crash warning: one glass panel, shown once per crash. It says only what
