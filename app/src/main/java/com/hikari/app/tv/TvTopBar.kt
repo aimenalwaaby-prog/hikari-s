@@ -688,7 +688,6 @@ private fun SelectAvailPane(inactive: List<ContentProvider>, working: androidx.c
 }
 
 /** One reference Select-Provider card: 28dp round icon + name/tag + subtitle. */
-@Composable
 /**
  * One-line text that shrinks to fit instead of truncating: starts at
  * [baseSize] and steps down 1sp per overflow layout pass to [minScale], so a
@@ -724,6 +723,7 @@ private fun ShrinkText(
     )
 }
 
+@Composable
 private fun RefProviderCard(
     name: String,
     repoTag: String?,
