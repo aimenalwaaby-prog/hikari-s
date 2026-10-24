@@ -573,6 +573,19 @@ class MainActivity : AppCompatActivity() {
         // otherwise the app is left with a status-bar-sized blank band that
         // pushes every screen down until the next launch.
         applyImmersiveMode()
+        // Heal a stuck window orientation on every foregrounding. The layout
+        // switch applies instantly in memory while the store write is still
+        // in flight, so the window can be left showing the TV layout in a
+        // portrait window (or the phone layout in a landscape one) until the
+        // round-trip lands — and a wedged/failed write left it there for good.
+        // Re-asserting the orientation that matches the EFFECTIVE mode here
+        // (and in onCreate, and in the store collector below) closes all three
+        // gaps with one idempotent assignment: same value is a no-op.
+        runCatching {
+            requestedOrientation =
+                if (TvMode.isTv) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     /**

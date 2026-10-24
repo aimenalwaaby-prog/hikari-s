@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -148,6 +149,12 @@ fun TvCinemaCard(
       com.hikari.app.ui.components.PosterImage(model = art, contentDescription = item.title, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape).then(if (!artWide) Modifier.blur(16.dp, BlurredEdgeTreatment.Unbounded) else Modifier), contentScale = ContentScale.Crop, alignment = Artwork.CINEMA_ALIGNMENT)
       if (!artWide && art != null) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(cardShape).background(Color.Black.copy(alpha = 0.32f)))
+        // Batch 137: a poster-only title keeps a RECOGNIZABLE card. The sharp
+        // 2:3 poster sits centered (the frame is Center-aligned) over the
+        // blurred atmosphere fill — instead of a full-bleed blur with nothing
+        // readable, which is the "selecting another provider and all become
+        // blur" report (freshly picked rows have no wide art cached yet).
+        com.hikari.app.ui.components.PosterImage(model = Artwork.model(item), contentDescription = item.title, modifier = Modifier.fillMaxHeight().aspectRatio(2f / 3f).clip(RoundedCornerShape(TvDesktop.CornerCard)).border(1.dp, TvDesktop.GlassEdge, RoundedCornerShape(TvDesktop.CornerCard)), contentScale = ContentScale.Crop)
       }
       item.rating?.takeIf { it > 0 }?.let { r ->
         Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(TvDesktop.CornerCard), modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {

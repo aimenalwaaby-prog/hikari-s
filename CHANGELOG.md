@@ -1,3 +1,14 @@
+## 0.11.105 (continuous build only)
+
+### Fixed (batch: orientation heal, provider switch, phone picker size, cinema sharp inset, server footer pills)
+- Layout and window orientation can no longer disagree: MainActivity re-asserts the orientation matching the effective layout on every foregrounding, so the TV layout in a portrait window and the phone layout stuck horizontal are both healed instead of surviving until reinstall
+- Switching layout to phone can no longer silently revert on restart: a failed settings write now toasts and logs instead of being swallowed, so "switched back but reopened in TV" always leaves a trace
+- Picking one provider can no longer silently revert to All (every provider's catalog): disabled-but-installed picks and tracker picks are kept instead of stripped by the installed-list watcher, every applied pick is logged, re-tapping the current provider refreshes instead of no-op, and the first load waits for the provider list to exist instead of judging the pick against an empty list
+- Phone provider box is bigger and no longer truncates: wider + taller dialog (fills most of the window), title at a size that fits beside the All pill, two-line subtitle, grid takes the remaining room with the bottom bar pinned
+- Poster-only titles stay recognizable on TV shelves: cinema cards keep the blurred atmosphere fill but now carry the sharp 2:3 poster centered over it, instead of a full-bleed blur when wide art has not loaded yet
+- Server Sources screen footer pills removed as marked (filled Skip Loading + outlined Cancel); Back still dismisses with the same fallbacks, and the list keeps a fixed bottom clearance
+- Home empty state names a disabled pick ("enable it in Extensions, or pick another provider") instead of the generic failure text
+
 ## 0.11.104 (continuous build only)
 
 ### Fixed (batch: provider-pick feed, TV-stuck-on-phone, Show All removal, server pill removal, bigger phone rows)

@@ -3098,7 +3098,24 @@ private fun TvDeviceCard(app: HikariApp) {
                     // write is still in flight (the "Automatic stays TV until
                     // restart" report).
                     TvMode.setOverride(pick)
-                    scope.launch { runCatching { app.store.setTvMode(pick) } }
+                    // The write MUST be acknowledged: a swallowed failure here
+                    // is the "I switched back to phone but restarting shows TV
+                    // again" report — the instant override said phone while the
+                    // store still said tv, and the next launch obeyed the store.
+                    scope.launch {
+                        val ok = runCatching { app.store.setTvMode(pick) }.isSuccess
+                        if (!ok) {
+                            com.hikari.app.data.Logs.log(
+                                "App",
+                                "layout pick '" + pick + "' applied for now but NOT saved — restart will revert",
+                            )
+                            android.widget.Toast.makeText(
+                                app.applicationContext,
+                                I18n.t("Layout switched, but saving failed — restart will revert it"),
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    }
                 },
                 onDismiss = { menuOpen = false },
             )

@@ -9073,88 +9073,11 @@ class PlayerActivity : ComponentActivity() {
         serverHeader.addView(searchBar, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt()
         ))
-        fun footerBtn(label: String, primary: Boolean = true, onClick: () -> Unit): TextView {
-            return TextView(this).apply {
-                text = label
-                dpText(12.5f)
-                includeFontPadding = false
-                gravity = Gravity.CENTER
-                isSingleLine = true
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                setTextColor(0xFFFFFFFF.toInt())
-                background = RippleDrawable(
-                    ColorStateList.valueOf(0x33FFFFFF),
-                    (if (primary) GradientDrawable(
-                        GradientDrawable.Orientation.LEFT_RIGHT,
-                        intArrayOf(withAlpha(accentStartColor, 0.9f), withAlpha(accentEndColor, 0.95f))
-                    ).apply { cornerRadius = 999f }
-                    else GradientDrawable().apply {
-                        shape = GradientDrawable.RECTANGLE
-                        cornerRadius = 999f
-                        setColor(0x14FFFFFF.toInt())
-                        setStroke(
-                            (1.2f * density).roundToInt().coerceAtLeast(1),
-                            withAlpha(accentMidColor, 0.8f)
-                        )
-                    }),
-                    null
-                )
-                val px = (22 * density).toInt()
-                setPadding(px, (11 * density).toInt(), px, (11 * density).toInt())
-                isClickable = true
-                if (playerTvRemote()) {
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    if (foreground == null) foreground = tvFocusRing()
-                }
-                setOnClickListener { onClick() }
-            }
-        }
-        val serverFooter = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, (10 * density).toInt(), 0, (12 * density).toInt())
-        }
-        if (!forDownload) {
-            serverFooter.addView(footerBtn(I18n.t("Skip Loading")) {
-                // The reference Skip: play the best of what has landed so far,
-                // right now — not a second dismiss. Empty-handed it says so.
-                if (sources.isEmpty()) {
-                    android.widget.Toast.makeText(
-                        this,
-                        I18n.t("Still looking for sources…"),
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                    return@footerBtn
-                }
-                startChoicePending = false
-                serverPickActed = true
-                dialog.dismiss()
-                lifecycleScope.launch { playSource(preferredStartIndex()) }
-            },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = (10 * density).toInt() })
-        }
-        serverFooter.addView(footerBtn(I18n.t("Cancel"), false) {
-            // Abandon, never fall back to a server: the player leaves
-            // instead of starting something the user just cancelled.
-            startChoicePending = false
-            if (forDownload) {
-                dialog.dismiss()
-            } else if (startMode && !playbackCommitted) {
-                cancelLoad = true
-                startChooserShown = true
-                dialog.dismiss()
-                if (!isFinishing) finish()
-            } else {
-                dialog.dismiss()
-            }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+        // Batch 137: the footer pills are gone — the red-marked filled pill
+        // plus the small outlined pill beside it. The dialog stays
+        // Back-dismissable (presentGlass defaults cancelable to true, and the
+        // OnDismissListener above keeps the start-mode/finish fallbacks), so
+        // no way out is lost — only the two pills.
         val hintView = presentGlass(
             dialog,
             if (forDownload) I18n.t("Download from") else "Sources",
@@ -9188,13 +9111,12 @@ class PlayerActivity : ComponentActivity() {
             artUrl = intent?.getStringExtra("serverArt")?.takeIf { it.isNotBlank() },
             // Lighter window dim so the title art reads through the scrim.
             dimAmount = 0.30f,
-            headerView = serverHeader,
-            footerView = serverFooter,
-            // Compact title: the reference sheet's header is a small line
+                headerView = serverHeader,
+                // Compact title: the reference sheet's header is a small line
             // over the art, not a billboard — the list gets the room.
             titleSizeSp = 16f,
             // Ghost panel: reference glass READY rows float directly over the
-            // art, with no dark box between the header and the footer.
+            // art, with no dark box between the header and the list.
             ghostPanel = true,
         )
         // The dialog is on screen from here: converge the list on the live
@@ -9208,15 +9130,16 @@ class PlayerActivity : ComponentActivity() {
             syncFromSession()
             rebuildList()
             rebuildChips()
-            // The last row must scroll fully clear of the footer (Skip/Cancel):
-            // the clearance is the footer's measured height, re-applied on
-            // every rebuild while servers keep landing — a one-time pad is
-            // what late arrivals slid back under.
+            // The last row must scroll fully clear of the bottom edge: the
+            // clearance is re-applied on every rebuild while servers keep
+            // landing — a one-time pad is what late arrivals slid back under.
+            // (Batch 137: no footer pills anymore, so a fixed gesture-bar pad
+            // instead of the old footer's measured height.)
             padFooterClearance = {
                 if (!fittingSheet) runCatching {
                     fittingSheet = true
                     try {
-                    val fh = serverFooter.height.takeIf { it > 0 } ?: (72 * density).toInt()
+                    val fh = (24 * density).toInt()
                     val want = fh + (12 * density).toInt()
                     val minDelta = (3 * density).toInt().coerceAtLeast(3)
                     if (abs(list.paddingBottom - want) >= minDelta) {

@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -170,6 +171,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -324,9 +326,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
                     val valid = sel.filter { key ->
                         isCollectionKey(key) || ps.any { it.config.enabled && it.config.id == key }
                     }
-                    if (valid != sel) {
-                        applySelection(valid)
-                        viewModelScope.launch { store.setHomeProviders(valid.toSet()) }
+                    // Batch 137: only a pick whose extension is GONE
+                    // (uninstalled) is dropped. A DISABLED pick is kept — its
+                    // feed is empty but the empty state names the reason —
+                    // instead of the pick silently reverting to All and Home
+                    // showing every provider's catalog. Tracker picks resolve
+                    // against the tracker stores in loadInternal, never here.
+                    val validKept = sel.filter { key ->
+                        isCollectionKey(key) || isTrackerKey(key) || ps.any { it.config.id == key }
+                    }
+                    if (validKept != sel) {
+                        com.hikari.app.data.Logs.log(
+                            "Home",
+                            "dropping pick(s) no longer installed: " +
+                                (sel - validKept.toSet()).joinToString(","),
+                        )
+                        applySelection(validKept)
+                        viewModelScope.launch { store.setHomeProviders(validKept.toSet()) }
                     }
                 }
                 loadInternal()
@@ -405,7 +421,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
     private fun collectionIdOf(key: String): String = key.removePrefix(COLLECTION_PREFIX)
 
     fun selectProvider(id: String?) {
-        setSelection(if (id == null) emptyList() else listOf(id))
+        val want = if (id == null) emptyList() else listOf(id)
+        // A re-tap of the CURRENT provider is a refresh request, not a no-op:
+        // without this the feed could sit on stale/blurred rows forever when
+        // the tap that should have reloaded it was swallowed as "no change".
+        if (want == _selection.value) refreshFeed()
+        else setSelection(want)
     }
 
     /**
@@ -418,6 +439,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
     fun setSelection(ids: List<String>) {
         val clean = ids.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         if (clean == _selection.value) return
+        // One line per applied pick: the next "it shows the old catalogue"
+        // report can be told apart from a tap that never arrived.
+        com.hikari.app.data.Logs.log(
+            "Home",
+            "pick=" + (if (clean.isEmpty()) "all" else clean.joinToString(",")),
+        )
         applySelection(clean)
         viewModelScope.launch { store.setHomeProviders(clean.toSet()) }
         viewModelScope.launch { loadInternal() }
@@ -498,6 +525,19 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
         // earlier can be resumed after a newer one and would otherwise paint
         // rows the current pick never asked for.
         val token = ++loadToken
+        // Never judge a pick against a provider list that has not been built
+        // yet: the first seconds of a process (or a refresh in flight) report
+        // an empty list, and loading against it is what painted "produced no
+        // rows" over a perfectly good pick at every boot.
+        if (manager.providers.value.isEmpty()) {
+            val ready = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                manager.providers.first { it.isNotEmpty() }
+            }
+            if (ready == null) {
+                com.hikari.app.data.Logs.log("Home", "providers never became ready — loading anyway")
+            }
+            if (token != loadToken) return
+        }
         val picks = _selection.value
         // A collection pick resolves to a saved collection; when it has been
         // deleted (or its id is stale) fall back to All instead of leaving the
@@ -1388,10 +1428,18 @@ fun HomeScreen(nav: NavHostController) {
                                 action = vm::refresh,
                             )
                         } else {
+                            // Batch 137: a kept-but-disabled pick names itself
+                            // instead of the generic "couldn't load".
+                            val pickedDisabled = selectedKey.let { key ->
+                                providers.any { it.config.id == key } &&
+                                    providers.none { it.config.id == key && it.config.enabled }
+                            }
                             EmptyState(
                                 title = I18n.t("Couldn't load %s")
                                     .replace("%s", selectedName ?: I18n.t("This extension")),
-                                subtitle = reason?.takeIf {
+                                subtitle = if (pickedDisabled) {
+                                    tr("This extension is disabled — enable it in Extensions, or pick another provider.")
+                                } else reason?.takeIf {
                                     !com.hikari.app.net.CloudflareVerifier.isVerificationMessage(it)
                                 }
                                     ?: I18n.t(
@@ -2000,9 +2048,10 @@ internal fun ProviderPickerSheet(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .widthIn(max = 760.dp)
-                .heightIn(min = 220.dp, max = 620.dp),
+                .fillMaxWidth(0.97f)
+                .widthIn(max = 800.dp)
+                .fillMaxHeight(0.92f)
+                .heightIn(min = 240.dp, max = 780.dp),
         ) {
             Column(
                 Modifier
@@ -2018,10 +2067,10 @@ internal fun ProviderPickerSheet(
                     Column(Modifier.weight(1f)) {
                         Text(
                             tr("Select Provider"),
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
@@ -2034,7 +2083,7 @@ internal fun ProviderPickerSheet(
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -2123,7 +2172,8 @@ internal fun ProviderPickerSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 60.dp, max = 440.dp),
+                        .weight(1f, fill = false)
+                        .heightIn(min = 60.dp, max = 560.dp),
                 ) {
                 if (shownCollections.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
