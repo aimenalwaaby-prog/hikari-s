@@ -3,6 +3,7 @@ package com.hikari.app.tv
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,9 +33,11 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -48,6 +51,9 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -973,8 +979,26 @@ fun Cs3PluginCard(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Explicit TV focus chain: the card hands Down to its first action, the
+    // gear and the action chain Left/Right, and both hand Up back to the
+    // card — the D-pad can reach everything on the 2-per-row grid.
+    val cardFocus = remember { FocusRequester() }
+    val settingsFocus = remember { FocusRequester() }
+    val actionFocus = remember { FocusRequester() }
+    // What a press of the WHOLE card does: the same thing the card's own
+    // action button does — install, update, or uninstall.
+    val cardAction: () -> Unit = if (!isInstalled || installStatus == "Update available") onInstallClick else (onUninstallClick ?: {})
+    val firstCardAction = if (showSettings) settingsFocus else actionFocus
     Surface(
-        modifier = modifier.fillMaxWidth().defaultMinSize(minHeight = 172.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 172.dp)
+            .focusGroup()
+            .focusRequester(cardFocus)
+            .focusProperties {
+                down = firstCardAction
+            }
+            .tvPress(previewPass = false, onClick = cardAction),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
@@ -1092,11 +1116,39 @@ fun Cs3PluginCard(
                         }
                     }
                 }
+                if (showSettings) {
+                    IconButton(
+                        onClick = onSettingsClick,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .focusRequester(settingsFocus)
+                            .focusProperties {
+                                left = cardFocus
+                                up = cardFocus
+                                right = actionFocus
+                            }
+                            .tvPress(previewPass = true, onClick = onSettingsClick),
+                    ) {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = "Plugin settings",
+                            tint = Cs3.TextMuted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.width(8.dp))
                 if (onUninstallClick != null && isInstalled) {
                     androidx.compose.material3.OutlinedButton(
                         onClick = onUninstallClick,
-                        modifier = Modifier.height(32.dp),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .focusRequester(actionFocus)
+                            .focusProperties {
+                                left = if (showSettings) settingsFocus else cardFocus
+                                up = cardFocus
+                            }
+                            .tvPress(previewPass = true, onClick = onUninstallClick),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.error,
@@ -1124,7 +1176,14 @@ fun Cs3PluginCard(
                         onClick = onInstallClick,
                         enabled = !isInstalling,
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                        modifier = Modifier.height(32.dp),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .focusRequester(actionFocus)
+                            .focusProperties {
+                                left = if (showSettings) settingsFocus else cardFocus
+                                up = cardFocus
+                            }
+                            .tvPress(previewPass = true, enabled = !isInstalling, onClick = onInstallClick),
                         shape = RoundedCornerShape(8.dp),
                     ) {
                         if (isInstalling) {

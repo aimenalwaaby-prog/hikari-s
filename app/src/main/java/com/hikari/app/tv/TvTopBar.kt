@@ -83,8 +83,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -687,6 +689,41 @@ private fun SelectAvailPane(inactive: List<ContentProvider>, working: androidx.c
 
 /** One reference Select-Provider card: 28dp round icon + name/tag + subtitle. */
 @Composable
+/**
+ * One-line text that shrinks to fit instead of truncating: starts at
+ * [baseSize] and steps down 1sp per overflow layout pass to [minScale], so a
+ * long provider name in a narrow 4-per-row card still reads in full. The loop
+ * terminates (bounded below, only shrinks on real visual overflow).
+ */
+@Composable
+private fun ShrinkText(
+    text: String,
+    baseSize: TextUnit,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.bodyMedium,
+    color: Color = Color.Unspecified,
+    fontWeight: FontWeight? = null,
+    minScale: Float = 0.7f,
+) {
+    var size by remember(text, baseSize) { mutableStateOf(baseSize) }
+    Text(
+        text = text,
+        modifier = modifier,
+        style = style,
+        color = color,
+        fontWeight = fontWeight,
+        fontSize = size,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        softWrap = false,
+        onTextLayout = { layout ->
+            if (layout.hasVisualOverflow && size.value > baseSize.value * minScale) {
+                size = (size.value - 1f).sp
+            }
+        },
+    )
+}
+
 private fun RefProviderCard(
     name: String,
     repoTag: String?,
@@ -742,13 +779,11 @@ private fun RefProviderCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
+                    ShrinkText(
                         text = name,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = if (compact) 11.sp else 13.sp,
+                        baseSize = if (compact) 11.sp else 13.sp,
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     if (!repoTag.isNullOrBlank()) {
@@ -762,12 +797,11 @@ private fun RefProviderCard(
                         )
                     }
                 }
-                Text(
+                ShrinkText(
                     text = subtitle,
-                    style = if (compact) MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp) else MaterialTheme.typography.labelSmall,
+                    baseSize = if (compact) 9.sp else 11.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

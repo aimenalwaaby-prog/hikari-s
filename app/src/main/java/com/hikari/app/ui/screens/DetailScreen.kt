@@ -3786,11 +3786,17 @@ fun DetailScreen(
     // The batch's per-episode match for the picked server: same name on the
     // same provider first, then either half, then whatever resolved — the
     // same preference the single-download queue uses.
-    fun matchDlServer(servers: List<StreamSource>, srv: StreamSource): StreamSource =
-        servers.firstOrNull { it.name == srv.name && it.providerId == srv.providerId }
-            ?: servers.firstOrNull { it.providerId == srv.providerId }
-            ?: servers.firstOrNull { it.name == srv.name }
-            ?: servers[0]
+    // Only servers with a real URL can win (a blank match used to queue
+    // an unplayable task), and an empty list returns null instead of
+    // crashing on [0].
+    fun matchDlServer(servers: List<StreamSource>, srv: StreamSource): StreamSource? {
+        val usable = servers.filter { it.url.isNotBlank() }
+        if (usable.isEmpty()) return null
+        return usable.firstOrNull { it.name == srv.name && it.providerId == srv.providerId }
+            ?: usable.firstOrNull { it.providerId == srv.providerId }
+            ?: usable.firstOrNull { it.name == srv.name }
+            ?: usable[0]
+    }
     fun startBatchDownload(srv: StreamSource, kind: com.hikari.app.download.DownloadKind, preferredHeight: Int, preferredBandwidth: Long, preferredAudio: String = "") {
         showDlDest = false
         showDlAudio = false
@@ -3813,12 +3819,19 @@ fun DetailScreen(
                         runCatching { delay(1500L) }
                         servers = runCatching { vm.serversForBatch(batchItem, ep, dlOriginOnly) }.getOrDefault(emptyList())
                     }
+                    if (servers.isEmpty() && dlOriginOnly) {
+                        // Origin-only scope found nothing for this episode: fall
+                        // back to the all-extensions sweep before giving up, so
+                        // one missing title doesn't sink the batch.
+                        runCatching { com.hikari.app.data.Logs.log("Download", "batch origin-only empty — sweeping all extensions") }
+                        servers = runCatching { vm.serversForBatch(batchItem, ep, false) }.getOrDefault(emptyList())
+                    }
                     if (servers.isEmpty()) {
                         failed.add(epTag(ep))
                         continue
                     }
                     val src = matchDlServer(servers, srv)
-                    if (src.url.isBlank()) {
+                    if (src == null) {
                         failed.add(epTag(ep))
                         continue
                     }

@@ -7911,6 +7911,7 @@ private fun RepoCard(
                 .focusRequester(rowFocus)
                 .focusProperties {
                     right = copyFocus
+                    down = copyFocus
                 }
                 .padding(
                     horizontal = if (com.hikari.app.tv.TvMode.current()) 16.dp else 12.dp,
@@ -8258,6 +8259,25 @@ private fun PluginRow(
     // card shape). The old single row put five targets beside the text and
     // squeezed the name to "Re:…" whenever an Update was pending — the buttons
     // can never steal the name's width again.
+    // Explicit TV focus chain (see the repo rows): the card hands Down to its
+    // first action, the buttons chain Left/Right, and every button hands Up
+    // back to the card — the D-pad can reach everything.
+    val cardFocus = remember { FocusRequester() }
+    val testFocus = remember { FocusRequester() }
+    val settingsFocus = remember { FocusRequester() }
+    val b1Focus = remember { FocusRequester() }
+    val b2Focus = remember { FocusRequester() }
+    val hasTest = onTest != null
+    val hasSettingsBtn = installed && onSettings != null
+    val hasUpdateBtn = installed && updateAvailable && onUpdate != null
+    val hasPrimaryBtn = installed || !dartOnly || onInstallJs != null
+    val firstActionFocus = when {
+        hasTest -> testFocus
+        hasSettingsBtn -> settingsFocus
+        hasPrimaryBtn -> b1Focus
+        hasUpdateBtn -> b2Focus
+        else -> cardFocus
+    }
     GlassCard(
         Modifier
             .fillMaxWidth()
@@ -8266,6 +8286,11 @@ private fun PluginRow(
         Column(
             Modifier
                 .padding(12.dp)
+                .focusGroup()
+                .focusRequester(cardFocus)
+                .focusProperties {
+                    down = firstActionFocus
+                }
                 // The card is a focus TARGET, not just a container: `tvPress`
                 // adds the focus node (with the same focus ring every other
                 // control in the app wears) and the centre press runs the
@@ -8334,7 +8359,17 @@ private fun PluginRow(
             }
         }
         if (installed && onSettings != null) {
-            IconButton(onClick = onSettings, modifier = Modifier.tvPress(previewPass = true, onClick = onSettings)) {
+            IconButton(
+                onClick = onSettings,
+                modifier = Modifier
+                    .focusRequester(settingsFocus)
+                    .focusProperties {
+                        left = cardFocus
+                        up = cardFocus
+                        down = if (hasTest) testFocus else if (hasPrimaryBtn) b1Focus else cardFocus
+                    }
+                    .tvPress(previewPass = true, onClick = onSettings),
+            ) {
                 Icon(
                     Icons.Filled.Settings,
                     contentDescription = tr("Plugin settings"),
@@ -8351,18 +8386,45 @@ private fun PluginRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
         if (onTest != null) {
-            TextButton(onClick = onTest, enabled = !testing, modifier = Modifier.tvPress(previewPass = true, enabled = !testing, onClick = onTest)) {
+            TextButton(
+                onClick = onTest,
+                enabled = !testing,
+                modifier = Modifier
+                    .focusRequester(testFocus)
+                    .focusProperties {
+                        left = cardFocus
+                        up = cardFocus
+                        if (hasPrimaryBtn) right = b1Focus else if (hasUpdateBtn) right = b2Focus
+                    }
+                    .tvPress(previewPass = true, enabled = !testing, onClick = onTest),
+            ) {
                 Text(if (testing) tr("Testing…") else tr("Test"))
             }
         }
         if (installed) {
             if (updateAvailable && onUpdate != null) {
-                TextButton(onClick = onUninstall, modifier = Modifier.tvPress(previewPass = true, onClick = onUninstall)) {
+                TextButton(
+                    onClick = onUninstall,
+                    modifier = Modifier
+                        .focusRequester(b1Focus)
+                        .focusProperties {
+                            left = if (hasTest) testFocus else cardFocus
+                            up = cardFocus
+                            right = b2Focus
+                        }
+                        .tvPress(previewPass = true, onClick = onUninstall),
+                ) {
                     Text(tr("Uninstall"), color = MaterialTheme.colorScheme.error)
                 }
                 Button(
                     onClick = onUpdate,
-                    modifier = Modifier.tvPress(previewPass = true, onClick = onUpdate),
+                    modifier = Modifier
+                        .focusRequester(b2Focus)
+                        .focusProperties {
+                            left = b1Focus
+                            up = cardFocus
+                        }
+                        .tvPress(previewPass = true, onClick = onUpdate),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Icon(
@@ -8376,7 +8438,13 @@ private fun PluginRow(
             } else {
                 TextButton(
                     onClick = onUninstall,
-                    modifier = Modifier.tvPress(previewPass = true, onClick = onUninstall),
+                    modifier = Modifier
+                        .focusRequester(b1Focus)
+                        .focusProperties {
+                            left = if (hasTest) testFocus else cardFocus
+                            up = cardFocus
+                        }
+                        .tvPress(previewPass = true, onClick = onUninstall),
                 ) {
                     Text(tr("Uninstall"), color = MaterialTheme.colorScheme.error)
                 }
@@ -8385,7 +8453,13 @@ private fun PluginRow(
             if (onInstallJs != null) {
                 Button(
                     onClick = onInstallJs,
-                    modifier = Modifier.tvPress(previewPass = true, onClick = onInstallJs),
+                    modifier = Modifier
+                        .focusRequester(b1Focus)
+                        .focusProperties {
+                            left = if (hasTest) testFocus else cardFocus
+                            up = cardFocus
+                        }
+                        .tvPress(previewPass = true, onClick = onInstallJs),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -8402,7 +8476,13 @@ private fun PluginRow(
         } else {
             Button(
                 onClick = onInstall,
-                modifier = Modifier.tvPress(previewPass = true, onClick = onInstall),
+                modifier = Modifier
+                    .focusRequester(b1Focus)
+                    .focusProperties {
+                        left = if (hasTest) testFocus else cardFocus
+                        up = cardFocus
+                    }
+                    .tvPress(previewPass = true, onClick = onInstall),
             ) {
                 Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))

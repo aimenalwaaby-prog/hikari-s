@@ -312,6 +312,8 @@ object DownloadEngine {
                     // back to its own first audio instead of failing.
                     if (preferredAudio.isNotBlank()) {
                         cands.firstOrNull { it.name.equals(preferredAudio, ignoreCase = true) }
+                            ?: cands.firstOrNull { it.name.contains("multi", ignoreCase = true) }
+                            ?: cands.firstOrNull { it.name.contains("english", ignoreCase = true) }
                             ?: cands.firstOrNull()
                     } else cands.firstOrNull()
                 }
@@ -393,7 +395,12 @@ object DownloadEngine {
             val withHeight = variants.filter { it.height > 0 }
             withHeight.firstOrNull { it.height == preferredHeight }?.let { return it }
             if (withHeight.isNotEmpty()) {
-                withHeight.minByOrNull { kotlin.math.abs(it.height - preferredHeight) }?.let { return it }
+                // Step DOWN before stepping up: a smaller file that exists
+                // beats a bigger guess that doesn't (the batch auto-shifts
+                // 1080p to 720p this way; nearest-either-way sometimes jumped
+                // up to a rendition the server only half-supports).
+                withHeight.filter { it.height < preferredHeight }.maxByOrNull { it.height }?.let { return it }
+                withHeight.filter { it.height > preferredHeight }.minByOrNull { it.height }?.let { return it }
             }
         }
         if (preferredBandwidth > 0L) {

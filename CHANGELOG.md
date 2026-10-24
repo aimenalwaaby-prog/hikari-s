@@ -1,3 +1,11 @@
+## 0.11.98 (continuous build only)
+
+### Fixed (batch: adaptive provider text, full TV D-pad, hardened download-all)
+- Provider-box card names and subtitles shrink to fit one line instead of truncating, so long names read in full in the 4-per-row grids
+- TV D-pad reaches every control on the extensions screens: plugin rows hand Down into Test/Uninstall/Update/Install with Left/Right chains, repo rows hand Down into Copy/Refresh/Remove, and the TV plugin cards carry a card press plus Install/Uninstall chains and the previously missing settings gear
+- Download-all hardened: per-episode all-extensions retry when the origin-only scope finds nothing, server match prefers usable URLs and never crashes, quality auto-shift steps down before up, audio falls back picked > multi > English > first
+- Phone UI untouched
+
 ## 0.11.97 (continuous build only)
 
 ### Fixed (batch: 4-in-a-row boxes, two-pane multi in both, single-line text)
