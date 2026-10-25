@@ -6297,7 +6297,7 @@ class PlayerActivity : ComponentActivity() {
                 text = serverLabel(src)
                 dpText(titleSp)
                 includeFontPadding = false
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTypeface(typeface, Typeface.BOLD)
                 setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFDCE3EE.toInt())
                 // Readable on any art: a soft dark halo behind the glyphs,
                 // invisible on dark scenes, saving light ones.
@@ -6310,9 +6310,12 @@ class PlayerActivity : ComponentActivity() {
                     text = metaLine
                     dpText(metaSp)
                     includeFontPadding = false
+                    setTypeface(typeface, Typeface.BOLD)
                     setTextColor(0xFF98A3B5.toInt())
                     setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
-                    maxLines = 2
+                    // Full detail, never cut: audio tracks, quality, size —
+                    // the row grows to fit however much the server reports.
+                    maxLines = 10
                     ellipsize = TextUtils.TruncateAt.END
                 }, LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -8175,10 +8178,11 @@ class PlayerActivity : ComponentActivity() {
         val list = optionList()
 
         // Source filter pills (All + every engine that has landed): the strip
-        // sits as the list's own first child, so it scrolls with the rows and
-        // needs no overlay. Hidden until a second engine lands — one pill is
-        // not a filter. A tap filters the rows in place (see `visible`) and
-        // restyles the strip without tearing it down.
+        // lives in the FIXED header under the found line (see serverHeader),
+        // so it never scrolls away with the rows — the pills stay reachable
+        // no matter how far down the list is read. Hidden until a second
+        // engine lands — one pill is not a filter. A tap filters the rows in
+        // place (see `visible`) and restyles the strip without tearing it down.
         val chipRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -8196,7 +8200,8 @@ class PlayerActivity : ComponentActivity() {
             ))
             visibility = View.GONE
         }
-        list.addView(chipStrip)
+        // NOTE: the strip is added to the fixed header below (under the found
+        // line), NOT to the scrolling list — child 0 of `list` is a row.
 
         /**
          * One engine chip. Its box is measured from the TEXT rather than left to
@@ -8254,7 +8259,10 @@ class PlayerActivity : ComponentActivity() {
                 isSingleLine = true
                 includeFontPadding = false
                 gravity = Gravity.CENTER
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                // Bold so the label reads on light artwork too (with the halo
+                // below); re-measured after, so the pill box follows the glyphs.
+                setTypeface(typeface, Typeface.BOLD)
+                setShadowLayer(4f, 0f, 2f, 0xAA000000.toInt())
                 dpText(if (tvMenu) 13f else 9.5f)
             }
             val textW = ceil(tv.paint.measureText(label)).toInt()
@@ -8361,7 +8369,7 @@ class PlayerActivity : ComponentActivity() {
             // the blank box over the searching footer from the report. Empty
             // always falls through to the placeholder branch.
             if (sig.isNotEmpty() && sig == builtSig && builtSelected == currentIndex && stateRowView == null &&
-                (list.childCount) == sig.size + 1) return
+                (list.childCount) == sig.size) return
             // Append-only live growth (the common search case: new servers land
             // at the end of the last section): keep every view on screen and
             // only inflate the tail. A full teardown on every below-fold append
@@ -8375,7 +8383,8 @@ class PlayerActivity : ComponentActivity() {
             // appends nothing still verifies positions, so a dropped view (a
             // disposed list, a cleared container) is re-seated instead of going
             // permanently missing — the log-proven permanent blank cannot recur.
-            var slot = 1 // child index inside `list` (0 is the chip strip)
+            var slot = 0 // child index inside `list` (rows start at 0 now that
+            // the chip strip lives in the fixed header, not the list)
             fun place(v: View) {
                 val cur = list.indexOfChild(v)
                 if (cur == slot) { slot++; return }
@@ -8496,21 +8505,19 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
             // Trailing children past the desired set are detached; their
-            // views stay cached for reuse. Child 0 is the chip strip and is
-            // never trimmed.
-            while (list.childCount > newSig.size + 1) list.removeViewAt(list.childCount - 1)
+            // views stay cached for reuse.
+            while (list.childCount > newSig.size) list.removeViewAt(list.childCount - 1)
             if (rowViews.size > sources.size + 24) {
                 val keepSet = newSig.toHashSet()
                 rowViews.keys.retainAll(keepSet)
             }
             sig.clear()
             sig.addAll(newSig)
-            // Rows actually on screen, minus the chip strip at child 0 (the
-            // incremental path above only counts NEW rows): a paint that
-            // appends nothing must not read as an empty chooser, or every
-            // steady-state tick logs a false "chooser empty" and stacks
-            // another Searching card under live rows.
-            val onScreenRows = (list.childCount - 1).coerceAtLeast(0)
+            // Rows actually on screen (the incremental path above only counts
+            // new rows): a paint that appends nothing must not read as an
+            // empty chooser, or every steady-state tick logs a false "chooser
+            // empty" and stacks another Searching card under live rows.
+            val onScreenRows = list.childCount.coerceAtLeast(0)
             if (rendered == 0 && onScreenRows == 0) {
                 // Opened before the first server landed ("don't play directly"
                 // opens the chooser the instant the player does): show that the
@@ -8708,9 +8715,10 @@ class PlayerActivity : ComponentActivity() {
             var anchorOff = 0
             sv?.let { v ->
                 val y = v.scrollY
-                // Child 0 is the chip strip, not a row: anchoring on it would
-                // pin every restore to the strip instead of the row read.
-                for (ai in 1 until list.childCount) {
+                // Child 0 is the first row (the chip strip lives in the
+                // fixed header now): anchoring on it pins every restore to
+                // the row read.
+                for (ai in 0 until list.childCount) {
                     val c = list.getChildAt(ai) ?: continue
                     if (c.bottom > y + 4) {
                         anchorTag = c.tag as? String
@@ -9066,6 +9074,12 @@ class PlayerActivity : ComponentActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = (6 * density).toInt() })
+        // Pinned filter pills: fixed under the found line, above the progress
+        // bar — always reachable, never scrolling away with the rows.
+        serverHeader.addView(chipStrip, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = (4 * density).toInt() })
         searchBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             indeterminateTintList = ColorStateList.valueOf(withAlpha(accentMidColor, 0.95f))
@@ -9228,6 +9242,9 @@ class PlayerActivity : ComponentActivity() {
                 var shown = ""
                 var shownFound = ""
                 var shownSearching: Boolean? = null
+                // One automatic re-ask per open (see the quiet-and-empty
+                // block below): reset every time the chooser opens.
+                var chooserAutoRetried = false
                 while (dialog.isShowing) {
                     val text = crossSearchHint() ?: baseHint
                     if (text != shown) {
@@ -9270,6 +9287,25 @@ class PlayerActivity : ComponentActivity() {
                     } ?: 0
                     if (list.childCount <= 0 && (sources.isNotEmpty() || sessionSize > 0)) {
                         runCatching { if (dialog.isShowing) requestPaint() }
+                    }
+                    // One automatic re-ask per open when the search has gone
+                    // quiet with nothing to show: a pass that ended empty
+                    // WITHOUT a genuine finished-empty verdict was cut short
+                    // or hit a problem (cold runtime past its budget, a dropped
+                    // request) — the "same episode shows nothing once, all the
+                    // next time". The play flow retries unfinished lookups
+                    // itself; the chooser waited for a manual Retry. A genuine
+                    // "no playable server" verdict is respected, never retried.
+                    if (!chooserAutoRetried && !searchingNow && sources.isEmpty() && sessionSize == 0 && dialog.isShowing) {
+                        val lastVerdict = liveSessionId?.let { runCatching { StreamsLive.statusFlow(it).value }.getOrNull() }
+                        if (lastVerdict == null || !isNoResultVerdict(lastVerdict)) {
+                            chooserAutoRetried = true
+                            com.hikari.app.data.Logs.log(
+                                "Player",
+                                "chooser quiet and empty with no genuine empty verdict — asking once more",
+                            )
+                            liveSessionId?.let { runCatching { StreamsLive.requestRefresh(it) } }
+                        }
                     }
                     // 1.5s, not every tick: the tally line remeasures the whole
                     // panel on every change, and at 600ms that remeasure never

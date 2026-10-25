@@ -957,13 +957,11 @@ fun HomeScreen(nav: NavHostController) {
         tvHero = emptyList()
     }
     val featured = if (TvMode.current()) tvHero.ifEmpty { featuredLive } else featuredLive
-    // Television hero art is TMDB backdrops (see TvCinematicHero): start those
-    // lookups the moment the hero set is known, so the banner paints
-    // high-quality art instead of waiting for a scroll to trigger each cell.
-    if (TvMode.current()) {
-        LaunchedEffect(featured) {
-            featured.take(8).forEach { Artwork.prefetch(it); Artwork.retryMiss(it) }
-        }
+    // Warm the featured titles' TMDB artwork the moment the hero set is known,
+    // so banners (and the showcase backdrop) paint high-quality art instead
+    // of waiting for a scroll to trigger each cell.
+    LaunchedEffect(featured) {
+        featured.take(8).forEach { Artwork.prefetch(it); Artwork.retryMiss(it) }
     }
     val openGlobalSearch: () -> Unit = {
         Routes.navigateTab(nav, Routes.SEARCH)
@@ -2063,7 +2061,8 @@ internal fun ProviderPickerSheet(
     // pick tinted purple. A tap picks and closes; a hold ticks into the
     // multi-pick without closing. The user's own folders, catalogues and
     // trackers stay: the same picker, drawn full-width above the grid.
-    var showFeed by remember { mutableStateOf(false) }
+    // (The Manage-feed mixer box is TV-only — TV opens TvManageFeedDialog
+    // from its own header. The phone mixes with hold-to-multi + Done.)
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -2532,23 +2531,30 @@ internal fun ProviderPickerSheet(
                     }
                 }
                 }
-                // Bottom bar: the feed mixer, the folder save, Done, Close — a
-                // long grid must never hide the way out.
+                // Bottom bar: floating pills, no enclosing box — hold-to-multi
+                // is the phone's mixer (the Manage feed box is TV-only), so
+                // the grid above gets the room. Done saves the ticked set,
+                // Close dismisses without saving anything.
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = { showFeed = true }) { Text(tr("Manage feed")) }
                     if (multi && saveable.isNotEmpty()) {
-                        TextButton(onClick = { folderName = ""; showFolderDialog = true }) {
+                        FilledTonalButton(
+                            onClick = { folderName = ""; showFolderDialog = true },
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
                             Text(tr("Save as folder"))
                         }
                     }
                     if (multi) {
+                        Spacer(Modifier.width(8.dp))
                         Button(
                             onClick = { onDone(working) },
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         ) {
                             Icon(
                                 Icons.Filled.Check,
@@ -2559,21 +2565,17 @@ internal fun ProviderPickerSheet(
                             Text(tr("Done"))
                         }
                     }
-                    TextButton(onClick = onDismiss) { Text(tr("Close")) }
+                    Spacer(Modifier.width(8.dp))
+                    FilledTonalButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    ) {
+                        Text(tr("Close"))
+                    }
                 }
             }
         }
-    }
-    // The Home Screen Feed mixer: the same dialog TV uses (an Active/Available
-    // two-pane when the multi switch is on, a single-provider grid otherwise).
-    // Its mix IS a saved selection, so saving applies exactly like Done.
-    if (showFeed) {
-        TvManageFeedDialog(
-            providers = providers,
-            selection = if (multi) working else selection,
-            onSave = { ids -> onDone(ids) },
-            onDismiss = { showFeed = false },
-        )
     }
 }
 

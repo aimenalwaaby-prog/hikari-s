@@ -701,6 +701,38 @@ class ContentRepository(private val manager: ProviderManager) {
 
         val streamsRemembered = ConcurrentHashMap<String, RememberedStreams>()
 
+        /**
+         * Banks servers a live session actually produced but no pass ever wrote
+         * to the ledger (backed out mid-search, player torn down before a
+         * pass's teardown ran). A cancelled pass remembers nothing
+         * ([streamsForOutcome] returns `complete = false`), and the session
+         * flow it was filling is dropped on close — so a list that was already
+         * on screen vanishes, and the reopen starts from zero against a cold
+         * runtime again (the "same episode shows nothing once, everything the
+         * next time" report). This keeps what was found: the next lookup for
+         * the same title+episode merges it in like any remembered list (never
+         * instead of fresh results), scoped and expiring exactly like the
+         * pass-written records. Only ever ADDS.
+         */
+        fun rememberLiveServers(item: MediaItem, episode: Episode?, list: List<StreamSource>) {
+            if (list.isEmpty()) return
+            val key = streamsRememberedKey(item, episode)
+            val now = System.currentTimeMillis()
+            val prev = streamsRemembered[key]
+                ?.takeIf { now - it.at < REMEMBERED_STREAMS_TTL_MS }?.list.orEmpty()
+            val merged = (prev + list).distinctBy { it.identityKey() }.takeLast(256)
+            if (merged.isEmpty()) return
+            streamsRemembered[key] = RememberedStreams(merged, now)
+            if (streamsRemembered.size > REMEMBERED_STREAMS_MAX) {
+                val cutoff = now - REMEMBERED_STREAMS_TTL_MS
+                streamsRemembered.entries.removeAll { it.value.at < cutoff }
+                while (streamsRemembered.size > REMEMBERED_STREAMS_MAX) {
+                    val oldest = streamsRemembered.entries.minByOrNull { it.value.at }?.key ?: break
+                    streamsRemembered.remove(oldest)
+                }
+            }
+        }
+
         /** How long a video's known servers stay on the ledger. Deliberately
          *  long: within a watching session the user replays, picks another
          *  server, jumps episodes and comes back, and every one of those

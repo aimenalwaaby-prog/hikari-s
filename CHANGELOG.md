@@ -1,3 +1,12 @@
+## 0.11.108 (continuous build only)
+
+### Fixed (batch: never-empty servers, pinned pills, bold + full details, phone box, hero backdrop)
+- Same episode can no longer show no servers once and all the next time: servers a live session actually found are banked when the session closes (a cancelled pass remembered nothing, so backing out wiped a visible list), and the reopen merges them back in; plus the chooser re-asks once on its own when the search goes quiet and empty without a genuine finished-empty verdict — the play flow already retried, the chooser waited for a manual Retry
+- Engine filter pills (All/Nuvio/…) are pinned in the fixed header under the "Found N" line, above the progress bar — they never scroll away with the rows (child-0/anchor/fast-path/trim math moved with them)
+- Server rows read on any art: name, full detail line and engine pills are bold with the dark halo; the detail line is no longer cut at 2 lines — the row grows to fit all audio/quality/size data
+- Phone provider box: Manage feed entry removed (TV-only; the phone mixes with hold-to-multi + Done), bottom bar is floating pills with no enclosing box, grid gets the room
+- Featured showcase banner draws the TMDB backdrop behind the poster + detail (was a black box), dimmed so text reads; featured artwork is warmed on phone too, not TV-only
+
 ## 0.11.107 (continuous build only)
 
 ### Fixed (batch: 135-style layout save, TV prefetch stampede)

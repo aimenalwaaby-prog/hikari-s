@@ -161,6 +161,15 @@ object StreamsLive {
      *  resumes on the next play of the same title (see [pauseSweep]). */
     fun remove(id: String, holdSweep: Boolean = false) {
         if (holdSweep) pauseSweep(id) else releaseSweep(id)
+        // Bank whatever this session actually found before dropping it: a pass
+        // cancelled by backing out remembers nothing, so without this a list
+        // that was on screen is gone and the reopen starts from zero. The next
+        // lookup merges it back in (see [ContentRepository.rememberLiveServers]).
+        val owner = sweepOwners[id]
+        val live = sessions[id]?.value.orEmpty()
+        if (owner != null && live.isNotEmpty()) {
+            runCatching { ContentRepository.rememberLiveServers(owner.first, owner.second, live) }
+        }
         sessions.remove(id)
         episodes.remove(id)
         dones.remove(id)

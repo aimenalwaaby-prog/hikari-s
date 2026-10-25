@@ -1324,6 +1324,29 @@ private fun HeroShowcase(
                     .fillMaxWidth()
                     .clickable { onClick(item) },
             ) {
+                // TMDB backdrop behind the detail: the art lookup (TMDB first,
+                // provider art as fallback) paints over the flat surface the
+                // moment it lands, so the card is never a black box.
+                Box {
+                    val backdrop = Artwork.backdropModel(item)
+                    if (backdrop != null) {
+                        HeroArtwork(
+                            model = backdrop,
+                            wide = true,
+                            contentDescription = null,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                        // Steady dim so the poster and the text read over any
+                        // art, bright or dark.
+                        Box(
+                            Modifier.matchParentSize().background(
+                                Brush.verticalGradient(
+                                    0f to Color.Black.copy(alpha = 0.30f),
+                                    1f to Color.Black.copy(alpha = 0.55f),
+                                )
+                            )
+                        )
+                    }
                 Row(Modifier.padding(12.dp)) {
                     PosterArt(
                         model = Artwork.model(item),
@@ -1398,6 +1421,7 @@ private fun HeroShowcase(
                         }
                     }
                 }
+                } // Box: backdrop art behind the detail row above
             }
         }
         HeroDots(
