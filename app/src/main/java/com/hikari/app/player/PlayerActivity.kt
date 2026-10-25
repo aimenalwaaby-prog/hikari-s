@@ -7205,6 +7205,9 @@ class PlayerActivity : ComponentActivity() {
             if (artUrl.isNullOrBlank()) root else android.widget.FrameLayout(this).apply {
                 addView(android.widget.ImageView(this@PlayerActivity).apply {
                     scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    // Tagged so the server screen can find its own backdrop
+                    // and rotate it (see the art loop at the chooser call).
+                    tag = "glassArtView"
                     runCatching { load(artUrl) }
                 }, android.widget.FrameLayout.LayoutParams(
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
@@ -7395,10 +7398,37 @@ class PlayerActivity : ComponentActivity() {
             panelLp.height = sil + 2 * halo
             panel.layoutParams = panelLp
         }
+        // The panel must never outgrow the LIVE window: a sheet measured in
+        // one rotation (or before the chrome settled) and shown in another
+        // keeps the bigger silhouette, and its last rows render past the
+        // window edge — sliced in half with no scroll able to reach them,
+        // because the scroller is taller than the room too. fitToContent grows
+        // and shrinks the panel onto its rows, but it never questions a panel
+        // something else sized (a FILL panel returns early up there) or a room
+        // that shrank after measuring. This clamps the silhouette to the room
+        // the window REALLY has now. WRAP_CONTENT heights (short sheets) pass
+        // through untouched — the window wraps them anyway.
+        fun clampPanelToRoom() {
+            if (panelLp == null) return
+            val h = panelLp.height
+            if (h <= 0) return
+            val maxSil = roomFor(windowSize(), (panel.width - 2 * halo).coerceAtLeast(0))
+            val maxH = maxSil + 2 * halo
+            if (maxH > 0 && h > maxH) {
+                panelLp.height = maxH
+                panel.layoutParams = panelLp
+            }
+        }
         // Widths only exist after the dialog is shown, and the rows can change
         // height while it is up (a server landing mid-search), so fit now and
-        // again on every content layout change.
-        scroll.post { fitToContent() }
+        // again on every content layout change. The clamp runs first so a
+        // panel measured against a stale window never starts life overflowing
+        // it — that overflow is the half-sliced bottom row no scroll reaches.
+        scroll.post { clampPanelToRoom(); fitToContent() }
+        // One late pass: row art and the app typeface settle after the first
+        // layout and can re-wrap rows taller (the "sometimes half-cut" sheets
+        // — everything measured right, then the pixels moved).
+        scroll.postDelayed({ clampPanelToRoom(); fitToContent() }, 300)
         content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitToContent() }
 
         // A panel can OUTLIVE the window it was measured in. The player is not
@@ -7429,7 +7459,7 @@ class PlayerActivity : ComponentActivity() {
                 )
             }
             appliedSil = -1
-            scroll.post { fitToContent() }
+            scroll.post { clampPanelToRoom(); fitToContent() }
         }
         window?.decorView?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             refitToWindow()
@@ -7495,7 +7525,13 @@ class PlayerActivity : ComponentActivity() {
         // apart inside the list's own padding — mirrored here so the panel opens
         // at its natural height instead of always filling the screen. presentGlass
         // still caps this against the window, and anything longer scrolls.
-        val height = options.sumOf { if (it.sub.isNullOrBlank()) 34.0 else 46.0 }.toFloat() +
+        // Measured GENEROUSLY on purpose (40/56, not 34/46): rows run taller
+        // than the old constants on TV skins, with wrapped long titles, and
+        // with bigger text — and opening short is what sliced the last row in
+        // half. fitToContent shrinks the panel back onto the real rows right
+        // after the show, so overshooting only ever costs a frame, while
+        // undershooting cost rows.
+        val height = options.sumOf { if (it.sub.isNullOrBlank()) 40.0 else 56.0 }.toFloat() +
             options.size * 3f + 12f +
             (if (!message.isNullOrBlank()) 40f else 0f)
         val hintView = presentGlass(dialog, title, content, height, hint, iconRes, cancelable, rowHosts = listOf(list))
@@ -8324,11 +8360,11 @@ class PlayerActivity : ComponentActivity() {
                 // below); re-measured after, so the pill box follows the glyphs.
                 setTypeface(typeface, Typeface.BOLD)
                 setShadowLayer(4f, 0f, 2f, 0xAA000000.toInt())
-                dpText(if (tvMenu) 13f else 9.5f)
+                dpText(if (tvMenu) 13f else 10.5f)
             }
             val textW = ceil(tv.paint.measureText(label)).toInt()
             val w = (textW + padX * 2 + (4 * density)).toInt().coerceAtLeast((28 * density).roundToInt())
-            val h = ((if (tvMenu) 40 else 21) * density).roundToInt()
+            val h = ((if (tvMenu) 40 else 24) * density).roundToInt()
             tv.apply {
                 setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFC9D2E0.toInt())
                 background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, null)
@@ -8977,8 +9013,10 @@ class PlayerActivity : ComponentActivity() {
         val watcher: () -> Unit = { requestPaint() }
         sourcesWatchers.add(watcher)
         var hintTicker: Job? = null
+        var artLoopJob: Job? = null
         dialog.setOnDismissListener {
             hintTicker?.cancel()
+            artLoopJob?.cancel()
             sourcesWatchers.remove(watcher)
             chooserScrollListener?.let { runCatching { verticalScrollerOf(list)?.viewTreeObserver?.removeOnScrollChangedListener(it) } }
             chooserScrollListener = null
@@ -9059,8 +9097,9 @@ class PlayerActivity : ComponentActivity() {
             gravity = Gravity.CENTER_HORIZONTAL
             // Compact: the list is the point of this screen, so the header
             // takes the least room it can — small title up top, tight rows.
+            // (Tightened: every gap above the list shaved so more rows fit.)
             val hp = (12 * density).toInt()
-            setPadding(hp, (6 * density).toInt(), hp, (2 * density).toInt())
+            setPadding(hp, (4 * density).toInt(), hp, (1 * density).toInt())
         }
         if (logoModel != null) {
             serverHeader.addView(ImageView(this).apply {
@@ -9073,7 +9112,7 @@ class PlayerActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = (6 * density).toInt()
+                bottomMargin = (4 * density).toInt()
             })
         } else {
             serverHeader.addView(TextView(this).apply {
@@ -9089,12 +9128,12 @@ class PlayerActivity : ComponentActivity() {
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (4 * density).toInt() })
+            ).apply { bottomMargin = (2 * density).toInt() })
         }
         if (epPillText.isNotBlank()) {
             serverHeader.addView(TextView(this).apply {
                 text = epPillText
-                dpText(11f)
+                dpText(10f)
                 includeFontPadding = false
                 gravity = Gravity.CENTER
                 isSingleLine = true
@@ -9108,13 +9147,13 @@ class PlayerActivity : ComponentActivity() {
                     intArrayOf(withAlpha(accentStartColor, 0.55f), withAlpha(accentEndColor, 0.6f))
                 ).apply { cornerRadius = 999f }
                 val px = (10 * density).toInt()
-                setPadding(px, (4 * density).toInt(), px, (4 * density).toInt())
+                setPadding(px, (2 * density).toInt(), px, (2 * density).toInt())
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = (4 * density).toInt()
+                bottomMargin = (2 * density).toInt()
             })
         }
         val foundRow = LinearLayout(this).apply {
@@ -9134,13 +9173,13 @@ class PlayerActivity : ComponentActivity() {
         serverHeader.addView(foundRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = (6 * density).toInt() })
+        ).apply { bottomMargin = (3 * density).toInt() })
         // Pinned filter pills: fixed under the found line, above the progress
         // bar — always reachable, never scrolling away with the rows.
         serverHeader.addView(chipStrip, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = (4 * density).toInt() })
+        ).apply { bottomMargin = (2 * density).toInt() })
         searchBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             indeterminateTintList = ColorStateList.valueOf(withAlpha(accentMidColor, 0.95f))
@@ -9148,6 +9187,10 @@ class PlayerActivity : ComponentActivity() {
         serverHeader.addView(searchBar, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt()
         ))
+        // The backdrop rotation list, filled by the artUrl block below while
+        // the panel builds (the intent's plural header art, first = opening
+        // frame). The loop starts after the show, further below.
+        var artLoopUrls: List<String> = emptyList()
         // Batch 137: the footer pills are gone — the red-marked filled pill
         // plus the small outlined pill beside it. The dialog stays
         // Back-dismissable (presentGlass defaults cancelable to true, and the
@@ -9180,10 +9223,18 @@ class PlayerActivity : ComponentActivity() {
             // servers are a full-width result list, not a narrow side sheet.
             // Full-window on both phone and TV so the list reads as its own page.
             fillFractionX = 1.0f,
-            // Title art behind the panel (the TMDB/AniList/Bangumi backdrop
-            // the detail screen passes in), the desktop client's look. Null
-            // keeps the plain dimmed-video background.
-            artUrl = intent?.getStringExtra("serverArt")?.takeIf { it.isNotBlank() },
+            // Title art behind the panel: the first of the plural header
+            // backdrops (the detail screen passes them in), else the single
+            // backdrop — the desktop client's look. Null keeps the plain
+            // dimmed-video background. The rest of the list rotates every 2s
+            // (see the art loop after the show below).
+            artUrl = run {
+                val loop = intent?.getStringArrayListExtra("serverArts")
+                    ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
+                artLoopUrls = loop
+                (loop.firstOrNull()
+                    ?: intent?.getStringExtra("serverArt"))?.takeIf { it.isNotBlank() }
+            },
             // Lighter window dim so the title art reads through the scrim.
             dimAmount = 0.30f,
                 headerView = serverHeader,
@@ -9194,6 +9245,29 @@ class PlayerActivity : ComponentActivity() {
             // art, with no dark box between the header and the list.
             ghostPanel = true,
         )
+        // Backdrop rotation, every 2s like the detail header: the art view
+        // was tagged in presentGlass, and artLoopUrls (filled by the artUrl
+        // block above) holds the plural header art with the opening frame
+        // first. A single frame — or none — needs no loop. The small
+        // crossfade-free swap matches the header: Coil replaces the pixels in
+        // place, the scrim stays untouched, rows never move.
+        if (artLoopUrls.size > 1) {
+            val artView = dialog.window?.decorView
+                ?.findViewWithTag<android.widget.ImageView>("glassArtView")
+            if (artView != null) {
+                var artIndex = 0
+                artLoopJob?.cancel()
+                artLoopJob = lifecycleScope.launch {
+                    while (isActive && dialog.isShowing) {
+                        delay(2_000L)
+                        if (!dialog.isShowing) break
+                        artIndex = (artIndex + 1) % artLoopUrls.size
+                        val url = artLoopUrls[artIndex]
+                        runCatching { artView.load(url) }
+                    }
+                }
+            }
+        }
         // The dialog is on screen from here: converge the list on the live
         // session one more time, on the window's own message queue. The open
         // path above rebuilt while the views were still unattached, and any

@@ -1,3 +1,13 @@
+## 0.11.110 (continuous build only)
+
+### Fixed (batch: plugin langs, rotating server art, tighter header, gated repo help, bigger pills, uncut sheets)
+- Provider flags from the plugin itself: CloudStream MainAPI.lang is banked per provider at install and on every sync (kept when a load comes back blank) and the picker prefers it over any guesswork — Anime4i shows GB exactly like CloudStream does; other engines still show none where they declare none
+- Server Sources background rotates through the title's header backdrops every 2s, exactly like the detail header (first frame doubles as the opening art; single art = no loop, loop dies with the chooser)
+- Server header tightened upward (title/logo/ep pill/found-line/pills gaps shaved, ep pill slightly smaller) so more servers fit; engine pills themselves slightly bigger (9.5→10.5sp, 21→24dp)
+- Add-repo dialog obeys the explanations switch: the per-kind worked example above the box and the example URL inside the box are both hidden when explanations are off (generic https://… placeholder instead)
+- Search filter pills (provider scope, Type, Year, Genre) slightly bigger: 12sp medium text, roomier padding, larger icons
+- Player sheets never slice their last row in half: generous open height (rows run taller than the old 34/46 constants on TV skins and wrapped titles), the panel clamps to the live window on show/refit/late-settle, and a 300ms settling pass re-fits after art and typeface land
+
 ## 0.11.109 (continuous build only)
 
 ### Fixed (batch: floating close, server logo badges, provider flags, icon fit, rounder cards)

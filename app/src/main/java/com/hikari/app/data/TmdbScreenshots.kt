@@ -29,9 +29,18 @@ object TmdbScreenshots {
      *  often null while /images has art. */
     private val firstByKey = ConcurrentHashMap<String, String>()
 
+    /** The FULL plural list behind [firstCached], per title id — the Play
+     *  intent carries it so the server screen rotates through the same art
+     *  the detail header rotates through, every 2s. Empty until loaded. */
+    private val listByKey = ConcurrentHashMap<String, List<String>>()
+
     /** Synchronous read of the header art [backdropsFor] resolved for this
      *  title id (null until it has loaded once). Never throws. */
     fun firstCached(uniqueId: String): String? = firstByKey[uniqueId]
+
+    /** Synchronous read of the full header-art list (empty until loaded).
+     *  Never throws. */
+    fun allCached(uniqueId: String): List<String> = listByKey[uniqueId] ?: emptyList()
 
     suspend fun backdropsFor(item: MediaItem): List<String> =
         runCatching {
@@ -42,8 +51,13 @@ object TmdbScreenshots {
             when (val pick = DonghuaDetails.pick(item)) {
                 is DonghuaDetails.Pick.Anime -> {
                     val list = listOfNotNull(pick.info.banner, pick.info.cover).distinct()
-                    if (list.isNotEmpty()) firstByKey[item.uniqueId] = list.first()
-                    else firstByKey.remove(item.uniqueId)
+                    if (list.isNotEmpty()) {
+                        firstByKey[item.uniqueId] = list.first()
+                        listByKey[item.uniqueId] = list
+                    } else {
+                        firstByKey.remove(item.uniqueId)
+                        listByKey.remove(item.uniqueId)
+                    }
                     return list
                 }
                 else -> {}
@@ -54,7 +68,13 @@ object TmdbScreenshots {
             // anime/donghua title.
             val seg = if (resolved.mediaType == "movie") "movie" else "tv"
             mem[seg + "/" + resolved.tmdbId]?.let {
-                if (it.isNotEmpty()) firstByKey[item.uniqueId] = it.first()
+                if (it.isNotEmpty()) {
+                    firstByKey[item.uniqueId] = it.first()
+                    listByKey[item.uniqueId] = it
+                } else {
+                    firstByKey.remove(item.uniqueId)
+                    listByKey.remove(item.uniqueId)
+                }
                 return it
             }
             val out = withContext(Dispatchers.IO) {
@@ -84,8 +104,10 @@ object TmdbScreenshots {
             if (out.isNotEmpty()) {
                 mem[seg + "/" + resolved.tmdbId] = out
                 firstByKey[item.uniqueId] = out.first()
+                listByKey[item.uniqueId] = out
             } else {
                 firstByKey.remove(item.uniqueId)
+                listByKey.remove(item.uniqueId)
             }
             out
         }.getOrDefault(emptyList())

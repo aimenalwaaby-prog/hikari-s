@@ -2391,6 +2391,15 @@ fun DetailScreen(
                         ?: m?.backdropUrl?.takeIf { it.isNotBlank() }
                         ?: posterUrl.orEmpty()
                 )
+                // The plural header art behind "serverArt": the player rotates
+                // the server screen through these every 2s, exactly like the
+                // detail header does. Capped — the intent stays small.
+                putStringArrayListExtra(
+                    "serverArts",
+                    ArrayList(
+                        (if (m != null) TmdbScreenshots.allCached(m.uniqueId) else emptyList()).take(8)
+                    )
+                )
                 putExtra("showLoadingBanner", showLoadingCoverSetting)
                 putExtra("loadingStyle", loadingStyleSetting)
                 putExtra("loadingEffect", com.hikari.app.ui.LoadingEffects.encode(loadingEffectsSetting))

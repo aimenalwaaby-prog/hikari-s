@@ -105,6 +105,13 @@ data class ProviderConfig(
      * older install fills it in.
      */
     val nsfw: Boolean? = null,
+    /**
+     * The plugin's own declared language ("en", "hi", …) for engines whose
+     * plugins declare one (CloudStream MainAPI.lang) — the picker flag. Read
+     * off the loaded plugin at install/sync time (see Cs3ProviderSync), never
+     * guessed from names. Null = the engine declares none.
+     */
+    val lang: String? = null,
 )
 
 /** A CloudStream-style plugin repository (repo.json → pluginLists → plugin list). */

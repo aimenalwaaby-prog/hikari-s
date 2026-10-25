@@ -2364,7 +2364,11 @@ internal fun ProviderPickerSheet(
                                 .distinct().joinToString(" · ")
                                 .ifBlank { null },
                             selected = if (multi) mticked else selection.contains(mkey),
-                            flag = ProviderFlags.flagFor(pack.memberLabel(i)),
+                            // The plugin's own banked language first (CloudStream
+                            // MainAPI.lang — exact, e.g. Anime4i → GB); the
+                            // language-named pack detail only as fallback.
+                            flag = member.config.lang?.let { ProviderFlags.flagFor(it) }
+                                ?: ProviderFlags.flagFor(pack.memberLabel(i)),
                             icon = {
                                 TvProviderIcon(
                                     iconUrl = member.config.iconUrl,
@@ -2452,7 +2456,8 @@ internal fun ProviderPickerSheet(
                         },
                         tag = dupTag,
                         selected = if (multi) ticked else selection.contains(key),
-                        flag = ProviderFlags.flagForPack(pack),
+                        flag = pack.primary.config.lang?.let { ProviderFlags.flagFor(it) }
+                            ?: ProviderFlags.flagForPack(pack),
                         icon = {
                             TvProviderIcon(
                                 iconUrl = pack.primary.config.iconUrl,

@@ -1344,6 +1344,10 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                     url = file.absolutePath,
                     iconUrl = iconUrl,
                     extra = sourceUrl ?: clean,
+                    // Banked at install (see Cs3ProviderSync): the plugin's
+                    // own declared language, for the picker flag.
+                    lang = runCatching { api.lang }.getOrNull()?.trim()
+                        ?.takeIf { it.isNotBlank() },
                 )
             )
             added++
@@ -4938,6 +4942,9 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         )
                     }
                     Spacer(Modifier.height(12.dp))
+                    // The per-kind worked example is an explanation like any
+                    // other: hidden with the rest when the switch is off.
+                    if (!LocalHideHelp.current) {
                     Text(
                         when {
                             isHikari ->
@@ -4986,6 +4993,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     "https://raw.githubusercontent.com/codegeasse1/codegeasse-cloudstream-repos/builds/repo.json"
                         }
                     )
+                    } // explanations-on worked example above
                     Spacer(Modifier.height(6.dp))
                     if (!LocalHideHelp.current) {
                     Text(
@@ -5019,6 +5027,10 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                         value = repoUrl,
                         onValueChange = { repoUrl = it },
                         placeholder = {
+                            if (LocalHideHelp.current) {
+                                // Explanations off: no worked example in the box.
+                                Text("https://…")
+                            } else {
                             Text(
                                 tr(
                                     // The full example URL per kind — never a
@@ -5039,6 +5051,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
                                     }
                                 )
                             )
+                            }
                         },
                         // Wraps instead of one line: a long pasted URL shows in
                         // full rather than scrolling sideways collapsed.

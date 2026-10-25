@@ -824,19 +824,19 @@ fun SearchScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                     ) {
                         Row(
-                            Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
                                 Icons.Filled.Tune,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(5.dp))
                             Text(
                                 scopeLabel,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary,
                                 maxLines = 1,
@@ -845,7 +845,7 @@ fun SearchScreen(
                                 Icons.Filled.KeyboardArrowDown,
                                 contentDescription = tr("Choose providers"),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(16.dp),
                             )
                         }
                     }
@@ -1470,19 +1470,19 @@ private fun FilterSelectPill(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
     ) {
         Row(
-            Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 Icons.Filled.Tune,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(5.dp))
             Text(
                 label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
@@ -1492,7 +1492,7 @@ private fun FilterSelectPill(
                 Icons.Filled.KeyboardArrowDown,
                 contentDescription = contentDescription,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(16.dp),
             )
         }
     }

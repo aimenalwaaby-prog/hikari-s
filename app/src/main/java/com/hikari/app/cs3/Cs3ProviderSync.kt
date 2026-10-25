@@ -58,14 +58,21 @@ object Cs3ProviderSync {
             apis.forEachIndexed { i, api ->
                 val id = "cs3|$hash|$i"
                 val name = api.name.ifBlank { file.name.removeSuffix(".cs3") }
+                // The plugin's own declared language (MainAPI.lang — "en"
+                // unless the plugin overrides it): the picker flag. Read off
+                // the loaded plugin, never guessed from names; a blank load
+                // keeps whatever the row already had.
+                val pluginLang = runCatching { api.lang }.getOrNull()?.trim()
+                    ?.takeIf { it.isNotBlank() }
                 val prev = previousById[id]
-                val next = prev?.copy(name = name) ?: ProviderConfig(
+                val next = prev?.copy(name = name, lang = pluginLang ?: prev.lang) ?: ProviderConfig(
                     id = id,
                     name = name,
                     type = ProviderType.CS3,
                     url = path,
                     iconUrl = template.iconUrl,
                     extra = template.extra,
+                    lang = pluginLang,
                 )
                 if (next != prev) changed = true
                 kept[id] = next

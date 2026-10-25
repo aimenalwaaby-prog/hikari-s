@@ -5088,6 +5088,7 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
             // Written only when known, so existing rows (and older app versions
             // reading the same file) are untouched until something learns it.
             if (c.nsfw != null) o.put("nsfw", c.nsfw)
+            if (!c.lang.isNullOrBlank()) o.put("lang", c.lang)
             arr.put(o)
         }
         return arr.toString()
@@ -5109,6 +5110,7 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
                     enabled = o.optBoolean("enabled", true),
                     extra = o.optString("extra").ifBlank { null },
                     nsfw = if (o.has("nsfw")) o.optBoolean("nsfw") else null,
+                    lang = o.optString("lang").ifBlank { null },
                 )
             }.filter { it.id.isNotBlank() }
         } catch (e: Exception) {
