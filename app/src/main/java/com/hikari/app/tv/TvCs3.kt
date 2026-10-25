@@ -251,7 +251,10 @@ fun Cs3RatingBadges(
     modifier: Modifier = Modifier,
 ) {
     if (ratings.isEmpty() && cert.isNullOrBlank()) return
-    val ts = TvUi.scale()
+    // The user's text-size choice rides along (see TvUi.textScale): 1.0
+    // until they move the slider, so the row never changes for anyone who
+    // does not touch the setting.
+    val ts = TvUi.scale() * TvUi.textScale()
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -486,8 +489,10 @@ fun Cs3EpisodeCard(
     val accent = Cs3.accent
     // Adaptive TV type: the card's text rides the viewport scale (see
     // TvUi.scale) so a dense stick screen doesn't set 19sp titles into a
-    // card half the height, and a 4K panel doesn't whisper.
-    val ts = TvUi.scale() * textScale.coerceIn(0.5f, 1.5f)
+    // card half the height, and a 4K panel doesn't whisper — and the user's
+    // text-size choice rides along too (see TvUi.textScale, 1.0 until they
+    // move the slider).
+    val ts = TvUi.scale() * textScale.coerceIn(0.5f, 1.5f) * TvUi.textScale()
     Box(
         modifier = modifier
             .aspectRatio(16f / 9f)

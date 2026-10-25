@@ -400,6 +400,9 @@ class AppStore(private val ctx: Context) {
         val PLAYER_TV_PANELS = booleanPreferencesKey("playerTvPanels")
         /** Size of TV episode rows/cards as a percentage of the default size. */
         val TV_EPISODE_SIZE = intPreferencesKey("tvEpisodeSize")
+        /** TV text size as a percentage of the shipped sizes (50–150, 100 is
+         *  the shipped small/medium look; Settings → TV & Remote). */
+        val TV_TEXT_SCALE = intPreferencesKey("tvTextScale")
         /** Default episode layout: -1 = Auto (TV grid, phone list), 0 = list,
          *  1 = poster grid, 2 = cinematic big cards (Settings → App Layout →
          *  Episode UI). The detail header button cycles the same three and
@@ -871,6 +874,7 @@ class AppStore(private val ctx: Context) {
             K.TV_SEEDED.name,
             K.PLAYER_UI_DEFAULTS_SEEDED.name,
             K.TV_POSTER_SCALE.name,
+            K.TV_TEXT_SCALE.name,
             K.TV_DETAIL_BIG.name,
             K.TV_BLUR_DETAIL.name,
             K.TV_EPISODE_VIEW_MODE.name,
@@ -1568,7 +1572,11 @@ class AppStore(private val ctx: Context) {
     /** Which shape catalogue cards take (see [com.hikari.app.ui.PosterTypes]). */
     fun posterTypeFlow(): Flow<String> =
         store.data.map {
-            com.hikari.app.ui.PosterTypes.normalize(it[K.POSTER_TYPE]).also { v -> posterTypeMemory = v }
+            // Fresh installs start on posters (VERTICAL): AUTO means cinema
+            // on TV, which is why a new install opened on wide cards while
+            // the phone showed posters. A stored choice always wins, so
+            // nobody who picked a style ever changes.
+            com.hikari.app.ui.PosterTypes.normalize(it[K.POSTER_TYPE] ?: com.hikari.app.ui.PosterTypes.VERTICAL).also { v -> posterTypeMemory = v }
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     /**
@@ -1578,7 +1586,7 @@ class AppStore(private val ctx: Context) {
      * first frame while the store re-emits.
      */
     @Volatile
-    var posterTypeMemory: String = com.hikari.app.ui.PosterTypes.AUTO
+    var posterTypeMemory: String = com.hikari.app.ui.PosterTypes.VERTICAL
 
     suspend fun posterType(): String = posterTypeFlow().first()
 
@@ -3824,6 +3832,19 @@ fun searchExceptionOnFlow(): Flow<Boolean> =
 
     suspend fun setTvEpisodeSize(size: Int) {
         write("TV_EPISODE_SIZE") { it[K.TV_EPISODE_SIZE] = size.coerceIn(80, 160) }
+    }
+
+    /** TV text size as a percentage of the shipped sizes (50–150, 100 is the
+     *  shipped small/medium look; Settings → TV & Remote). */
+    fun tvTextScaleFlow(): Flow<Int> =
+        store.data.map { (it[K.TV_TEXT_SCALE] ?: 100).coerceIn(50, 150) }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+
+    suspend fun tvTextScale(): Int = tvTextScaleFlow().first()
+
+    suspend fun setTvTextScale(scale: Int) {
+        write("TV_TEXT_SCALE") { it[K.TV_TEXT_SCALE] = scale.coerceIn(50, 150) }
     }
 
     /** Default episode layout for every title (-1 = Auto). */

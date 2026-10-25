@@ -233,6 +233,21 @@ object TvUi {
         return (w / 960f).coerceIn(0.8f, 1.3f)
     }
 
+    /**
+     * The user's TV text size (Settings → TV & Remote → Text size) as a
+     * 0.5–1.5 multiplier; 1.0 is the shipped small/medium look. 1.0 on
+     * phones, so every use below is a phone no-op and the phone layout
+     * never moves.
+     */
+    @Composable
+    fun textScale(): Float {
+        if (!TvMode.current()) return 1f
+        val app = remember { runCatching { com.hikari.app.HikariApp.instance }.getOrNull() }
+        val pct by (app?.store?.tvTextScaleFlow()
+            ?: kotlinx.coroutines.flow.flowOf(100)).collectAsState(initial = 100)
+        return (pct.coerceIn(50, 150)) / 100f
+    }
+
     /** The left inset a page keeps clear of the rail: the collapsed width
      *  always (the expanded panel overlays the content, like the reference). */
     @Composable

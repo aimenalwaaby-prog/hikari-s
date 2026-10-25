@@ -9245,12 +9245,12 @@ class PlayerActivity : ComponentActivity() {
             // art, with no dark box between the header and the list.
             ghostPanel = true,
         )
-        // Backdrop rotation, every 2s like the detail header: the art view
-        // was tagged in presentGlass, and artLoopUrls (filled by the artUrl
-        // block above) holds the plural header art with the opening frame
-        // first. A single frame — or none — needs no loop. The small
-        // crossfade-free swap matches the header: Coil replaces the pixels in
-        // place, the scrim stays untouched, rows never move.
+        // Backdrop rotation, every 2.5s: the art view was tagged in
+        // presentGlass, and artLoopUrls (filled by the artUrl block above)
+        // holds the plural header art with the opening frame first. A single
+        // frame — or none — needs no loop. The small crossfade-free swap
+        // matches the header: Coil replaces the pixels in place, the scrim
+        // stays untouched, rows never move.
         if (artLoopUrls.size > 1) {
             val artView = dialog.window?.decorView
                 ?.findViewWithTag<android.widget.ImageView>("glassArtView")
@@ -9259,7 +9259,7 @@ class PlayerActivity : ComponentActivity() {
                 artLoopJob?.cancel()
                 artLoopJob = lifecycleScope.launch {
                     while (isActive && dialog.isShowing) {
-                        delay(2_000L)
+                        delay(2_500L)
                         if (!dialog.isShowing) break
                         artIndex = (artIndex + 1) % artLoopUrls.size
                         val url = artLoopUrls[artIndex]

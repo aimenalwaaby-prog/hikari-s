@@ -148,6 +148,10 @@ fun TvNavRail(
     // container deliberately has NO clip, so the panel reads as an overlay.
     var railFocused by remember { mutableStateOf(false) }
     val s = TvUi.scale()
+    // The user's text-size choice rides the rail labels too (see
+    // TvUi.textScale): 1.0 until they move the slider, so the rail never
+    // changes for anyone who does not touch the setting.
+    val t = TvUi.textScale()
     val railWidth by androidx.compose.animation.core.animateDpAsState(
         targetValue = if (railFocused) TvUi.RAIL_EXPANDED_WIDTH else TvUi.RAIL_WIDTH,
         label = "rail-width",
@@ -233,7 +237,7 @@ fun TvNavRail(
                         slot = slot,
                         compact = compact,
                         showLabel = railFocused,
-                        labelScale = s,
+                        labelScale = s * t,
                         onClick = { onNavigate(tab.route) },
                         onFocus = { bringIntoView(index) },
                     )

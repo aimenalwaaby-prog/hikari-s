@@ -121,7 +121,11 @@ object TmdbResolver {
         val id = item.id.trim()
         tmdbPrefixedId(id)?.let { return "id|$it|${typeHint(item)}" }
         return when {
-            id.isNotEmpty() && id.all { it.isDigit() } -> "id|$id|${typeHint(item)}"
+            // A bare numeric id is a TMDB row id ONLY for TMDB-backed items
+            // (see isTmdbBacked, and the resolveNetwork note): an extension's
+            // own numeric id must key by title, never by id, or one wrong
+            // mapping poisons every later open of that title.
+            id.isNotEmpty() && id.all { it.isDigit() } && isTmdbBacked(item) -> "id|$id|${typeHint(item)}"
             id.lowercase().startsWith("tt") -> "imdb|$id|${typeHint(item)}"
             // The ORIGINAL name is the one TMDB indexes; a display name
             // localized by the app's TMDB language would search for the wrong
@@ -134,6 +138,24 @@ object TmdbResolver {
         MediaType.MOVIE -> "movie"
         MediaType.SERIES -> if (item.rawType.contains("anime", true)) "anime" else "tv"
         MediaType.UNKNOWN -> "unknown"
+    }
+
+    /**
+     * True when this item's own id namespace IS TMDB's: a TMDB catalogue row,
+     * preset, franchise or Similar cell (`providerId = "tmdb"`,
+     * `rawType = "tmdb"`). Only those may treat a bare numeric id as a TMDB
+     * row id. Every extension (Castle TV, site scrapers, …) carries its OWN
+     * numeric ids, and resolving those as TMDB rows picked an unrelated title
+     * or nothing — which blanked the whole detail page (no hero, no details,
+     * no data) for every title of every such extension. Those fall through
+     * to the title search instead, which is the same route that already
+     * worked for them.
+     */
+    private fun isTmdbBacked(item: MediaItem): Boolean {
+        if (item.providerId.equals("tmdb", ignoreCase = true)) return true
+        if (item.providerId.startsWith("tmdb|")) return true
+        if (item.rawType.equals("tmdb", ignoreCase = true)) return true
+        return false
     }
 
     private suspend fun resolveNetwork(item: MediaItem): Resolved? {
@@ -157,7 +179,13 @@ object TmdbResolver {
         }
         tmdbPrefixedId(id)?.let { return resolveNumericId(it, item) }
         if (id.isNotEmpty() && id.all { it.isDigit() }) {
-            return resolveNumericId(id, item)
+            // TMDB-backed rows name their TMDB row directly; an extension's
+            // numeric id is its own business (see isTmdbBacked) and goes to
+            // the title search below instead of resolving as someone else.
+            if (isTmdbBacked(item)) {
+                return resolveNumericId(id, item)
+            }
+            return searchByTitle(item)
         }
         if (id.lowercase().startsWith("tt") && id.length >= 8) {
             return resolveImdb(id, item)

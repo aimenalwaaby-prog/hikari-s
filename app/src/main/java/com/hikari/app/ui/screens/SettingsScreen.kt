@@ -1103,6 +1103,7 @@ fun SettingsScreen(nav: NavHostController) {
                 SettingsFolder.TV -> {
                     item { SettingsCard(top = 2.dp) { TvDeviceCard(app) } }
                     item { SettingsCard { TvPosterSizeCard(app) } }
+                    item { SettingsCard { TvTextSizeCard(app) } }
                     item { SettingsCard { TvDetailStyleCard(app) } }
                     item { SettingsCard { TvOverscanCard(app) } }
                     item { SettingsCard { TvPerformanceCard(app) } }
@@ -3219,6 +3220,40 @@ private fun TvPosterSizeCard(app: HikariApp) {
             onValueChange = { v -> slider = v.roundToInt().toFloat() },
             onValueChangeFinished = {
                 scope.launch { runCatching { app.store.setTvPosterScale(slider.roundToInt()) } }
+            },
+        )
+    }
+}
+
+/**
+ * TV text size (Settings → TV & Remote): 50–150% of the shipped sizes, 100
+ * is the shipped small/medium look. The slider is the same D-pad-workable
+ * [SettingsSlider] the poster-size card uses, so the remote steps it 1% at
+ * a time and every press really saves (see [Modifier.tvAdjust]).
+ */
+@Composable
+private fun TvTextSizeCard(app: HikariApp) {
+    val scope = rememberCoroutineScope()
+    val flow = remember { app.store.tvTextScaleFlow() }
+    val stored by flow.collectAsState(initial = 100)
+    var slider by remember { mutableStateOf(stored.toFloat()) }
+    LaunchedEffect(stored) { slider = stored.toFloat() }
+
+    SettingsSection(
+        id = "tv.textSize",
+        icon = Icons.Filled.FormatSize,
+        title = tr("Text size"),
+        summary = slider.roundToInt().toString() + "%",
+    ) {
+        SettingsSlider(
+            label = tr("How big text is drawn on TV"),
+            value = slider,
+            valueText = slider.roundToInt().toString() + "%",
+            valueRange = 50f..150f,
+            steps = 100,
+            onValueChange = { v -> slider = v.roundToInt().toFloat() },
+            onValueChangeFinished = {
+                scope.launch { runCatching { app.store.setTvTextScale(slider.roundToInt()) } }
             },
         )
     }

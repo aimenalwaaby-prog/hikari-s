@@ -1,3 +1,13 @@
+## 0.11.111 (continuous build only)
+
+### Fixed (batch: TV pills, TMDB for every extension, TV focus, TV scroll, TMDB posters, poster default, TV text size, rotation timings)
+- TV detail action row can no longer squash: Play / save / download pills ride a full-width row at required sizes, so a cramped ancestor squeezes nothing — the pill shape survives scrolling
+- Detail enrichment is universal now: a bare numeric id only counts as a TMDB row id for TMDB-backed items — an extension's own numeric ids (Castle TV and every site scraper like it) go to the title search instead of resolving as someone else, so hero art, details, cast, trailers and Related/Similar load for them like for every other extension; the artwork cache version is bumped so titles burned by the old mapping heal immediately
+- TV detail parks the remote on Play when the page opens (like the phone row does), so focus no longer sits on the rail's Home tab and the next OK press no longer goes Home
+- TV scrolling no longer stalls on the backdrop: the rotating banner decodes w1280 art instead of full-res originals (still TMDB quality), and the server screen rotates every 2.5s while the detail banner rotates every 2s
+- Fresh installs open on poster cards on TV too (Vertical is the new default; a stored Auto/poster choice always wins, so nobody who picked a style ever changes)
+- TV text is smaller at 100 and user-scalable: detail title/meta/overview/section text stepped down to a small/medium look, and Settings → TV & Remote → Text size scales TV text 50–150% with a D-pad-workable slider — detail text, episode cards, rating badges and rail labels all ride it (phones unchanged, episode cards keep their own size slider)
+
 ## 0.11.110 (continuous build only)
 
 ### Fixed (batch: plugin langs, rotating server art, tighter header, gated repo help, bigger pills, uncut sheets)

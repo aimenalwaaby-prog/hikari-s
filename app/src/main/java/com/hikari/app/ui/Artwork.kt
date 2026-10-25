@@ -48,12 +48,12 @@ object Artwork {
 
     private const val MISS_TTL_MS = 3L * 24L * 60L * 60L * 1000L
     private const val MAX_ENTRIES = 800
-    /** v2: the v1 cache is full of MIS-misses recorded while the IMDb fallback's
-     *  title match was too strict (it rejected "Ramayana Part 2" for the catalog's
-     *  "Ramayana: Part Two"), and a miss is cached for [MISS_TTL_MS] — three days
-     *  of identical placeholder cells after the matcher was fixed. A new filename
-     *  drops those stale misses so the fix is visible immediately. */
-    private const val CACHE_FILE = "artwork-cache-v2.json"
+    /** v3: the v2 cache is full of MIS-misses recorded while extension numeric
+     *  ids resolved as TMDB rows (see TmdbResolver.isTmdbBacked) — a title the
+     *  matcher can now resolve kept showing provider art because a miss is
+     *  cached for [MISS_TTL_MS]. A new filename drops those stale misses so
+     *  the fix is visible immediately. */
+    private const val CACHE_FILE = "artwork-cache-v3.json"
 
     private val memory = ConcurrentHashMap<String, Entry>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>()

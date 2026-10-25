@@ -40,9 +40,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -1991,6 +1994,11 @@ fun DetailScreen(
     // The hero/detail type scale (see TvUi.scale): 1.0 on phones, so every
     // use below is a phone no-op and the phone layout never moves.
     val tvTypeScale = com.hikari.app.tv.TvUi.scale()
+    // The user's TV text size (Settings → TV & Remote → Text size, 50–150%,
+    // 100 = the shipped small/medium sizes below): multiplies the viewport
+    // scale, so a 4K panel still draws bigger than a stick at any setting.
+    // 1.0 on phones, so the phone layout never moves either.
+    val tvText = tvTypeScale * com.hikari.app.tv.TvUi.textScale()
     val heroStyle =
         // Big TV detail: SIDE puts poster left + info/episodes right (matches
         // the living-room layout users expect). TALL was full-width art only.
@@ -2392,8 +2400,8 @@ fun DetailScreen(
                         ?: posterUrl.orEmpty()
                 )
                 // The plural header art behind "serverArt": the player rotates
-                // the server screen through these every 2s, exactly like the
-                // detail header does. Capped — the intent stays small.
+                // the server screen through these every 2.5s (the detail
+                // header rotates every 2s). Capped — the intent stays small.
                 putStringArrayListExtra(
                     "serverArts",
                     ArrayList(
@@ -3656,19 +3664,22 @@ fun DetailScreen(
             }
         }
         // The banner resolves with the title, not the episode list: a movie
-        // has no seasons but still gets its rotating backdrop.
+        // has no seasons but still gets its rotating backdrop. w1280, not
+        // original: a full-res TMDB file is multi-MB, and decoding one of
+        // those every rotation is what stalled TV scrolling — 1280px is
+        // already more than the panel it is drawn under.
         LaunchedEffect(m?.uniqueId) {
             tvBgUrls.clear()
             tvBgIndex = 0
             val item = batchItem ?: return@LaunchedEffect
             Artwork.retryMiss(item)
-            tvBgUrls.addAll(
-                TmdbScreenshots.backdropsFor(item).map { it.replace("/w1280/", "/original/") }
-            )
+            tvBgUrls.addAll(TmdbScreenshots.backdropsFor(item))
         }
         LaunchedEffect(m?.uniqueId, tvBgUrls.size) {
+            // Banner rotation, every 2s: the title's backdrops crossfade
+            // behind the page while it is read.
             while (tvBgUrls.size > 1) {
-                delay(9_000L)
+                delay(2_000L)
                 tvBgIndex = (tvBgIndex + 1) % tvBgUrls.size
             }
         }
@@ -4643,8 +4654,13 @@ fun DetailScreen(
         ?: (PosterLoader.model(posterUrl) to false)
 
                     val tvPlayRow: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { topPad ->
+                    // The row is full-width with wrap-sized pills: a cramped
+                    // ancestor (the 0.60f hero column, a narrow viewport) must
+                    // never squeeze the pills — required* sizes hold the pill
+                    // shape and overflow instead of compressing (the "Play E1 /
+                    // heart / download squash when I scroll" report).
                     Row(
-                        Modifier.padding(top = topPad),
+                        Modifier.fillMaxWidth().padding(top = topPad),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -4659,7 +4675,8 @@ fun DetailScreen(
                             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
                             modifier = Modifier
                                 .focusRequester(playFocus)
-                                .height(46.dp)
+                                .requiredHeight(46.dp)
+                                .widthIn(min = 120.dp)
                                 .tvPress(
                                     previewPass = true,
                                     onClick = { tryPlay(detailBtnEp) }
@@ -4691,7 +4708,7 @@ fun DetailScreen(
                             FilledTonalButton(
                                 onClick = openLibrary,
                                 contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.size(48.dp).tvPress(
+                                modifier = Modifier.requiredSize(48.dp).tvPress(
                                     previewPass = true,
                                     onClick = openLibrary,
                                 )
@@ -4702,7 +4719,7 @@ fun DetailScreen(
                             OutlinedButton(
                                 onClick = openLibrary,
                                 contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.size(48.dp).tvPress(
+                                modifier = Modifier.requiredSize(48.dp).tvPress(
                                     previewPass = true,
                                     onClick = openLibrary,
                                 )
@@ -4713,7 +4730,7 @@ fun DetailScreen(
                         FilledTonalButton(
                             onClick = { openDlChoice() },
                             contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.size(48.dp).tvPress(
+                            modifier = Modifier.requiredSize(48.dp).tvPress(
                                 previewPass = true,
                                 onClick = { openDlChoice() }
                             )
@@ -4736,7 +4753,7 @@ fun DetailScreen(
                                     )
                                 },
                                 contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.size(48.dp).tvPress(
+                                modifier = Modifier.requiredSize(48.dp).tvPress(
                                     previewPass = true,
                                     onClick = {
                                         openYouTubeVideo(
@@ -4754,6 +4771,15 @@ fun DetailScreen(
                     }
     val heroBlock: @Composable () -> Unit = {
         if (isTvLayout) {
+            // The remote lands on Play the moment the page opens (TV parity
+            // with the phone action row below, which does the same): without
+            // this nothing in the page took focus, so it sat on the nav
+            // rail's Home tab and the next OK press went Home instead of
+            // into this page.
+            LaunchedEffect(Unit) {
+                delay(150L)
+                runCatching { playFocus.requestFocus() }
+            }
             // TV detail is a single cinematic hero: artwork, title, metadata,
             // overview and the primary action live in the same focusable scene.
             val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.52f else 0.60f).dp
@@ -5061,7 +5087,7 @@ fun DetailScreen(
                         Text(
                             tvProviderName,
                             color = Color(0xFF4DA3FF),
-                            fontSize = 13.sp,
+                            fontSize = 11.sp * tvText,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -5072,7 +5098,7 @@ fun DetailScreen(
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxWidth(if (episodePosterStyle) 0.62f else 0.58f).heightIn(max = 84.dp))
                     } else {
-                        Text(artTitle, fontSize = 28.sp * tvTypeScale, lineHeight = 34.sp * tvTypeScale, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 24.sp * tvText, lineHeight = 29.sp * tvText, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(8.dp))
@@ -5102,7 +5128,7 @@ fun DetailScreen(
                         ) {
                             if (tvMetaHead.isNotBlank()) Text(
                                 tvMetaHead,
-                                fontSize = 13.sp * tvTypeScale,
+                                fontSize = 11.sp * tvText,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.88f),
                                 maxLines = 1,
@@ -5110,7 +5136,7 @@ fun DetailScreen(
                             if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
                             if (tvMetaTail.isNotBlank()) Text(
                                 (if (tvMetaHead.isNotBlank() || !tvCert.isNullOrBlank()) "•  " else "") + tvMetaTail,
-                                fontSize = 13.sp * tvTypeScale,
+                                fontSize = 11.sp * tvText,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.72f),
                                 maxLines = 1,
@@ -5152,8 +5178,8 @@ fun DetailScreen(
                         var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
                         Text(
                             displayOverview!!,
-                            fontSize = 14.sp * tvTypeScale,
-                            lineHeight = 20.sp * tvTypeScale,
+                            fontSize = 12.sp * tvText,
+                            lineHeight = 17.sp * tvText,
                             color = Color.White.copy(alpha = 0.88f),
                             maxLines = if (tvOverviewFull) Int.MAX_VALUE else 2,
                             overflow = TextOverflow.Ellipsis,
@@ -5323,14 +5349,14 @@ fun DetailScreen(
                                         if (seasons.size > 1) {
                                             Text(
                                                 text = tr("Season %s").replace("%s", activeSeason.toString()),
-                                                fontSize = 18.sp * tvTypeScale,
+                                                fontSize = 16.sp * tvText,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White,
                                             )
                                         } else {
                                             Text(
                                                 text = tr("Episodes"),
-                                                fontSize = 18.sp * tvTypeScale,
+                                                fontSize = 16.sp * tvText,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White,
                                             )
@@ -5339,7 +5365,7 @@ fun DetailScreen(
                                             Text(
                                                 text = "•   ${shownEps.size} " + if (shownEps.size == 1) tr("Episode") else tr("Episodes"),
                                                 color = Color.White.copy(alpha = 0.55f),
-                                                fontSize = 14.sp * tvTypeScale,
+                                                fontSize = 12.sp * tvText,
                                                 fontWeight = FontWeight.Medium,
                                             )
                                         }
@@ -9313,7 +9339,10 @@ private fun EpisodePosterCard(
     /** Anti-spoiler: blur the still and mask the title/overview. */
     hideSpoilers: Boolean = false,
 ) {
-    val s = sizeScale.coerceIn(0.8f, 1.6f)
+    // The card content rides the episode size AND the user's text size (see
+    // TvUi.textScale — 1.0 on phones and until the slider moves, so nothing
+    // changes for anyone who does not touch it).
+    val s = (sizeScale * com.hikari.app.tv.TvUi.textScale()).coerceIn(0.5f, 2.4f)
     val tokens = rememberGlassTokens()
     // Television wears the desktop card language (8dp corners,
     // elevated-black thumb, hairline edge, white/muted text).
@@ -9517,7 +9546,10 @@ private fun EpisodeBigCard(
     /** Anti-spoiler: blur the still and mask the title/overview. */
     hideSpoilers: Boolean = false,
 ) {
-    val s = sizeScale.coerceIn(0.8f, 1.6f)
+    // The card content rides the episode size AND the user's text size (see
+    // TvUi.textScale — 1.0 on phones and until the slider moves, so nothing
+    // changes for anyone who does not touch it).
+    val s = (sizeScale * com.hikari.app.tv.TvUi.textScale()).coerceIn(0.5f, 2.4f)
     val unaired = isEpisodeUnaired(ep.released)
     val tokens = rememberGlassTokens()
     Column(
@@ -9700,7 +9732,10 @@ private fun EpisodeRow(
      *  watching, 2 = watched. Drawn as a small pill under the buttons. */
     watchState: Int = 0,
 ) {
-    val s = sizeScale.coerceIn(0.8f, 1.6f)
+    // The card content rides the episode size AND the user's text size (see
+    // TvUi.textScale — 1.0 on phones and until the slider moves, so nothing
+    // changes for anyone who does not touch it).
+    val s = (sizeScale * com.hikari.app.tv.TvUi.textScale()).coerceIn(0.5f, 2.4f)
     val tokens = rememberGlassTokens()
     // Television rows sit flat on the black page (desktop language) with
     // white/muted text; phones keep the near-page fill.
