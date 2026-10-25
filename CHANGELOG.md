@@ -1,3 +1,12 @@
+## 0.11.109 (continuous build only)
+
+### Fixed (batch: floating close, server logo badges, provider flags, icon fit, rounder cards)
+- Phone provider box: Close (and Done / Save as folder in multi) now floats over the list's bottom end with a soft shadow — the dead strip that existed only to hold the Close button is gone, the grid runs the full height underneath with bottom clearance so the last row scrolls clear
+- Server rows: codec / source / audio logo badges (x265/HEVC, HD, DD+, DTS, Atmos, WEB-DL, Blu-ray, DV/HDR, resolutions …) plus small text pills for facts with no logo artwork — the same detector and artwork the card variant already used, now on the live row; shown for every fact the name/details/url already state, nothing invented
+- Provider rows: country flag beside the extension name for extensions whose language is known (Aniyomi/manga language packs and members — Bengali, Hindi, English …), nothing guessed where no language is stored
+- Extension icons: failed or white loads no longer leave a blank white disc (letter tile fallback on a dark tile), logos draw whole with fit + padding instead of being cropped off the edge; TV reference cards share the same fixed icon
+- Rounder provider UI: cards and the phone dialog use 20dp corners, tighter dialog padding/spacing shows more rows
+
 ## 0.11.108 (continuous build only)
 
 ### Fixed (batch: never-empty servers, pinned pills, bold + full details, phone box, hero backdrop)

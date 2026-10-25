@@ -93,6 +93,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -145,6 +146,7 @@ import com.hikari.app.tv.TvUi
 import com.hikari.app.ui.Artwork
 import com.hikari.app.ui.FlagIcon
 import com.hikari.app.ui.PosterLoader
+import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.ui.ProviderPacks
 import com.hikari.app.ui.rememberVisibleItems
@@ -2068,7 +2070,7 @@ internal fun ProviderPickerSheet(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
             modifier = Modifier
@@ -2077,11 +2079,15 @@ internal fun ProviderPickerSheet(
                 .fillMaxHeight(0.92f)
                 .heightIn(min = 240.dp, max = 780.dp),
         ) {
+            // The action pills float OVER the list (see the overlay below):
+            // the grid runs the full height underneath, so no rows are lost
+            // to a dead strip kept alive only by the Close button.
+            Box(Modifier.fillMaxWidth()) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -2192,8 +2198,11 @@ internal fun ProviderPickerSheet(
                 }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 160.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    // Bottom clearance for the floating pills below: the last
+                    // row scrolls fully clear of them, like a footer pad.
+                    contentPadding = PaddingValues(bottom = 84.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f, fill = false)
@@ -2356,6 +2365,7 @@ internal fun ProviderPickerSheet(
                                 .distinct().joinToString(" · ")
                                 .ifBlank { null },
                             selected = if (multi) mticked else selection.contains(mkey),
+                            flag = ProviderFlags.flagFor(pack.memberLabel(i)),
                             icon = {
                                 TvProviderIcon(
                                     iconUrl = member.config.iconUrl,
@@ -2443,6 +2453,7 @@ internal fun ProviderPickerSheet(
                         },
                         tag = dupTag,
                         selected = if (multi) ticked else selection.contains(key),
+                        flag = ProviderFlags.flagForPack(pack),
                         icon = {
                             TvProviderIcon(
                                 iconUrl = pack.primary.config.iconUrl,
@@ -2531,12 +2542,16 @@ internal fun ProviderPickerSheet(
                     }
                 }
                 }
-                // Bottom bar: floating pills, no enclosing box — hold-to-multi
-                // is the phone's mixer (the Manage feed box is TV-only), so
-                // the grid above gets the room. Done saves the ticked set,
-                // Close dismisses without saving anything.
+                // Floating action pills, OVERLAID on the grid's bottom end —
+                // not a bar, so they reserve no space: the grid above runs
+                // full height underneath (its bottom content padding clears
+                // them). Done saves the ticked set, Close dismisses without
+                // saving anything. A soft shadow lifts them off the list.
+                } // Column: the grid's own height ends here
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 20.dp, bottom = 16.dp),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -2545,6 +2560,7 @@ internal fun ProviderPickerSheet(
                             onClick = { folderName = ""; showFolderDialog = true },
                             shape = RoundedCornerShape(50),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.shadow(6.dp, RoundedCornerShape(50)),
                         ) {
                             Text(tr("Save as folder"))
                         }
@@ -2555,6 +2571,7 @@ internal fun ProviderPickerSheet(
                             onClick = { onDone(working) },
                             shape = RoundedCornerShape(50),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.shadow(6.dp, RoundedCornerShape(50)),
                         ) {
                             Icon(
                                 Icons.Filled.Check,
@@ -2570,13 +2587,14 @@ internal fun ProviderPickerSheet(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(50),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.shadow(6.dp, RoundedCornerShape(50)),
                     ) {
                         Text(tr("Close"))
                     }
                 }
-            }
-        }
-    }
+            } // Box
+        } // Surface
+    } // Dialog
 }
 
 /**

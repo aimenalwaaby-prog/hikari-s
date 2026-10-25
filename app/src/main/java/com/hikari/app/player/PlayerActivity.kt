@@ -6305,6 +6305,67 @@ class PlayerActivity : ComponentActivity() {
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
             })
+            // Logo + fact badges, the reference Sources look: every parsed
+            // fact with real logo artwork (4K, DV, Atmos, HEVC, Blu-ray, DTS,
+            // DD+, TrueHD, 1080p, …) draws its logo; the rest keep small text
+            // pills. Never invented — only what name/details/url state.
+            val allChips = com.hikari.app.data.ServerMeta.chipsOf(src.name, src.details, src.url)
+            val iconChips = allChips.filter { com.hikari.app.data.ServerMeta.badgeIconRes(it) != 0 }.distinct().take(5)
+            if (iconChips.isNotEmpty()) {
+                addView(LinearLayout(this@PlayerActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    for ((bi, chip) in iconChips.withIndex()) {
+                        addView(ImageView(this@PlayerActivity).apply {
+                            setImageResource(com.hikari.app.data.ServerMeta.badgeIconRes(chip))
+                            scaleType = ImageView.ScaleType.FIT_CENTER
+                            adjustViewBounds = true
+                            contentDescription = chip
+                        }, LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT, (18 * density).toInt()
+                        ).apply {
+                            if (bi > 0) marginStart = (7 * density).toInt()
+                        })
+                    }
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (5 * density).toInt() })
+            }
+            // Fact chips without logo artwork, greedily wrapped into rows by
+            // estimated width (same measure as the card variant above).
+            val textChips = allChips.filter { com.hikari.app.data.ServerMeta.badgeIconRes(it) == 0 }.take(6)
+            if (textChips.isNotEmpty()) {
+                var cur = LinearLayout(this@PlayerActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                var used = 0
+                val maxW = 300
+                var firstRow = true
+                for (c in textChips) {
+                    val w = c.length * 7 + 18
+                    if (used > 0 && used + w > maxW) {
+                        addView(cur, LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = ((if (firstRow) 5 else 4) * density).toInt() })
+                        firstRow = false
+                        cur = LinearLayout(this@PlayerActivity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                        }
+                        used = 0
+                    }
+                    cur.addView(serverChip(c), LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        if (used > 0) marginStart = (6 * density).toInt()
+                    })
+                    used += w
+                }
+                addView(cur, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = ((if (firstRow) 5 else 4) * density).toInt() })
+            }
             if (metaLine.isNotBlank()) {
                 addView(TextView(this@PlayerActivity).apply {
                     text = metaLine

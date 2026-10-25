@@ -376,15 +376,23 @@ fun TvProviderIcon(
     size: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
 ) {
-    if (!iconUrl.isNullOrBlank()) {
+    // White-on-white reads as an empty tile (a white logo on the old white
+    // disc, or a failed load that never replaces it), so the tile is dark and
+    // a failed load falls back to the letter tile below — the row never shows
+    // a blank disc. Fit (never Crop) with a little padding, so a wide or tall
+    // logo draws whole instead of bleeding off the edge.
+    var failed by remember(iconUrl) { mutableStateOf(false) }
+    if (!iconUrl.isNullOrBlank() && !failed) {
         AsyncImage(
             model = iconUrl,
             contentDescription = name,
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.Fit,
+            onError = { failed = true },
             modifier = modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(Color.White),
+                .background(Color(0xFF232833))
+                .padding(4.dp),
         )
     } else {
         Box(
@@ -754,29 +762,11 @@ private fun RefProviderCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp),
         ) {
-            if (!iconUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = iconUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(if (compact) 22.dp else 28.dp).clip(CircleShape).background(Color.White),
-                )
-            } else {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    modifier = Modifier.size(if (compact) 22.dp else 28.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = iconName.take(1).uppercase(),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = if (compact) 10.sp else 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-            }
+            TvProviderIcon(
+                iconUrl = iconUrl,
+                name = iconName,
+                size = if (compact) 22.dp else 28.dp,
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1863,10 +1853,13 @@ fun TvProviderCard(
     onHold: (() -> Unit)? = null,
     /** Duplicate-name tag ("(repo)"). */
     tag: String? = null,
+    /** Country flag ("🇮🇳") drawn before the name, null when the row's
+     *  language is not known (see ProviderFlags — never guessed). */
+    flag: String? = null,
     /** Phone picker actions (pin, pack caret) — null on TV, which has none. */
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(20.dp)
     // Fresh lambdas for the gesture below (see PickerRow's note): the touch
     // hold's pointerInput key never changes, so without these every tap after
     // the first recomposition would compute from a dead snapshot.
@@ -1913,6 +1906,14 @@ fun TvProviderCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (!flag.isNullOrBlank()) {
+                    Text(
+                        flag,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.width(5.dp))
+                }
                 Text(
                     name,
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),

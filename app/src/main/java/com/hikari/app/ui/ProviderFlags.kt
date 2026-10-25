@@ -1,171 +1,90 @@
 package com.hikari.app.ui
 
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-
 /**
- * Country/language flags for extension rows — REAL flag images, not text.
+ * Country flags for provider rows, the CloudStream extension-list look: one
+ * flag beside the extension's name naming which language the extension serves.
  *
- * The image is the country's actual flag (flagcdn, w80 PNG) with the emoji
- * flag as the offline fallback, so a row never shows a broken tile. The
- * mapping reads what the repo listing (or the installed name) already says —
- * language words ("Hindi", "English", "Bangla", …), Bangladesh markers
- * ("BD", "Bangla", "Dhaka", "BDIX") and a small table of well-known
- * extension names whose country the name alone declares. Anything that names
- * no country gets NO flag — never guessed.
+ * Mapped from LANGUAGE, not guessed from names: an Aniyomi/manga pack's member
+ * details already ARE the language names (see [ProviderPacks] — "Bengali",
+ * "Hindi", …), so member rows and uniform-language packs resolve a flag. Every
+ * other engine stores no per-extension language, and a missing flag is honest
+ * where a guessed one would be a lie — [flagFor] returns null there and the
+ * row draws exactly as before.
  */
 object ProviderFlags {
-    /** Real flag image for an ISO code ("BD" → flagcdn w80 PNG). */
-    fun urlOf(code: String): String =
-        "https://flagcdn.com/w80/" + code.lowercase() + ".png"
 
-    /** Emoji flag for an ISO code — the offline fallback, never networked. */
-    fun emojiOf(code: String): String {
-        val up = code.uppercase()
-        if (up.length != 2 || up.any { it !in 'A'..'Z' }) return "🏳"
-        return String(Character.toChars(0x1F1E6 + (up[0] - 'A'))) +
-            String(Character.toChars(0x1F1E6 + (up[1] - 'A')))
-    }
-
-    private fun has(hay: String, vararg words: String): Boolean = words.any { w ->
-        Regex("(^|[^a-z])" + Regex.escape(w) + "([^a-z]|$)").containsMatchIn(hay)
-    }
-
-    // Well-known installed names whose country the name alone declares (the
-    // reference provider list flags these: Emwbd/Cinefreak/Mlsbd/Banglaplex/
-    // FibWatch/MovieLinkBD/BDIX on BD; Rtally/Movies4u/Castle/HDHub4U on IN;
-    // UHDmovies/4K HDHUB on GB). Static name knowledge, not per-extension
-    // behaviour — the rows play exactly as before either way.
-    private fun aliasOf(hay: String): String? = when {
-        "hdhub4u" in hay -> "IN"
-        "4khdhub" in hay -> "GB"
-        "uhdmovies" in hay -> "GB"
-        "movies4u" in hay -> "IN"
-        "rtally" in hay -> "IN"
-        "castle tv" in hay || "castletv" in hay -> "IN"
-        "cinefreak" in hay -> "BD"
-        "fibwatch" in hay -> "BD"
-        "emwbd" in hay -> "BD"
-        "mlsbd" in hay -> "BD"
-        "movielinkbd" in hay -> "BD"
-        "banglaplex" in hay -> "BD"
-        "bdix" in hay -> "BD"
-        else -> null
-    }
-
-    /** (match words, ISO code, language label), highest priority first. */
-    private val flagTable: List<Triple<List<String>, String, String>> = listOf(
-        Triple(listOf("hindi", "hindi-audio", "bollywood"), "IN", "Hindi"),
-        Triple(listOf("tamil"), "IN", "Tamil"),
-        Triple(listOf("telugu"), "IN", "Telugu"),
-        Triple(listOf("malayalam"), "IN", "Malayalam"),
-        Triple(listOf("kannada"), "IN", "Kannada"),
-        Triple(listOf("bengali"), "IN", "Bengali"),
-        Triple(listOf("marathi", "punjabi", "gujarati", "desi"), "IN", "Desi"),
-        Triple(listOf("english", "hollywood"), "GB", "English"),
-        Triple(listOf("spanish", "espanol", "español", "latino"), "ES", "Spanish"),
-        Triple(listOf("french", "francais", "français"), "FR", "French"),
-        Triple(listOf("german", "deutsch"), "DE", "German"),
-        Triple(listOf("italian"), "IT", "Italian"),
-        Triple(listOf("portuguese", "brasileiro"), "BR", "Portuguese"),
-        Triple(listOf("russian"), "RU", "Russian"),
-        Triple(listOf("turkish"), "TR", "Turkish"),
-        Triple(listOf("arabic"), "SA", "Arabic"),
-        Triple(listOf("japanese", "anime"), "JP", "Japanese"),
-        Triple(listOf("korean", "kdrama", "k-drama"), "KR", "Korean"),
-        Triple(listOf("chinese", "donghua", "cdrama", "c-drama"), "CN", "Chinese"),
-        Triple(listOf("indonesian", "indo"), "ID", "Indonesian"),
-        Triple(listOf("vietnamese"), "VN", "Vietnamese"),
-        Triple(listOf("thai"), "TH", "Thai"),
+    private val byToken: Map<String, String> = mapOf(
+        "en" to "🇬🇧", "eng" to "🇬🇧", "english" to "🇬🇧",
+        "hi" to "🇮🇳", "hin" to "🇮🇳", "hindi" to "🇮🇳",
+        "bn" to "🇮🇳", "ben" to "🇮🇳", "bengali" to "🇮🇳", "bangla" to "🇮🇳",
+        "ta" to "🇮🇳", "tam" to "🇮🇳", "tamil" to "🇮🇳",
+        "te" to "🇮🇳", "tel" to "🇮🇳", "telugu" to "🇮🇳",
+        "ml" to "🇮🇳", "mal" to "🇮🇳", "malayalam" to "🇮🇳",
+        "mr" to "🇮🇳", "mar" to "🇮🇳", "marathi" to "🇮🇳",
+        "kn" to "🇮🇳", "kan" to "🇮🇳", "kannada" to "🇮🇳",
+        "gu" to "🇮🇳", "guj" to "🇮🇳", "gujarati" to "🇮🇳",
+        "pa" to "🇮🇳", "pan" to "🇮🇳", "punjabi" to "🇮🇳",
+        "ur" to "🇵🇰", "urd" to "🇵🇰", "urdu" to "🇵🇰",
+        "ne" to "🇳🇵", "nep" to "🇳🇵", "nepali" to "🇳🇵",
+        "si" to "🇱🇰", "sin" to "🇱🇰", "sinhala" to "🇱🇰", "sinhalese" to "🇱🇰",
+        "ar" to "🇸🇦", "ara" to "🇸🇦", "arabic" to "🇸🇦",
+        "es" to "🇪🇸", "spa" to "🇪🇸", "spanish" to "🇪🇸", "espanol" to "🇪🇸", "español" to "🇪🇸",
+        "fr" to "🇫🇷", "fre" to "🇫🇷", "fra" to "🇫🇷", "french" to "🇫🇷",
+        "de" to "🇩🇪", "ger" to "🇩🇪", "deu" to "🇩🇪", "german" to "🇩🇪", "deutsch" to "🇩🇪",
+        "pt" to "🇧🇷", "por" to "🇧🇷", "portuguese" to "🇧🇷",
+        "it" to "🇮🇹", "ita" to "🇮🇹", "italian" to "🇮🇹",
+        "ru" to "🇷🇺", "rus" to "🇷🇺", "russian" to "🇷🇺",
+        "ja" to "🇯🇵", "jpn" to "🇯🇵", "japanese" to "🇯🇵",
+        "ko" to "🇰🇷", "kor" to "🇰🇷", "korean" to "🇰🇷",
+        "zh" to "🇨🇳", "zho" to "🇨🇳", "chi" to "🇨🇳", "chinese" to "🇨🇳",
+        "tr" to "🇹🇷", "tur" to "🇹🇷", "turkish" to "🇹🇷",
+        "id" to "🇮🇩", "ind" to "🇮🇩", "indonesian" to "🇮🇩",
+        "ms" to "🇲🇾", "may" to "🇲🇾", "msa" to "🇲🇾", "malay" to "🇲🇾",
+        "th" to "🇹🇭", "tha" to "🇹🇭", "thai" to "🇹🇭",
+        "vi" to "🇻🇳", "vie" to "🇻🇳", "vietnamese" to "🇻🇳",
+        "fil" to "🇵🇭", "filipino" to "🇵🇭", "tagalog" to "🇵🇭",
+        "tl" to "🇵🇭",
+        "nl" to "🇳🇱", "dut" to "🇳🇱", "nld" to "🇳🇱", "dutch" to "🇳🇱",
+        "pl" to "🇵🇱", "pol" to "🇵🇱", "polish" to "🇵🇱",
+        "uk" to "🇺🇦", "ukr" to "🇺🇦", "ukrainian" to "🇺🇦",
+        "fa" to "🇮🇷", "per" to "🇮🇷", "fas" to "🇮🇷", "persian" to "🇮🇷", "farsi" to "🇮🇷",
+        "he" to "🇮🇱", "heb" to "🇮🇱", "hebrew" to "🇮🇱",
+        "el" to "🇬🇷", "gre" to "🇬🇷", "ell" to "🇬🇷", "greek" to "🇬🇷",
+        "ro" to "🇷🇴", "rum" to "🇷🇴", "ron" to "🇷🇴", "romanian" to "🇷🇴",
+        "hu" to "🇭🇺", "hun" to "🇭🇺", "hungarian" to "🇭🇺",
+        "cs" to "🇨🇿", "cze" to "🇨🇿", "ces" to "🇨🇿", "czech" to "🇨🇿",
+        "sv" to "🇸🇪", "swe" to "🇸🇪", "swedish" to "🇸🇪",
+        "no" to "🇳🇴", "nor" to "🇳🇴", "norwegian" to "🇳🇴",
+        "da" to "🇩🇰", "dan" to "🇩🇰", "danish" to "🇩🇰",
+        "fi" to "🇫🇮", "fin" to "🇫🇮", "finnish" to "🇫🇮",
     )
 
     /**
-     * (ISO code, language label) for the given texts, or null when nothing
-     * names a country. Bangladesh is checked before the Indian languages:
-     * "Bangla" is Bangladesh's own word while "Bengali" alone stays Indian.
-     *
-     * Two passes: whole-word matches first ("Hindi" in "Hindi Audio"), then
-     * substring matches for longer tokens ("donghua" inside "DonghuaStream",
-     * "anime" inside "AllAnime" — the word-boundary pass misses names that
-     * glue the token to the rest). Short tokens stay word-only so "in" or
-     * "bd" can never match inside an unrelated word. Anything that names no
-     * country still gets NO flag — matched from real tokens only, never
-     * guessed.
+     * The flag for one language token ("Hindi", "hi", "hi-IN" all resolve), or
+     * null when the token names no language with a flag — "Default",
+     * "Source 1", "Multi", "All" and friends stay flagless.
      */
-    fun pairOf(vararg texts: String?): Pair<String, String>? {
-        val hay = texts.filterNotNull().joinToString(" ").lowercase()
-        if (hay.isBlank()) return null
-        aliasOf(hay)?.let { code ->
-            return code to when (code) {
-                "BD" -> "Bangla"
-                "GB" -> "English"
-                else -> "Desi"
-            }
-        }
-        if (has(hay, "bangladesh", "bangla", "dhaka") ||
-            Regex("""bd([^a-z]|$)""").containsMatchIn(hay)
-        ) return "BD" to "Bangla"
-        for ((words, code, label) in flagTable) {
-            if (words.any { has(hay, it) }) return code to label
-        }
-        for ((words, code, label) in flagTable) {
-            if (words.any { it.length >= 4 && it in hay }) return code to label
-        }
-        return null
+    fun flagFor(token: String): String? {
+        // Tags arrive as "hi", "hi-IN" and "hi_IN" — the primary subtag is the
+        // language; the region is not what separates two feeds of one site.
+        val code = token.trim().lowercase().substringBefore('-').substringBefore('_')
+        if (code.isBlank()) return null
+        return byToken[code]
     }
-
-    /** ISO country code for the given texts, or null when none is named. */
-    fun codeOf(vararg texts: String?): String? = pairOf(*texts)?.first
 
     /**
-     * "🇮🇳 Hindi"-style label for the given texts, or null when none is
-     * named — the same strings the extension rows always printed.
+     * The flag for a collapsed pack row: its members' flag when EVERY named
+     * member resolves to the SAME one, else null (a mixed-language pack gets
+     * no single flag — its members carry their own once expanded).
      */
-    fun flagOf(vararg texts: String?): String? {
-        val (code, label) = pairOf(*texts) ?: return null
-        return emojiOf(code) + " " + label
-    }
-}
-
-/**
- * A real flag image ([ProviderFlags.urlOf]) with the emoji flag as the
- * offline fallback, so the row shows a flag with or without network.
- */
-@Composable
-fun FlagIcon(
-    code: String,
-    size: Dp,
-    modifier: Modifier = Modifier,
-) {
-    var failed by remember(code) { mutableStateOf(false) }
-    if (failed) {
-        Text(
-            ProviderFlags.emojiOf(code),
-            fontSize = (size.value * 0.72f).sp,
-            modifier = modifier,
-        )
-    } else {
-        AsyncImage(
-            model = ProviderFlags.urlOf(code),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            onError = { failed = true },
-            modifier = modifier
-                .size(size)
-                .clip(RoundedCornerShape(4.dp)),
-        )
+    fun flagForPack(pack: ProviderPack): String? {
+        if (!pack.isPack || pack.cross) return null
+        var flag: String? = null
+        for (i in pack.members.indices) {
+            val f = flagFor(pack.memberLabel(i)) ?: return null
+            if (flag == null) flag = f
+            else if (flag != f) return null
+        }
+        return flag
     }
 }
