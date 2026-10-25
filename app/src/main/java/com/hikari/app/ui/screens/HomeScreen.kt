@@ -435,10 +435,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
      *
      * The selection is what Home draws from, and it survives leaving the screen
      * (and a restart) through [com.hikari.app.data.AppStore.setHomeProviders].
+     *
+     * Returns true when the pick actually changed (the rebuild is already
+     * launched): callers that also need a rebuild when NOTHING changed (the
+     * feed mixer's catalog switches/reorder write to the store, not the pick)
+     * must call [refreshFeed] themselves — never unconditionally after this,
+     * or the two loads race: the second cancels the first mid-flight and, on
+     * a forced refresh with the screen just cleared, parks it on a blank page
+     * with the spinner suppressed.
      */
-    fun setSelection(ids: List<String>) {
+    fun setSelection(ids: List<String>): Boolean {
         val clean = ids.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-        if (clean == _selection.value) return
+        if (clean == _selection.value) return false
         // One line per applied pick: the next "it shows the old catalogue"
         // report can be told apart from a tap that never arrived.
         com.hikari.app.data.Logs.log(
@@ -446,8 +454,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {    private val m
             "pick=" + (if (clean.isEmpty()) "all" else clean.joinToString(",")),
         )
         applySelection(clean)
+        // Clear the previous pick's shelves SYNCHRONOUSLY: the async load below
+        // first waits for the provider list (up to 20s) and fetches, and until
+        // it paints the old provider's rows sit on screen with no loading
+        // state — which reads as "selecting another provider still shows the
+        // old catalogue". A previously visited pick paints its cache instantly.
+        val key = if (clean.isEmpty()) "all" else clean.joinToString(",")
+        val cached = homeCache[key]
+        if (cached != null) {
+            _rows.value = cached
+            _loading.value = false
+        } else {
+            _rows.value = emptyList()
+            _loading.value = true
+        }
         viewModelScope.launch { store.setHomeProviders(clean.toSet()) }
         viewModelScope.launch { loadInternal() }
+        return true
     }
 
     /**
@@ -1622,10 +1645,12 @@ fun HomeScreen(nav: NavHostController) {
             selection = selection,
             onSave = { ids ->
                 showTvManageFeed = false
-                vm.setSelection(ids)
-                // Catalog switches/reorder write to the store, not the pick:
-                // rebuild even when the mix itself did not change.
-                vm.refreshFeed()
+                // Rebuild only when the mix itself did not change (catalog
+                // switches/reorder write to the store, not the pick): a pick
+                // change already rebuilds inside setSelection, and a second
+                // forced load would cancel that one mid-flight and park the
+                // just-cleared screen on blank with no spinner.
+                if (!vm.setSelection(ids)) vm.refreshFeed()
             },
             onDismiss = { showTvManageFeed = false },
         )

@@ -1,3 +1,10 @@
+## 0.11.106 (continuous build only)
+
+### Fixed (batch: provider switch stale rows, poster-shape first frame)
+- Switching provider can no longer leave the old provider's shelves on screen: the pick clears them synchronously the moment it changes (cached feed of the new pick paints instantly when one exists, otherwise a loading state), instead of holding the previous rows with no loading indicator while the async load waits for the provider list and fetches
+- Saving the TV feed can no longer park Home on a blank page with no spinner: Save used to fire two loads (pick + forced refresh), the second cancelling the first mid-flight and suppressing the spinner on the just-cleared screen — now the forced rebuild runs only when the pick itself did not change, matching the phone path which always ran a single load
+- Vertical poster setting can no longer flash cinema cards after a layout switch or recreation: the live poster style seeds from the last value seen this process instead of AUTO, and the choice is mirrored into memory the moment it is set, so a Vertical user never gets a 16:9 first frame while the store re-emits
+
 ## 0.11.105 (continuous build only)
 
 ### Fixed (batch: orientation heal, provider switch, phone picker size, cinema sharp inset, server footer pills)

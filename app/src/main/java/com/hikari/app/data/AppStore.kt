@@ -1568,12 +1568,22 @@ class AppStore(private val ctx: Context) {
     /** Which shape catalogue cards take (see [com.hikari.app.ui.PosterTypes]). */
     fun posterTypeFlow(): Flow<String> =
         store.data.map {
-            com.hikari.app.ui.PosterTypes.normalize(it[K.POSTER_TYPE])
+            com.hikari.app.ui.PosterTypes.normalize(it[K.POSTER_TYPE]).also { v -> posterTypeMemory = v }
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    /**
+     * Last poster-type value seen this process (see [posterTypeFlow]). The
+     * first composition after a layout switch / activity recreation seeds
+     * from this instead of AUTO, so a Vertical user never gets a cinema
+     * first frame while the store re-emits.
+     */
+    @Volatile
+    var posterTypeMemory: String = com.hikari.app.ui.PosterTypes.AUTO
 
     suspend fun posterType(): String = posterTypeFlow().first()
 
     suspend fun setPosterType(key: String) {
+        posterTypeMemory = com.hikari.app.ui.PosterTypes.normalize(key)
         write("POSTER_TYPE") {
             it[K.POSTER_TYPE] = com.hikari.app.ui.PosterTypes.normalize(key)
         }

@@ -317,7 +317,7 @@ fun rememberPosterStyle(): PosterStyle {
     val auraColor by auraFlow.collectAsState(initial = AuraColors.THEME)
     val glowPoint by glowPointFlow.collectAsState(initial = 0.5f to 0.14f)
     val glowStrength by glowStrengthFlow.collectAsState(initial = 55)
-    val posterType by posterTypeFlow.collectAsState(initial = PosterTypes.AUTO)
+    val posterType by posterTypeFlow.collectAsState(initial = app.store.posterTypeMemory)
     return PosterStyle(
         blur = if (perf) 0 else blur.coerceIn(0, 24),
         corner = corner.coerceIn(0, 28),
