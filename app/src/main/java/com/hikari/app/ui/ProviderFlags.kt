@@ -106,15 +106,15 @@ object ProviderFlags {
      * null draws none. Read from the listing's own name+description, never
      * guessed.
      */
-    fun codeOf(name: String, description: String = ""): String? =
-        match("$name $description")?.iso
+    fun codeOf(name: String, description: String? = null): String? =
+        match("$name ${description.orEmpty()}")?.iso
 
     /**
      * The "🇮🇳 Hindi" label for an extension row's text meta — null when the
      * listing names no language.
      */
-    fun flagOf(name: String, description: String = ""): String? =
-        match("$name $description")?.let { "${it.emoji} ${it.display}" }
+    fun flagOf(name: String, description: String? = null): String? =
+        match("$name ${description.orEmpty()}")?.let { "${it.emoji} ${it.display}" }
 
     /**
      * The bare flag emoji for one language token ("Hindi", "hi", "hi-IN") —
