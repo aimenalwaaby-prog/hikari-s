@@ -3047,7 +3047,6 @@ private fun EdgeLightControls(
  */
 @Composable
 private fun TvDeviceCard(app: HikariApp) {
-    val scope = rememberCoroutineScope()
     val modeFlow = remember { app.store.tvModeFlow() }
     val stored by modeFlow.collectAsState(initial = TvMode.AUTO)
     var menuOpen by remember { mutableStateOf(false) }
@@ -3093,27 +3092,20 @@ private fun TvDeviceCard(app: HikariApp) {
                 selectedKey = mode,
                 onPick = { pick ->
                     menuOpen = false
-                    // Apply instantly, not on the store round-trip: the choice
-                    // re-lays-out the app on this frame even if the DataStore
-                    // write is still in flight (the "Automatic stays TV until
-                    // restart" report).
-                    TvMode.setOverride(pick)
-                    // The write MUST be acknowledged: a swallowed failure here
-                    // is the "I switched back to phone but restarting shows TV
-                    // again" report — the instant override said phone while the
-                    // store still said tv, and the next launch obeyed the store.
-                    scope.launch {
+                    // 135 behavior: the store is the single source of truth and
+                    // the UI follows its emission. The ONE difference from 135
+                    // is the scope: 135 wrote in the card's own scope, so
+                    // leaving this folder in the same second cancelled the
+                    // write mid-flight ("applied for now but NOT saved" on
+                    // every fast tap). The app scope outlives the screen, so
+                    // the write always lands — no toast, no revert.
+                    app.appScope.launch {
                         val ok = runCatching { app.store.setTvMode(pick) }.isSuccess
                         if (!ok) {
                             com.hikari.app.data.Logs.log(
                                 "App",
-                                "layout pick '" + pick + "' applied for now but NOT saved — restart will revert",
+                                "layout pick '" + pick + "' failed to save",
                             )
-                            android.widget.Toast.makeText(
-                                app.applicationContext,
-                                I18n.t("Layout switched, but saving failed — restart will revert it"),
-                                android.widget.Toast.LENGTH_LONG,
-                            ).show()
                         }
                     }
                 },

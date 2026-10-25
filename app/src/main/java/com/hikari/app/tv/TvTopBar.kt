@@ -109,6 +109,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import com.hikari.app.data.ProviderType
 import com.hikari.app.data.Collection
@@ -119,6 +121,17 @@ import com.hikari.app.HikariApp
 import com.hikari.app.data.RepoProvenance
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.ui.screens.holdOrTap
+
+/**
+ * Process-level catalog-name cache for the TV feed mixer (see the prefetch in
+ * [TvManageFeedDialog]). The phone picker never loads these; without the
+ * cache every box open re-fired one load per installed provider.
+ */
+private val catalogNameCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
+/** Install-set signature [catalogNameCache] was built for; a mismatch drops it. */
+@Volatile
+private var catalogNameCacheKey = ""
 
 /**
  * The television top-right cluster, in the shape of the CloudStream desktop
@@ -837,14 +850,34 @@ fun TvManageFeedDialog(
     // Per-provider catalog names for the counts, the expander toggles and the
     // Tune sub-screen — loaded off the tap path like the reference keeps them
     // in memory, a provider that does not answer in time keeps its plain row.
+    //
+    // Process-level cache + a 4-wide gate: the phone picker never does this
+    // work at all, and firing one load per installed provider (649 on a big
+    // install, JS-engine boots among them) the moment the box opens saturated
+    // the device so the tapped provider's own feed had nothing left to run on.
+    // Reopens reuse the cache; a changed install set drops it.
     val catalogNames = remember { mutableStateMapOf<String, List<String>>() }
     LaunchedEffect(providers) {
+        val sig = providers.size.toString() + "|" + providers.sumOf { it.config.id.hashCode() }.toString()
+        if (sig != catalogNameCacheKey) {
+            catalogNameCache.clear()
+            catalogNameCacheKey = sig
+        }
         providers.forEach { p ->
+            catalogNameCache[p.config.id]?.let { catalogNames[p.config.id] = it }
+        }
+        val gate = Semaphore(4)
+        providers.filter { it.config.id !in catalogNames }.forEach { p ->
             launch {
-                val names = withTimeoutOrNull(8_000L) {
-                    runCatching { p.homeCatalogs().map { it.name }.distinct() }.getOrDefault(null)
+                gate.withPermit {
+                    val names = withTimeoutOrNull(8_000L) {
+                        runCatching { p.homeCatalogs().map { it.name }.distinct() }.getOrDefault(null)
+                    }
+                    if (names != null) {
+                        catalogNames[p.config.id] = names
+                        catalogNameCache[p.config.id] = names
+                    }
                 }
-                if (names != null) catalogNames[p.config.id] = names
             }
         }
     }

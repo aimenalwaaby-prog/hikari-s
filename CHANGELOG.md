@@ -1,3 +1,9 @@
+## 0.11.107 (continuous build only)
+
+### Fixed (batch: 135-style layout save, TV prefetch stampede)
+- Layout switch saves like 135 again: the store is the single source of truth and the UI follows its emission — with the one functional change that the write runs in the app scope instead of the card's scope, so leaving the folder in the same second can no longer cancel it mid-flight (the "applied for now but NOT saved" toast is gone because the failure mode is gone)
+- Opening the TV feed mixer no longer fires one catalog load per installed provider all at once: a 4-wide gate plus a process-level cache (dropped when the install set changes), so a 649-provider install doesn't saturate the device right before the tapped provider's own feed has to load — the phone picker never did this work, now TV doesn't stampede either
+
 ## 0.11.106 (continuous build only)
 
 ### Fixed (batch: provider switch stale rows, poster-shape first frame)
