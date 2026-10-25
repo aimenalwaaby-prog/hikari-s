@@ -129,6 +129,7 @@ import com.hikari.app.data.TrackerLibraryRepository
 import com.hikari.app.data.ProviderType
 import com.hikari.app.data.ProviderFolder
 import com.hikari.app.data.RepoProvenance
+import com.hikari.app.data.Site
 import com.hikari.app.data.TmdbGenres
 import com.hikari.app.data.TmdbSourceType
 import com.hikari.app.data.TmdbSpec
@@ -1925,6 +1926,23 @@ internal fun ProviderPickerSheet(
     val folders by remember { app.store.providerFoldersFlow() }
         .collectAsState(initial = emptyList<ProviderFolder>())
     val connectedTrackers by remember { app.store.trackersFlow() }.collectAsState(initial = emptyList())
+    // The user's own saved websites (Extensions → Webview sites): they ride
+    // the engine chip row below as shortcut pills, so a site opens straight
+    // from this picker instead of needing the Extensions detour.
+    val sites by remember { app.store.sitesFlow() }
+        .collectAsState(initial = emptyList<Site>())
+    val ctx = LocalContext.current
+    fun openSite(site: Site) {
+        onDismiss()
+        runCatching {
+            ctx.startActivity(
+                Intent(ctx, WebViewActivity::class.java).apply {
+                    putExtra("url", site.url)
+                    putExtra("title", site.name)
+                }
+            )
+        }
+    }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderName by remember { mutableStateOf("") }
     var folderToDelete by remember { mutableStateOf<ProviderFolder?>(null) }
@@ -2158,8 +2176,15 @@ internal fun ProviderPickerSheet(
                         .tvTextFieldKeys(query),
                 )
                 // Categories: All first, then one chip per engine that is actually
-                // installed. Picking one only NARROWS the grid below.
-                if (kinds.isNotEmpty()) {
+                // installed. Picking one only NARROWS the grid below. The user's
+                // saved websites ride the same row after them as shortcut pills:
+                // a tap loads that site at once (the ad-free WebView), it does
+                // not filter anything.
+                val shownSites = remember(sites, query) {
+                    if (query.isBlank()) sites
+                    else sites.filter { it.name.contains(query, ignoreCase = true) }
+                }
+                if (kinds.isNotEmpty() || shownSites.isNotEmpty()) {
                     LazyRow(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2176,6 +2201,13 @@ internal fun ProviderPickerSheet(
                                 label = kind.groupLabel,
                                 selected = filter == kind,
                                 onClick = { onFilter(if (filter == kind) null else kind) },
+                            )
+                        }
+                        items(shownSites, key = { it.url }) { site ->
+                            FilterChipLine(
+                                label = site.name,
+                                selected = false,
+                                onClick = { openSite(site) },
                             )
                         }
                     }

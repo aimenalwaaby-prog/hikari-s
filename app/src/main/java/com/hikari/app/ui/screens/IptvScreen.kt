@@ -1148,8 +1148,13 @@ fun IptvPlaylistScreen(nav: NavHostController, providerId: String) {
                         )
                     }
                 }
+                // A known country wears its flag; any other group wears the
+                // first real channel logo inside it (entertainment shows an
+                // entertainment logo, India an Indian channel logo…); only a
+                // group with no logo at all falls back to initials.
+                val flag = remember(g.name) { IptvPlaylist.countryCodeOf(g.name)?.let { IptvPlaylist.flagUrl(it) } }
                 IptvTile(
-                    cover = null,
+                    cover = flag ?: g.cover,
                     art = art,
                     name = g.name,
                     subtitle = I18n.t("%s channels").replace("%s", g.count.toString()),
@@ -1197,11 +1202,14 @@ private data class IptvCard(
     val local: Boolean = false,
 )
 
-/** One group inside a playlist. */
+/** One group inside a playlist. [cover] is the first real channel logo in the
+ *  group (null when no channel in it shipped one) — what the tile wears
+ *  before the generated initials tile. */
 private data class IptvGroupTile(
     val name: String,
     val catalogId: String,
     val count: Int,
+    val cover: String? = null,
 )
 
 /** Reads one playlist (its channel count, its groups, and a logo to wear). */
@@ -1245,6 +1253,7 @@ private suspend fun readGroups(p: IptvProvider, mode: String): List<IptvGroupTil
             name = I18n.t("All channels"),
             catalogId = IptvProvider.CATALOG_ALL,
             count = list.size,
+            cover = list.firstOrNull { !it.logo.isNullOrBlank() }?.logo,
         )
     }
     list.groupBy { IptvPlaylist.groupKey(it, m) }
@@ -1263,6 +1272,11 @@ private suspend fun readGroups(p: IptvProvider, mode: String): List<IptvGroupTil
                     else -> IptvProvider.catalogIdForGroup(group)
                 },
                 count = channels.size,
+                // The first channel that really has a logo: a group tile
+                // wearing one of its own channel logos reads as "this is
+                // what is inside" far better than initials. A known country
+                // wears its flag instead (see the grid below).
+                cover = channels.firstOrNull { !it.logo.isNullOrBlank() }?.logo,
             )
         }
     return out
@@ -1679,7 +1693,10 @@ private fun IptvTile(
     onClick: () -> Unit,
 ) {
     val tokens = rememberGlassTokens()
-    val model = cover ?: art
+    // A remote cover (channel logo, country flag) can 404 or be offline: fall
+    // back to the generated tile then, instead of sitting on the bare icon.
+    var coverFailed by remember(cover) { mutableStateOf(false) }
+    val model = if (coverFailed) art else (cover ?: art)
     Column(
         Modifier
             .fillMaxWidth()
@@ -1707,6 +1724,7 @@ private fun IptvTile(
                 model = model,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
+                onError = { coverFailed = true },
                 modifier = Modifier.fillMaxSize(),
             )
             if (badge != null) {

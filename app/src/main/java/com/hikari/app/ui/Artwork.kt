@@ -118,6 +118,14 @@ object Artwork {
      * televisions alike — every hero/cinema surface paints from here.
      */
     fun heroModel(item: MediaItem, skipExtensionBackdrop: Boolean = false): Pair<Any?, Boolean> {
+        // A live TV channel wears its OWN logo: the generated initials tile
+        // must never shadow a real `tvg-logo` here. The channel grid draws
+        // cinema cards from this (see CatalogScreen's iptvCinema path), and the
+        // lookup below always answers a drawn tile for a channel — so without
+        // this guard every logoed channel sat on initials instead of its logo.
+        if (IptvMark.of(item) && item.rawType == "channel") {
+            item.posterUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to false }
+        }
         backdrop(item)?.let { return PosterLoader.model(it) to true }
         if (!skipExtensionBackdrop) {
             item.backdropUrl?.takeIf { it.isNotBlank() }?.let { return PosterLoader.model(it) to true }

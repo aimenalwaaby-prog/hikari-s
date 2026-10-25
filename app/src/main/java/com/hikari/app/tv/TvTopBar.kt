@@ -40,6 +40,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import android.content.Intent
+import com.hikari.app.data.Site
+import com.hikari.app.web.WebViewActivity
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -566,6 +569,50 @@ fun TvSelectProviderDialog(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(10.dp),
             )
+
+            // The user's saved websites (Extensions → Webview sites) as
+            // shortcut pills under the filter: a tap loads that site at once
+            // in the ad-free WebView, straight from this picker.
+            val sites by remember { app.store.sitesFlow() }.collectAsState(initial = emptyList<Site>())
+            val shownSites = remember(sites, providerModalSearch) {
+                if (providerModalSearch.isBlank()) sites
+                else sites.filter { it.name.contains(providerModalSearch, ignoreCase = true) }
+            }
+            if (shownSites.isNotEmpty()) {
+                val tvCtx = LocalContext.current
+                fun openSite(site: Site) {
+                    onDismiss()
+                    runCatching {
+                        tvCtx.startActivity(
+                            Intent(tvCtx, WebViewActivity::class.java).apply {
+                                putExtra("url", site.url)
+                                putExtra("title", site.name)
+                            }
+                        )
+                    }
+                }
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items(shownSites, key = { it.url }) { site ->
+                        FilterChip(
+                            selected = false,
+                            onClick = { openSite(site) },
+                            label = { Text(site.name, fontSize = 12.sp, maxLines = 1) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Public,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            },
+                            modifier = Modifier.tvFocusRing(50.dp),
+                        )
+                    }
+                }
+            }
 
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(text = tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))

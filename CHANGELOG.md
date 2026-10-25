@@ -1,3 +1,10 @@
+## 0.11.112 (continuous build only)
+
+### Fixed (batch: IPTV thumbnails, group covers, WebView site pills)
+- IPTV channels show their own thumbnails now: the cinema frame prefers a channel's real `tvg-logo` instead of the generated initials tile, so logoed channels draw their logo in the group grid (a channel with no logo keeps its initials tile)
+- IPTV group tiles wear real covers: a known country wears its flag (India → Indian flag, USA → USA flag), any other group wears the first real channel logo inside it (entertainment shows an entertainment logo…), and only a group with no logo at all falls back to initials; a cover that fails to load falls back to the generated tile instead of a bare icon
+- Saved websites ride the provider picker: Extensions → Webview sites entries appear as pills beside All / Nuvio / Hikari in the Select Provider box (phone and TV), and a tap loads that site at once in the ad-free WebView — straight from Home, no Extensions detour
+
 ## 0.11.111 (continuous build only)
 
 ### Fixed (batch: TV pills, TMDB for every extension, TV focus, TV scroll, TMDB posters, poster default, TV text size, rotation timings)
