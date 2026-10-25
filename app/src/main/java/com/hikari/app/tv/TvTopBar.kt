@@ -570,46 +570,80 @@ fun TvSelectProviderDialog(
                 shape = RoundedCornerShape(10.dp),
             )
 
-            // The user's saved websites (Extensions → Webview sites) as
-            // shortcut pills under the filter: a tap loads that site at once
-            // in the ad-free WebView, straight from this picker.
+            // The user's saved websites (Extensions → Webview sites): one
+            // "Websites" pill under the filter, opening the full saved list
+            // under it — a tap on a site loads it at once in the ad-free
+            // WebView, straight from this picker.
             val sites by remember { app.store.sitesFlow() }.collectAsState(initial = emptyList<Site>())
             val shownSites = remember(sites, providerModalSearch) {
                 if (providerModalSearch.isBlank()) sites
-                else sites.filter { it.name.contains(providerModalSearch, ignoreCase = true) }
-            }
-            if (shownSites.isNotEmpty()) {
-                val tvCtx = LocalContext.current
-                fun openSite(site: Site) {
-                    onDismiss()
-                    runCatching {
-                        tvCtx.startActivity(
-                            Intent(tvCtx, WebViewActivity::class.java).apply {
-                                putExtra("url", site.url)
-                                putExtra("title", site.name)
-                            }
-                        )
-                    }
+                else sites.filter {
+                    it.name.contains(providerModalSearch, ignoreCase = true) ||
+                        it.url.contains(providerModalSearch, ignoreCase = true)
                 }
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    items(shownSites, key = { it.url }) { site ->
-                        FilterChip(
-                            selected = false,
-                            onClick = { openSite(site) },
-                            label = { Text(site.name, fontSize = 12.sp, maxLines = 1) },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.Public,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                )
-                            },
-                            modifier = Modifier.tvFocusRing(50.dp),
+            }
+            var sitesOpen by remember { mutableStateOf(false) }
+            val tvCtx = LocalContext.current
+            fun openSite(site: Site) {
+                onDismiss()
+                runCatching {
+                    tvCtx.startActivity(
+                        Intent(tvCtx, WebViewActivity::class.java).apply {
+                            putExtra("url", site.url)
+                            putExtra("title", site.name)
+                        }
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChip(
+                    selected = sitesOpen,
+                    onClick = { sitesOpen = !sitesOpen },
+                    label = { Text(tr("Websites"), fontSize = 12.sp, maxLines = 1) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.Public,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
                         )
+                    },
+                    modifier = Modifier.tvFocusRing(50.dp),
+                )
+            }
+            // The saved list, under the pill: every added site as its own
+            // pill, opening straight in the WebView on tap.
+            if (sitesOpen) {
+                if (shownSites.isEmpty()) {
+                    Text(
+                        tr("No websites saved yet — add them in Extensions → Webview sites."),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        shownSites.forEach { site ->
+                            FilterChip(
+                                selected = false,
+                                onClick = { openSite(site) },
+                                label = { Text(site.name, fontSize = 12.sp, maxLines = 1) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.Public,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                },
+                                modifier = Modifier.tvFocusRing(50.dp),
+                            )
+                        }
                     }
                 }
             }

@@ -1,3 +1,11 @@
+## 0.11.113 (continuous build only)
+
+### Fixed (batch: black-screen playback rescue, Websites pill)
+- Black screen with sound gets a full automatic rescue ladder: after the effects pipeline is disarmed and software decoding is tried, the player now rebuilds once more capped to a compatibility rendition (SD H.264-class) for HLS/DASH manifests — a top rendition the phone cannot decode (4K HEVC / Dolby Vision on a decoder-less SoC) often sits beside a plain lower one that anything draws, so the video plays at compatibility quality instead of sitting black; any decoder mode, one attempt per link, a rendered frame keeps it
+- When even that fails but the sound IS playing, the player says so honestly: instead of an error panel over audible playback (or a "not responding" lie for a live channel that is responding), it offers "Open in another player" — VLC & co decode with their own bundled codecs and rendering path and routinely show exactly these streams — or keep sound-only; once per link, never nagging
+- Every source now logs one line naming its video (manifest codec strings, biggest rendition size, HDR range) plus the decoder media3 chose, so the next black-screen report is answerable from the log instead of a guess
+- Saved websites ride the provider picker as one "Websites" pill (phone + TV): a tap opens the full saved list under the row, and a tap on a site loads it at once in the ad-free WebView — straight from Home, no Extensions detour
+
 ## 0.11.112 (continuous build only)
 
 ### Fixed (batch: IPTV thumbnails, group covers, WebView site pills)

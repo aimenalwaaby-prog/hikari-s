@@ -345,6 +345,14 @@ class PlayerActivity : ComponentActivity() {
             initializationDurationMs: Long,
         ) {
             videoDecoderName = decoderName
+            // Name the decoder doing the work, per source: with the video
+            // format line (see [logVideoFormat]) a black-screen report shows
+            // codec + who tried to decode it.
+            com.hikari.app.data.Logs.log(
+                "Player",
+                "video decoder $decoderName for " +
+                    "\"${sources.getOrNull(currentIndex)?.name ?: "?"}\"",
+            )
         }
     }
 
@@ -378,6 +386,30 @@ class PlayerActivity : ComponentActivity() {
 
     /** The URL [swPreferDecode] was armed for — one attempt per server. */
     private var swPreferAttemptUrl: String? = null
+
+    /**
+     * Compatibility rendition downshift: the last automatic move before
+     * giving up on a picture that will not render. Some providers serve a top
+     * rendition the device cannot decode at all (4K HEVC / Dolby Vision on a
+     * phone with no matching decoder — even the bundled FFmpeg software
+     * decode cannot always save those, and it is far too slow for 4K on a
+     * weak SoC), while a lower rendition in the same manifest is plain H.264
+     * that anything draws. Armed per server URL like [swPreferDecode]: one
+     * capped rebuild (854x480, ~1.2 Mbps — see `playDirectInner`), and a
+     * rendered frame keeps it; a different server re-arms it.
+     */
+    private var compatDownshift = false
+
+    /** The URL [compatDownshift] was armed for — one attempt per server. */
+    private var compatDownshiftAttemptUrl: String? = null
+
+    /**
+     * The no-picture external-player offer was already shown for this URL
+     * (see [offerExternalPlayback]): answering (either way) spends it, so a
+     * re-open goes straight to the error instead of nagging again. Never
+     * reset on rebuild — only a different URL re-arms the offer.
+     */
+    private var externalOfferUrl: String = ""
 
     /**
      * The user's decoder choice ("auto" = Best, "hw" = hardware only, "sw" =
@@ -558,6 +590,133 @@ class PlayerActivity : ComponentActivity() {
             playDirectInner(currentIndex)
         } finally {
             silentEffectsRebuild = false
+        }
+    }
+
+    /**
+     * The silent half of [maybeDownshiftRendition]: same shape as
+     * [rebuildPlayerSwPrefer] (same source, position kept, no cover).
+     */
+    private fun rebuildPlayerCompat() {
+        val p = player ?: return
+        if (currentIndex !in sources.indices) return
+        val position = p.currentPosition
+        if (position > 2_000L) {
+            startPositionMs = position
+            seekPending = true
+        }
+        silentEffectsRebuild = true
+        try {
+            playDirectInner(currentIndex)
+        } finally {
+            silentEffectsRebuild = false
+        }
+    }
+
+    /**
+     * Compatibility rendition: the last automatic move before giving up on a
+     * picture that will not render. Some providers serve a top rendition the
+     * device cannot decode at all (4K HEVC / Dolby Vision on a phone with no
+     * matching decoder — even the bundled FFmpeg software decode cannot
+     * always save those, and it is far too slow for 4K on a weak SoC), while
+     * a lower rendition in the same manifest is plain H.264 that anything
+     * draws. So the player is rebuilt ONCE per server URL capped to SD
+     * (854x480, ~1.2 Mbps): if a frame renders, the video plays at
+     * compatibility quality instead of sitting on a black screen with sound.
+     * Only for adaptive (HLS/DASH) manifests — a progressive file has no
+     * other rendition to pick, so a cap would only rebuild the identical
+     * track. Any decoder mode: this chooses a rendition, it never overrides
+     * the user's decoder pick. Returns true when the rebuild fired (the
+     * caller must return); false means this URL already had its attempt, so
+     * the caller should carry on to its honest error.
+     */
+    private fun maybeDownshiftRendition(index: Int): Boolean {
+        if (compatDownshift) return false
+        val src = sources.getOrNull(index) ?: return false
+        val url = src.url
+        if (url.isBlank() || url == compatDownshiftAttemptUrl) return false
+        // Torrents and progressive files have no renditions to step between.
+        if (src.isTorrent) return false
+        if (mainMimeOf(src) == null) return false
+        if (player == null) return false
+        compatDownshift = true
+        compatDownshiftAttemptUrl = url
+        com.hikari.app.data.Logs.log(
+            "Player",
+            "audio but no picture from \"${src.name}\" " +
+                "(server ${index + 1}/${sources.size}) after software decode — " +
+                "rebuilding capped to the compatibility rendition",
+        )
+        runCatching {
+            Toast.makeText(
+                this,
+                I18n.t("Trying compatibility quality…"),
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        rebuildPlayerCompat()
+        return true
+    }
+
+    /**
+     * True when playback is RUNNING but no frame ever rendered: the sound is
+     * playing over a black screen. READY + playWhenReady means the position
+     * is advancing (audibly progressing); a stuck BUFFERING source is not
+     * this case — the buffering watchdog owns that one.
+     */
+    private fun audioOnlyPlayback(): Boolean {
+        val p = player ?: return false
+        return !renderedFirstFrame &&
+            p.playbackState == Player.STATE_READY &&
+            p.playWhenReady
+    }
+
+    /**
+     * The honest end of the no-picture ladder: Hikari's own player tried the
+     * effects pipeline off, software decode and the compatibility rendition
+     * and the picture still will not draw on this device — but the sound IS
+     * playing. Another video app (VLC & co) decodes differently, with its own
+     * bundled codecs and its own rendering path, and routinely shows exactly
+     * these streams. So instead of an error panel over audible playback, the
+     * player offers the hand-off once per URL: open outside, or keep the
+     * sound-only playback. The in-house player is paused first so the two
+     * never talk over each other.
+     */
+    private fun offerExternalPlayback() {
+        val src = sources.getOrNull(currentIndex) ?: return
+        val url = src.url
+        if (url.isBlank() || url == externalOfferUrl) return
+        if (isFinishing || isDestroyed) return
+        externalOfferUrl = url
+        runCatching { player?.pause() }
+        com.hikari.app.data.Logs.log(
+            "Player",
+            "no picture from \"${src.name}\" after the full ladder " +
+                "(effects off, software decode, compatibility rendition) — " +
+                "offering the external player",
+        )
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            showGlassMenu(
+                I18n.t("No picture on this video"),
+                listOf(
+                    GlassOption(
+                        I18n.t("Open in another player"),
+                        I18n.t("VLC & co often show it"),
+                        iconRes = R.drawable.ic_external, marker = RowMarker.ICON,
+                    ),
+                    GlassOption(
+                        I18n.t("Keep playing audio"),
+                        I18n.t("Stay with sound only"),
+                        iconRes = R.drawable.ic_settings, marker = RowMarker.ICON,
+                    ),
+                ),
+                message = I18n.t("Hikari's player — hardware, software and compatibility quality — could not draw this video's picture on your device, but the sound is playing. Another video app decodes differently and often shows it."),
+                iconRes = R.drawable.ic_external,
+            ) { which ->
+                if (which == 0) openExternalPlayer()
+                else runCatching { player?.play() }
+            }
         }
     }
 
@@ -12775,6 +12934,9 @@ class PlayerActivity : ComponentActivity() {
         // (see [maybePreferSoftwareDecode]): a different server earns its own
         // attempt, the same URL never gets two.
         if (src.url != swPreferAttemptUrl) swPreferDecode = false
+        // Same one-attempt-per-URL rule for the compatibility-rendition
+        // downshift (see [maybeDownshiftRendition]).
+        if (src.url != compatDownshiftAttemptUrl) compatDownshift = false
         // [firstFrameRetried] is deliberately NOT reset here: a restart of the
         // SAME server is what it guards, and `playDirectInner` is what a restart
         // calls — resetting it here made the guard useless, so a server that
@@ -12986,10 +13148,18 @@ class PlayerActivity : ComponentActivity() {
         // with software fallback armed (see the renderers factory above), so
         // every codec the device or FFmpeg can handle plays without a lag
         // penalty and nothing is ever stepped down for being heavy.
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+        // The ONE exception is the compatibility downshift (see
+        // [compatDownshift]): after every same-quality rescue has failed on a
+        // picture that will not render, the manifest is capped to an SD
+        // rendition so the video plays instead of sitting on a black screen.
+        val trackSel = player.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
             .setMaxVideoBitrate(Int.MAX_VALUE)
-            .build()
+        if (compatDownshift) {
+            trackSel.setMaxVideoSize(854, 480)
+            trackSel.setMaxVideoBitrate(1_200_000)
+        }
+        player.trackSelectionParameters = trackSel.build()
         player.addListener(listener)
         playerView?.player = player
         // A dual-audio pairing survives an effects-pipeline re-arm (which
@@ -13240,11 +13410,20 @@ class PlayerActivity : ComponentActivity() {
             // (see [maybePreferSoftwareDecode]) — a genuinely dead link just
             // returns false and the error below stands.
             if (maybePreferSoftwareDecode(currentIndex)) return
+            // ...then one capped-rendition rebuild (see
+            // [maybeDownshiftRendition]).
+            if (maybeDownshiftRendition(currentIndex)) return
             com.hikari.app.data.Logs.log(
                 "Player",
                 "live stream \"${src.name}\" did not start after " +
                     "$liveStartRetries re-opens (${budgetMs / 1000}s each) — giving up",
             )
+            // Audio running over a black screen is not "not responding":
+            // offer the outside player instead of the offline-channel error.
+            if (audioOnlyPlayback()) {
+                offerExternalPlayback()
+                return
+            }
             showError(
                 I18n.t("This live channel is not responding. It may be offline right now."),
                 false,
@@ -13992,11 +14171,22 @@ class PlayerActivity : ComponentActivity() {
         // that already had its attempt just returns false and the flow below
         // stands.
         if (maybePreferSoftwareDecode(index)) return
+        // ...then one capped-rendition rebuild (see
+        // [maybeDownshiftRendition]): a top rendition the device cannot
+        // decode while a lower one is plain H.264 is exactly the
+        // audio-over-black class on weak phones.
+        if (maybeDownshiftRendition(index)) return
         // Nothing else to hand ExoPlayer yet, and the search is still running:
         // wait for it instead of declaring the video dead (see
         // [awaitReplacementForStalledServer]).
         if (liveSessionId != null && !liveSearchDone && src?.isTorrent != true) {
             awaitReplacementForStalledServer(src)
+            return
+        }
+        // The picture never rendered but the sound IS playing: offer the
+        // outside player instead of an error panel over audible playback.
+        if (audioOnlyPlayback()) {
+            offerExternalPlayback()
             return
         }
         showError(I18n.t("Playback started but no video frame was rendered."), false)
@@ -14879,6 +15069,41 @@ class PlayerActivity : ComponentActivity() {
      *  the quality badge missing AND the screen stuck in portrait with a
      *  letterboxed landscape video. The track format still carries the coded
      *  size (rotation included), so the real size can be derived from it. */
+    /** The URL [logVideoFormat] already described — one line per source. */
+    private var lastFormatLogUrl: String = ""
+
+    /**
+     * One log line per source naming the video media3 picked: the manifest's
+     * own codec strings across the selected group (a Dolby Vision top
+     * rendition reads "dvh1…", an HEVC one "hev1…"), the biggest rendition's
+     * size, and the range (HDR10/HLG/SDR — see [rangeLabel]). The
+     * audio-over-black class is then answerable from the log (codec the
+     * device cannot draw + who tried) instead of a guess.
+     */
+    private fun logVideoFormat(tracks: Tracks) {
+        val url = sources.getOrNull(currentIndex)?.url.orEmpty()
+        if (url.isBlank() || url == lastFormatLogUrl) return
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_VIDEO || group.length == 0) continue
+            val fmts = (0 until group.length).mapNotNull {
+                runCatching { group.getTrackFormat(it) }.getOrNull()
+            }
+            if (fmts.isEmpty()) continue
+            lastFormatLogUrl = url
+            val codecs = fmts.mapNotNull { it.codecs ?: it.sampleMimeType }.distinct()
+            val w = fmts.maxOfOrNull { it.width } ?: 0
+            val h = fmts.maxOfOrNull { it.height } ?: 0
+            val range = fmts.firstOrNull()?.let { rangeLabel(it) }.orEmpty()
+            com.hikari.app.data.Logs.log(
+                "Player",
+                "video track \"${sources.getOrNull(currentIndex)?.name ?: "?"}\" " +
+                    "codecs=${codecs.ifEmpty { listOf("?") }} ${w}x$h " +
+                    "range=$range decoder=${videoDecoderName ?: "?"}",
+            )
+            return
+        }
+    }
+
     private fun videoFormatSize(tracks: Tracks): Pair<Int, Int>? {
         for (group in tracks.groups) {
             if (group.type != C.TRACK_TYPE_VIDEO || group.length == 0) continue
@@ -14947,6 +15172,10 @@ class PlayerActivity : ComponentActivity() {
             // A source rendered through the video-effects pipeline never gets an
             // onVideoSizeChanged, so take the size from the video track itself.
             videoFormatSize(tracks)?.let { (w, h) -> onKnownVideoSize(w, h) }
+            // One line per source naming what media3 picked (codec family,
+            // renditions, range) — the black-screen class is answerable from
+            // the log instead of a guess (see [logVideoFormat]).
+            logVideoFormat(tracks)
             applyVideoEnhance()
             // Re-assert the booster gain after a track change (cheap and
             // idempotent — the stage itself survives in the sink).
@@ -14963,6 +15192,10 @@ class PlayerActivity : ComponentActivity() {
             // this URL is spent and must not leak onto the next server.
             swPreferDecode = false
             swPreferAttemptUrl = null
+            // Same for the compatibility-rendition downshift: the rendition
+            // that drew is the one re-opens keep using.
+            compatDownshift = false
+            compatDownshiftAttemptUrl = null
             // Real video is on screen — retract any "your connection looks slow"
             // verdict, measured or not.
             SlowNetTip.onFirstFrame()

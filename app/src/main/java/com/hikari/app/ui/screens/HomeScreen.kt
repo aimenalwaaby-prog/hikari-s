@@ -1926,12 +1926,14 @@ internal fun ProviderPickerSheet(
     val folders by remember { app.store.providerFoldersFlow() }
         .collectAsState(initial = emptyList<ProviderFolder>())
     val connectedTrackers by remember { app.store.trackersFlow() }.collectAsState(initial = emptyList())
-    // The user's own saved websites (Extensions → Webview sites): they ride
-    // the engine chip row below as shortcut pills, so a site opens straight
-    // from this picker instead of needing the Extensions detour.
+    // The user's own saved websites (Extensions → Webview sites): one
+    // "Websites" pill in the engine chip row below, opening the full saved
+    // list under it — a tap on a site loads it straight from this picker in
+    // the ad-free WebView instead of needing the Extensions detour.
     val sites by remember { app.store.sitesFlow() }
         .collectAsState(initial = emptyList<Site>())
     val ctx = LocalContext.current
+    var sitesOpen by remember { mutableStateOf(false) }
     fun openSite(site: Site) {
         onDismiss()
         runCatching {
@@ -2177,14 +2179,17 @@ internal fun ProviderPickerSheet(
                 )
                 // Categories: All first, then one chip per engine that is actually
                 // installed. Picking one only NARROWS the grid below. The user's
-                // saved websites ride the same row after them as shortcut pills:
-                // a tap loads that site at once (the ad-free WebView), it does
-                // not filter anything.
+                // saved websites ride the same row as one "Websites" pill: a
+                // tap opens the full saved list under the row, and a tap on a
+                // site loads it at once (the ad-free WebView).
                 val shownSites = remember(sites, query) {
                     if (query.isBlank()) sites
-                    else sites.filter { it.name.contains(query, ignoreCase = true) }
+                    else sites.filter {
+                        it.name.contains(query, ignoreCase = true) ||
+                            it.url.contains(query, ignoreCase = true)
+                    }
                 }
-                if (kinds.isNotEmpty() || shownSites.isNotEmpty()) {
+                if (kinds.isNotEmpty() || sites.isNotEmpty()) {
                     LazyRow(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2203,12 +2208,70 @@ internal fun ProviderPickerSheet(
                                 onClick = { onFilter(if (filter == kind) null else kind) },
                             )
                         }
-                        items(shownSites, key = { it.url }) { site ->
-                            FilterChipLine(
-                                label = site.name,
-                                selected = false,
-                                onClick = { openSite(site) },
-                            )
+                        if (sites.isNotEmpty()) {
+                            item {
+                                FilterChipLine(
+                                    label = tr("Websites"),
+                                    selected = sitesOpen,
+                                    onClick = { sitesOpen = !sitesOpen },
+                                )
+                            }
+                        }
+                    }
+                    // The saved list, under the chip row: every added site as
+                    // its own row (globe + name + address), opening straight
+                    // in the WebView on tap.
+                    if (sitesOpen) {
+                        Column(
+                            Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (shownSites.isEmpty()) {
+                                Text(
+                                    tr("No websites saved yet — add them in Extensions → Webview sites."),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                )
+                            }
+                            shownSites.forEach { site ->
+                                Surface(
+                                    onClick = { openSite(site) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                ) {
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Public,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                site.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                site.url,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
