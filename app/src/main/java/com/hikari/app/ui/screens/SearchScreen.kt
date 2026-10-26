@@ -1059,7 +1059,19 @@ fun SearchScreen(
                 // [com.hikari.app.ui.components.MediaRow]).
                 val style = rememberPosterStyle()
                 val tvSearch = TvMode.current()
-                val searchCols = if (tvSearch) 3 else TvUi.resultsColumns()
+                // Television's medium grid: 6 across reads at a glance from the
+                // sofa without the 3-across billboards the screen had (one row
+                // filled the whole display). Phones keep their adaptive count.
+                val searchCols = if (tvSearch) 6 else TvUi.resultsColumns()
+                // Cell-sized cards: the TV cards below carry a fixed shelf
+                // width by default (made for sideways rows), which would
+                // overflow a 6-across grid. Size them to the cell instead,
+                // from the viewport minus the rail and the grid's own padding.
+                val tvCell = if (tvSearch) {
+                    val sw = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+                    val avail = sw - com.hikari.app.tv.TvUi.RAIL_WIDTH - 20.dp - tvEdge * 2
+                    ((avail - 12.dp * (searchCols - 1)) / searchCols).coerceAtLeast(96.dp)
+                } else 0.dp
                 val openSearchItem: (MediaItem) -> Unit = { item ->
                     Routes.safeNavigate(
                         nav,
@@ -1201,8 +1213,8 @@ fun SearchScreen(
                     bottom = LocalTaskbarInset.current + 12.dp + tvEdge +
                         if (TvMode.current()) 28.dp else 0.dp,
                 ),
-                horizontalArrangement = Arrangement.spacedBy(if (tvSearch) 14.dp else 8.dp),
-                verticalArrangement = Arrangement.spacedBy(if (tvSearch) 20.dp else 10.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (tvSearch) 12.dp else 8.dp),
+                verticalArrangement = Arrangement.spacedBy(if (tvSearch) 16.dp else 10.dp)
             ) {
                 items(gridItems, key = { it.uniqueId }) { item ->
                     if (tvSearch) {
@@ -1214,9 +1226,9 @@ fun SearchScreen(
                             )
                         }
                         if (style.isCinema(true)) {
-                            com.hikari.app.tv.TvCinemaCard(item = item, onClick = go)
+                            com.hikari.app.tv.TvCinemaCard(item = item, onClick = go, cardWidth = tvCell)
                         } else {
-                            com.hikari.app.tv.TvVerticalCard(item = item, onClick = go)
+                            com.hikari.app.tv.TvVerticalCard(item = item, onClick = go, cardWidth = tvCell)
                         }
                     } else {
                     // Show scores (Settings → App Layout) draws here too — the

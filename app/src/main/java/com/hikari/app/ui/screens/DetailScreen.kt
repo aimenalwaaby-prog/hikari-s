@@ -4655,7 +4655,7 @@ fun DetailScreen(
 
                     val tvPlayRow: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { topPad ->
                     // The row is full-width with wrap-sized pills: a cramped
-                    // ancestor (the 0.44f hero column, a narrow viewport) must
+                    // ancestor (the 0.40f hero column, a narrow viewport) must
                     // never squeeze the pills — required* sizes hold the pill
                     // shape and overflow instead of compressing (the "Play E1 /
                     // heart / download squash when I scroll" report).
@@ -4675,8 +4675,8 @@ fun DetailScreen(
                             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
                             modifier = Modifier
                                 .focusRequester(playFocus)
-                                .requiredHeight(46.dp)
-                                .widthIn(min = 110.dp)
+                                .requiredHeight(50.dp)
+                                .widthIn(min = 180.dp)
                                 .tvPress(
                                     previewPass = true,
                                     onClick = { tryPlay(detailBtnEp) }
@@ -4697,7 +4697,7 @@ fun DetailScreen(
                                 softWrap = false,
                                 overflow = TextOverflow.Visible,
                                 style = MaterialTheme.typography.labelLarge.copy(
-                                    fontSize = 13.sp * (11f / detailActionLabel.length.toFloat()).coerceIn(0.45f, 1f)
+                                    fontSize = 14.sp * (11f / detailActionLabel.length.toFloat()).coerceIn(0.45f, 1f)
                                 ),
                             )
                         }
@@ -4708,7 +4708,7 @@ fun DetailScreen(
                             FilledTonalButton(
                                 onClick = openLibrary,
                                 contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.requiredSize(48.dp).tvPress(
+                                modifier = Modifier.requiredSize(50.dp).tvPress(
                                     previewPass = true,
                                     onClick = openLibrary,
                                 )
@@ -4719,7 +4719,7 @@ fun DetailScreen(
                             OutlinedButton(
                                 onClick = openLibrary,
                                 contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.requiredSize(48.dp).tvPress(
+                                modifier = Modifier.requiredSize(50.dp).tvPress(
                                     previewPass = true,
                                     onClick = openLibrary,
                                 )
@@ -4730,7 +4730,7 @@ fun DetailScreen(
                         FilledTonalButton(
                             onClick = { openDlChoice() },
                             contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.requiredSize(48.dp).tvPress(
+                            modifier = Modifier.requiredSize(50.dp).tvPress(
                                 previewPass = true,
                                 onClick = { openDlChoice() }
                             )
@@ -4753,7 +4753,7 @@ fun DetailScreen(
                                     )
                                 },
                                 contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.requiredSize(48.dp).tvPress(
+                                modifier = Modifier.requiredSize(50.dp).tvPress(
                                     previewPass = true,
                                     onClick = {
                                         openYouTubeVideo(
@@ -4778,17 +4778,29 @@ fun DetailScreen(
             // into this page.
             LaunchedEffect(Unit) {
                 delay(150L)
-                runCatching { playFocus.requestFocus() }
+                // Never yank a scrolled page back to the top: only take focus
+                // while the hero is still on screen (the opening position).
+                // Focusing Play after the user scrolled to episodes would
+                // scroll the metadata back into view — the reported "detail
+                // automatically coming to top".
+                if (detailList.firstVisibleItemIndex == 0 && detailList.firstVisibleItemScrollOffset < 200) {
+                    runCatching { playFocus.requestFocus() }
+                }
             }
             // TV detail is a single cinematic hero: artwork, title, metadata,
             // overview and the primary action live in the same focusable scene.
-            // Fixed and TALLER than the block, adaptive to any TV: ~94% of the
-            // viewport height (88% when the episode panel rides right), so the
+            // ~94% of the viewport height (88% when the episode panel rides
+            // right), NEVER taller than the viewport itself, so the
             // bottom-anchored column always has art above it to sit low on —
-            // like the reference banner on 720p, 1080p or any panel. Floor keeps
-            // short screens honest. A wrap/minimum height shrinks to the block
+            // like the reference banner on 720p, 1080p or any panel. The old
+            // 480dp floor overflowed short viewports (dense windows, small
+            // panels): Play sat off-screen, and the focus request above then
+            // scrolled the whole page to reach it — which is what parked the
+            // metadata at the top. A wrap/minimum height shrinks to the block
             // and "bottom" becomes "top" (batches 146-147).
-            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.88f else 0.94f).dp.coerceAtLeast(480.dp)
+            val cfgH = androidx.compose.ui.platform.LocalConfiguration.current
+            val viewportH = cfgH.screenHeightDp.dp
+            val tvHeight = ((viewportH * if (episodePosterStyle) 0.88f else 0.94f).coerceAtMost(viewportH - 12.dp)).coerceAtLeast(280.dp)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -5074,18 +5086,18 @@ fun DetailScreen(
                         // The reference look (the Qi Refining shot): a narrow
                         // text column parked low on the left, so the backdrop
                         // art stays visible on the right instead of sitting
-                        // under full-width text. Both hero modes share it —
-                        // the full-width column is what the TV photos showed
-                        // text painted edge to edge over the art. Like the
-                        // reference: a ~1/3-width column, everything small
-                        // except a slightly bigger title, the whole block low.
+                        // under full-width text. One-to-one with the reference:
+                        // ~40% width, bottom-anchored with the action row just
+                        // off the bottom edge, everything small except the
+                        // wordmark/title. NEVER top-anchored: the whole block
+                        // must open low and stay low until the user scrolls.
                         .align(Alignment.BottomStart)
-                        .fillMaxWidth(0.36f)
+                        .fillMaxWidth(0.40f)
                         .padding(
-                            start = 36.dp,
+                            start = 44.dp,
                             end = 12.dp,
                             top = 8.dp,
-                            bottom = 20.dp,
+                            bottom = 28.dp,
                         )
                 ) {
                     // Provider eyebrow, like the reference client's blue
@@ -5098,7 +5110,7 @@ fun DetailScreen(
                         Text(
                             tvProviderName,
                             color = Color(0xFF4DA3FF),
-                            fontSize = 10.sp * tvText,
+                            fontSize = 12.sp * tvText,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -5107,9 +5119,9 @@ fun DetailScreen(
                     }
                     if (!heroLogo.isNullOrBlank()) {
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxWidth(0.90f).heightIn(max = 68.dp))
+                            modifier = Modifier.fillMaxWidth(0.90f).heightIn(max = 96.dp))
                     } else {
-                        Text(artTitle, fontSize = 19.sp * tvText, lineHeight = 24.sp * tvText, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 24.sp * tvText, lineHeight = 30.sp * tvText, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(6.dp))
@@ -5139,7 +5151,7 @@ fun DetailScreen(
                         ) {
                             if (tvMetaHead.isNotBlank()) Text(
                                 tvMetaHead,
-                                fontSize = 10.sp * tvText,
+                                fontSize = 11.sp * tvText,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.88f),
                                 maxLines = 1,
@@ -5147,7 +5159,7 @@ fun DetailScreen(
                             if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
                             if (tvMetaTail.isNotBlank()) Text(
                                 (if (tvMetaHead.isNotBlank() || !tvCert.isNullOrBlank()) "•  " else "") + tvMetaTail,
-                                fontSize = 10.sp * tvText,
+                                fontSize = 11.sp * tvText,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.72f),
                                 maxLines = 1,
@@ -5189,8 +5201,8 @@ fun DetailScreen(
                         var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
                         Text(
                             displayOverview!!,
-                            fontSize = 11.sp * tvText,
-                            lineHeight = 15.sp * tvText,
+                            fontSize = 12.5.sp * tvText,
+                            lineHeight = 17.sp * tvText,
                             color = Color.White.copy(alpha = 0.88f),
                             maxLines = if (tvOverviewFull) Int.MAX_VALUE else 3,
                             overflow = TextOverflow.Ellipsis,
