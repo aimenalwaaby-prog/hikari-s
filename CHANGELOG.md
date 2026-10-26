@@ -1,3 +1,9 @@
+## 0.11.114 (continuous build only)
+
+### Fixed (batch: TV detail hero like the reference, provider-box D-pad)
+- TV detail hero now looks like the reference shot: the detail block is a narrow column parked low on the left (provider tag, slightly smaller title/logo, small meta line, small badges, 2-line overview + More, Play row) so the backdrop art stays visible on the right instead of sitting under full-width edge-to-edge text; both TV hero modes share it, phones untouched
+- TV provider boxes are fully D-pad walkable: the Select box (Home + Search) chains pill → filter → Websites → multi toggle → grid explicitly, the filter lets the remote leave it, and the multi toggle answers the D-pad itself instead of being skipped past; the Manage box gets the same toggle + field treatment, so every corner is reachable and nothing strands the focus
+
 ## 0.11.113 (continuous build only)
 
 ### Fixed (batch: black-screen playback rescue, Websites pill)

@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -85,7 +86,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -500,6 +503,14 @@ fun TvSelectProviderDialog(
     val narrow = selectCfg.screenWidthDp < 600
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
     val dlgFocus = remember { FocusRequester() }
+    // Explicit D-pad chain (pill → filter → websites → toggle → grid): the
+    // toggle sits at its row's far end and the 2D search kept walking past
+    // it, so every stop names its neighbours instead of relying on geometry.
+    val filterReq = remember { FocusRequester() }
+    val webReq = remember { FocusRequester() }
+    val toggleReq = remember { FocusRequester() }
+    val siteReq = remember { FocusRequester() }
+    val firstCardReq = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { dlgFocus.requestFocus() } }
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     // Repo display names for the "(repo)" duplicate tags — the reference tells
@@ -528,7 +539,7 @@ fun TvSelectProviderDialog(
         modifier = Modifier.width(selectW).wrapContentHeight().heightIn(min = 220.dp, max = (selectCfg.screenHeightDp * 0.85f).dp),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().wrapContentHeight().padding(24.dp),
+            modifier = Modifier.fillMaxWidth().wrapContentHeight().padding(24.dp).focusGroup(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (!narrow) {
@@ -538,7 +549,7 @@ fun TvSelectProviderDialog(
                         Text(text = tr("Select Provider"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(text = tr("Choose a dedicated provider or search across all installed plugins"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp), modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(10.dp)) {
+                    FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp), modifier = Modifier.focusRequester(dlgFocus).focusProperties { down = filterReq }.tvFocusRing(10.dp)) {
                         Text(tr("All Plugins (Global)"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
                     }
                 }
@@ -546,7 +557,7 @@ fun TvSelectProviderDialog(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(text = tr("Select Provider"), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp), modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(10.dp)) {
+                        FilledTonalButton(onClick = onPickAll, shape = RoundedCornerShape(10.dp), modifier = Modifier.focusRequester(dlgFocus).focusProperties { down = filterReq }.tvFocusRing(10.dp)) {
                             Text(tr("All Plugins (Global)"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 1)
                         }
                     }
@@ -566,7 +577,9 @@ fun TvSelectProviderDialog(
                         modifier = Modifier.size(18.dp),
                     )
                 },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                // The remote must be able to LEAVE the field (arrows move the
+                // caret otherwise) and land on the Websites row below it.
+                modifier = Modifier.fillMaxWidth().height(48.dp).focusRequester(filterReq).focusProperties { up = dlgFocus; down = webReq }.tvTextFieldKeys(providerModalSearch),
                 shape = RoundedCornerShape(10.dp),
             )
 
@@ -611,7 +624,7 @@ fun TvSelectProviderDialog(
                             modifier = Modifier.size(14.dp),
                         )
                     },
-                    modifier = Modifier.tvFocusRing(50.dp),
+                    modifier = Modifier.focusRequester(webReq).focusProperties { up = filterReq; down = if (sitesOpen) siteReq else toggleReq }.tvFocusRing(50.dp),
                 )
             }
             // The saved list, under the pill: every added site as its own
@@ -629,7 +642,7 @@ fun TvSelectProviderDialog(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        shownSites.forEach { site ->
+                        shownSites.forEachIndexed { siteIdx, site ->
                             FilterChip(
                                 selected = false,
                                 onClick = { openSite(site) },
@@ -641,7 +654,16 @@ fun TvSelectProviderDialog(
                                         modifier = Modifier.size(14.dp),
                                     )
                                 },
-                                modifier = Modifier.tvFocusRing(50.dp),
+                                // Stacked full-width rows walk fine on their
+                                // own; only the ends are pinned: the first
+                                // hands Up back to the Websites pill, the last
+                                // hands Down to the multi toggle.
+                                modifier = (if (siteIdx == 0) Modifier.focusRequester(siteReq) else Modifier)
+                                    .focusProperties {
+                                        if (siteIdx == 0) up = webReq
+                                        if (siteIdx == shownSites.lastIndex) down = toggleReq
+                                    }
+                                    .tvFocusRing(50.dp),
                             )
                         }
                     }
@@ -651,7 +673,13 @@ fun TvSelectProviderDialog(
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(text = tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Spacer(modifier = Modifier.width(8.dp))
-                Switch(checked = isAdvancedMode, modifier = Modifier.tvFocusRing(50.dp), onCheckedChange = { enabled ->
+                // A bare Switch at the row's far end is what the 2D search
+                // kept skipping (see [Modifier.tvToggle]): the switch answers
+                // the D-pad itself now, and the row above/below hand to it.
+                Switch(checked = isAdvancedMode, modifier = Modifier.focusRequester(toggleReq).focusProperties { up = webReq }.tvToggle(isAdvancedMode) { enabled ->
+                    isAdvancedMode = enabled
+                    if (enabled && working.value.isEmpty()) { selection.firstOrNull()?.let { working.value = ArrayList(listOf(it)) } }
+                }.tvFocusRing(50.dp), onCheckedChange = { enabled ->
                     isAdvancedMode = enabled
                     if (enabled && working.value.isEmpty()) { selection.firstOrNull()?.let { working.value = ArrayList(listOf(it)) } }
                 })
@@ -678,9 +706,9 @@ fun TvSelectProviderDialog(
                 }
             } else {
                 LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = if (narrow) 280.dp else 440.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(shownCollections, key = { "tv-col-" + it.id }, span = { GridItemSpan(maxLineSpan) }) { col ->
+                    itemsIndexed(shownCollections, key = { _, col -> "tv-col-" + col.id }, span = { _, _ -> GridItemSpan(maxLineSpan) }) { colIdx, col ->
                         val key = Routes.COLLECTION_PROVIDER_PREFIX + col.id
-                        RefProviderCard(name = col.name, repoTag = null, subtitle = tr("Collection"), selected = key in selection, iconUrl = null, iconName = col.name, onClick = { onPick(key) })
+                        RefProviderCard(name = col.name, repoTag = null, subtitle = tr("Collection"), selected = key in selection, iconUrl = null, iconName = col.name, onClick = { onPick(key) }, modifier = if (colIdx == 0) Modifier.focusRequester(firstCardReq).focusProperties { up = toggleReq } else Modifier)
                     }
                     items(matchingProviders.size, key = { idx ->
                         val p = matchingProviders[idx]
@@ -689,7 +717,7 @@ fun TvSelectProviderDialog(
                         val provider = matchingProviders[idx]
                         val id = provider.config.id
                         val repoTag = if (provider.config.name in duplicateNames) { repoLabels[id]?.takeIf { it.isNotBlank() } } else null
-                        RefProviderCard(name = provider.config.name, repoTag = repoTag, subtitle = refProviderSubtitle(provider), selected = id in selection, iconUrl = provider.config.iconUrl, iconName = provider.config.name, onClick = { onPick(id) }, compact = true)
+                        RefProviderCard(name = provider.config.name, repoTag = repoTag, subtitle = refProviderSubtitle(provider), selected = id in selection, iconUrl = provider.config.iconUrl, iconName = provider.config.name, onClick = { onPick(id) }, compact = true, modifier = if (shownCollections.isEmpty() && idx == 0) Modifier.focusRequester(firstCardReq).focusProperties { up = toggleReq } else Modifier)
                     }
                 }
             }
@@ -825,6 +853,7 @@ private fun RefProviderCard(
     iconName: String,
     onClick: () -> Unit,
     compact: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
@@ -836,7 +865,7 @@ private fun RefProviderCard(
             if (selected) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
         ),
-        modifier = Modifier.tvPress(previewPass = true, onClick = onClick).tvFocusRing(12.dp),
+        modifier = modifier.tvPress(previewPass = true, onClick = onClick).tvFocusRing(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 6.dp else 10.dp),
@@ -904,6 +933,10 @@ fun TvManageFeedDialog(
     val advNarrow = manageNarrow
     val scope = rememberCoroutineScope()
     val dlgFocus = remember { FocusRequester() }
+    // Same explicit chain as the Select box: the toggle answers the D-pad
+    // itself and the search field hands Down to the chips below it.
+    val manageFilterReq = remember { FocusRequester() }
+    val manageToggleReq = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { dlgFocus.requestFocus() } }
     val working = remember(selection) { mutableStateOf(ArrayList(selection)) }
     var isAdvancedMode by remember { mutableStateOf(selection.size > 1) }
@@ -997,7 +1030,13 @@ fun TvManageFeedDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(tr("Enable Multi-Provider Feed"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Switch(checked = isAdvancedMode, modifier = Modifier.tvFocusRing(50.dp), onCheckedChange = { enabled ->
+                            Switch(checked = isAdvancedMode, modifier = Modifier.focusRequester(manageToggleReq).focusProperties { down = manageFilterReq }.tvToggle(isAdvancedMode) { enabled ->
+                                isAdvancedMode = enabled
+                                if (!enabled) {
+                                    val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
+                                    working.value = if (top != null) ArrayList(listOf(top)) else ArrayList()
+                                }
+                            }.tvFocusRing(50.dp), onCheckedChange = { enabled ->
                                 isAdvancedMode = enabled
                                 if (!enabled) {
                                     val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
@@ -1024,7 +1063,13 @@ fun TvManageFeedDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(tr("Enable Multi-Provider Feed"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Switch(checked = isAdvancedMode, modifier = Modifier.tvFocusRing(50.dp), onCheckedChange = { enabled ->
+                            Switch(checked = isAdvancedMode, modifier = Modifier.focusRequester(manageToggleReq).focusProperties { down = manageFilterReq }.tvToggle(isAdvancedMode) { enabled ->
+                                isAdvancedMode = enabled
+                                if (!enabled) {
+                                    val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
+                                    working.value = if (top != null) ArrayList(listOf(top)) else ArrayList()
+                                }
+                            }.tvFocusRing(50.dp), onCheckedChange = { enabled ->
                                 isAdvancedMode = enabled
                                 if (!enabled) {
                                     val top = working.value.firstOrNull() ?: providers.firstOrNull()?.config?.id
@@ -1055,7 +1100,7 @@ fun TvManageFeedDialog(
                             modifier = Modifier.size(18.dp),
                         )
                     },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp).focusRequester(manageFilterReq).focusProperties { up = manageToggleReq }.tvTextFieldKeys(manageQuery),
                     shape = RoundedCornerShape(10.dp),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1068,7 +1113,7 @@ fun TvManageFeedDialog(
                     items(feedCats) { category ->
                         val catSelected = if (category == "All") providerTypeFilter.isEmpty() else category in providerTypeFilter
                         FilterChip(
-                            modifier = Modifier.focusRequester(dlgFocus).tvFocusRing(50.dp),
+                            modifier = Modifier.focusRequester(dlgFocus).focusProperties { up = manageFilterReq }.tvFocusRing(50.dp),
                             selected = catSelected,
                             onClick = {
                                 providerTypeFilter = if (category == "All") {

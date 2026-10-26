@@ -4655,7 +4655,7 @@ fun DetailScreen(
 
                     val tvPlayRow: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { topPad ->
                     // The row is full-width with wrap-sized pills: a cramped
-                    // ancestor (the 0.60f hero column, a narrow viewport) must
+                    // ancestor (the 0.44f hero column, a narrow viewport) must
                     // never squeeze the pills — required* sizes hold the pill
                     // shape and overflow instead of compressing (the "Play E1 /
                     // heart / download squash when I scroll" report).
@@ -5065,16 +5065,19 @@ fun DetailScreen(
                 }
                 Column(
                     Modifier
-                        .align(if (episodePosterStyle) Alignment.BottomStart else Alignment.TopStart)
-                        // Normal episode-list mode owns the right side of the TV hero.
-                        // Keep the detail text inside the remaining left area instead of
-                        // letting long overviews draw underneath the episode panel.
-                        .fillMaxWidth(if (episodePosterStyle) 1f else 0.60f)
+                        // The reference look (the Qi Refining shot): a narrow
+                        // text column parked low on the left, so the backdrop
+                        // art stays visible on the right instead of sitting
+                        // under full-width text. Both hero modes share it —
+                        // the full-width column is what the TV photos showed
+                        // text painted edge to edge over the art.
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth(0.44f)
                         .padding(
-                            start = 42.dp,
+                            start = 36.dp,
                             end = 12.dp,
-                            top = if (episodePosterStyle) 0.dp else 68.dp,
-                            bottom = if (episodePosterStyle) 12.dp else 0.dp,
+                            top = 8.dp,
+                            bottom = 16.dp,
                         )
                 ) {
                     // Provider eyebrow, like the reference client's blue
@@ -5096,9 +5099,9 @@ fun DetailScreen(
                     }
                     if (!heroLogo.isNullOrBlank()) {
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxWidth(if (episodePosterStyle) 0.62f else 0.58f).heightIn(max = 84.dp))
+                            modifier = Modifier.fillMaxWidth(0.90f).heightIn(max = 76.dp))
                     } else {
-                        Text(artTitle, fontSize = 24.sp * tvText, lineHeight = 29.sp * tvText, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 21.sp * tvText, lineHeight = 26.sp * tvText, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(8.dp))
