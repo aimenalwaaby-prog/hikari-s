@@ -71,6 +71,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import com.hikari.app.data.RatingSource
 import com.hikari.app.data.TitleRating
+import com.hikari.app.ui.Artwork
 import com.hikari.app.ui.components.PosterImage
 
 /**
@@ -502,12 +503,17 @@ fun Cs3EpisodeCard(
             .clickable(onClick = onPlay)
             .cs3Focus(16.dp),
     ) {
-        // Card background image, full-bleed like the reference.
+        // Card background image, full-bleed like the reference: a top-anchored
+        // centre crop (the one cinema anchor every 16:9 frame uses), never a
+        // stretch — FillBounds squeezed portrait/odd-size stills into the
+        // frame, which is the "compressed episode thumbnail" report. Same box,
+        // same card size; only the image fit changed.
         if (art != null) {
             PosterImage(
                 model = art,
                 contentDescription = title,
-                contentScale = ContentScale.FillBounds,
+                contentScale = ContentScale.Crop,
+                alignment = Artwork.CINEMA_ALIGNMENT,
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (hideSpoilers) Modifier.blur(14.dp) else Modifier),

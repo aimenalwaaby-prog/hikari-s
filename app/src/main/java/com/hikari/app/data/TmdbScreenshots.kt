@@ -61,22 +61,29 @@ object TmdbScreenshots {
                 }
                 else -> {}
             }
-            val resolved = TmdbResolver.resolve(item) ?: return emptyList()
+            // Null when TMDB cannot resolve the title at all (mistranslated
+            // donghua, provider-only rows): the anime fallback below still
+            // gets its chance instead of bailing out here.
+            val resolved = TmdbResolver.resolve(item)
             // "anime" is TMDB's tv namespace (see TmdbResolver): the images
             // endpoint is the same one. Resolving any other way 404s every
             // anime/donghua title.
-            val seg = if (resolved.mediaType == "movie") "movie" else "tv"
-            mem[seg + "/" + resolved.tmdbId]?.let {
-                if (it.isNotEmpty()) {
-                    firstByKey[item.uniqueId] = it.first()
-                    listByKey[item.uniqueId] = it
-                } else {
-                    firstByKey.remove(item.uniqueId)
-                    listByKey.remove(item.uniqueId)
+            val seg = if (resolved?.mediaType == "movie") "movie" else "tv"
+            resolved?.let { r ->
+                mem[seg + "/" + r.tmdbId]?.let {
+                    if (it.isNotEmpty()) {
+                        firstByKey[item.uniqueId] = it.first()
+                        listByKey[item.uniqueId] = it
+                    } else {
+                        firstByKey.remove(item.uniqueId)
+                        listByKey.remove(item.uniqueId)
+                    }
+                    return it
                 }
-                return it
             }
-            val out = withContext(Dispatchers.IO) {
+            val out = if (resolved == null) {
+                emptyList()
+            } else withContext(Dispatchers.IO) {
                 // No language filter (desktop parity): a zh-tagged donghua
                 // backdrop beats a provider thumbnail stretched over the
                 // hero. English/unflagged art first, then art in any
@@ -100,13 +107,27 @@ object TmdbScreenshots {
                     .take(8).map { IMG_BACKDROP + it.second }
             }
             if (mem.size >= 200) mem.clear()
-            if (out.isNotEmpty()) {
+            if (out.isNotEmpty() && resolved != null) {
                 mem[seg + "/" + resolved.tmdbId] = out
                 firstByKey[item.uniqueId] = out.first()
                 listByKey[item.uniqueId] = out
             } else {
                 firstByKey.remove(item.uniqueId)
                 listByKey.remove(item.uniqueId)
+            }
+            if (out.isEmpty()) {
+                // Universal fallback (parity with TmdbMeta.artwork): a title
+                // TMDB missed still gets the anime sources' own banner/cover
+                // sharp instead of a blurred provider poster. This is the
+                // cover-only/scoreless case the usable-pick gate sends here.
+                runCatching { DonghuaDetails.load(item) }.getOrNull()?.let { a ->
+                    val fb = listOfNotNull(a.banner, a.cover).distinct()
+                    if (fb.isNotEmpty()) {
+                        firstByKey[item.uniqueId] = fb.first()
+                        listByKey[item.uniqueId] = fb
+                        return fb
+                    }
+                }
             }
             out
         }.getOrDefault(emptyList())

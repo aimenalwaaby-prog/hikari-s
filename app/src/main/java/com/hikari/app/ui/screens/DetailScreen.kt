@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -469,6 +470,14 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     /** Takes the next ticket for an episode load. */
     private fun newEpisodeGeneration(): Int = ++episodeGeneration
 
+    /** Shelves (TMDB extras/ratings/related) run twice per open — once from
+     *  the nav args, once from the full origin meta — so the second pass must
+     *  win even if the first finishes later. Same ticket pattern as episodes. */
+    @Volatile
+    private var shelvesGeneration = 0
+
+    private fun newShelvesGeneration(): Int = ++shelvesGeneration
+
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
@@ -841,6 +850,16 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             )
             _meta.value = base
             _loading.value = false
+            // TMDB shelves from the nav args RIGHT NOW (title/poster are all
+            // TMDB needs to resolve): waiting for the origin's /meta first is
+            // what held the logo, title, ratings and overview back for seconds
+            // on every open. The upgrade pass below rebuilds them from the full
+            // meta when it lands; the generation tickets keep the newer pass
+            // winning no matter which finishes last.
+            val sgFast = newShelvesGeneration()
+            if (!com.hikari.app.data.IptvMark.of(base)) {
+                launch { loadShelves(base, sgFast) }
+            }
             // A fresh page starts on Vega pack 0 / quality row 0 — the provider
             // default — and it is set SYNCHRONOUSLY here so the episode lookup
             // starting below can never read a previous visit's pick for the
@@ -871,12 +890,24 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             // reported "it shows no IMDb/TMDB rating and no similar titles on
             // some titles". Now the page fills in from three directions at once.
             val metaDeferred = async { runCatching { repo.metaFor(base) }.getOrDefault(base) }
+            // Ticket for this load: stale async work (episodes, shelves) can
+            // never repaint a newer page. Defined up here so the shelves
+            // upgrade pass below can share it.
+            val gen = newEpisodeGeneration()
             // IPTV: a live channel gets NO TMDB shelves — no ratings strip, no
             // Cast/Trailers, and above all no Related/Similar row, which for a
             // channel name ("Sony TV HD") returned a shelf of unrelated films.
             // See [com.hikari.app.data.IptvMark].
-            if (!com.hikari.app.data.IptvMark.of(base)) {
-                launch { loadShelves(metaDeferred.await()) }
+            // (Fast shelves pass lives above, right after _loading=false.)
+            // Upgrade pass once the origin's /meta lands: same shelves rebuilt
+            // from the full item (year/genres/ids), winning over the fast pass
+            // via the newer ticket. (IPTV guard lives on the fast pass too;
+            // channels get no shelves either way.)
+            launch {
+                val fullMeta = metaDeferred.await()
+                if (gen == episodeGeneration && !com.hikari.app.data.IptvMark.of(fullMeta)) {
+                    loadShelves(fullMeta, newShelvesGeneration())
+                }
             }
             // The 3-second rule: the header and the episode list are on screen
             // within 3 seconds — TMDB-enriched when TMDB answered in time, the
@@ -886,7 +917,6 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             // the episodes are asked for, and the full meta repaints the header
             // when it lands. Guarded by the episode generation, so a stale load
             // can never repaint a newer page.
-            val gen = newEpisodeGeneration()
             val fastMeta = withTimeoutOrNull(3_000L) { metaDeferred.await() }
             launch {
                 val full = runCatching { metaDeferred.await() }.getOrNull() ?: return@launch
@@ -1198,7 +1228,7 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             ?.setSelectedLink(item.id, options[at].link)
     }
 
-    private suspend fun loadShelves(item: MediaItem) {
+    private suspend fun loadShelves(item: MediaItem, shelvesGen: Int) {
         // Everything here is blocking network + file IO, so it runs off the main
         // thread. Without this the TMDB lookups below were killed by Android's
         // NetworkOnMainThreadException (viewModelScope is the main dispatcher) and
@@ -1208,6 +1238,7 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             // Extras first: they are ONE TMDB call (credits+videos+certifications)
             // and carry the details block, so the page fills in fastest this way.
             val ex = runCatching { TmdbMeta.extras(item) }.getOrNull()
+            if (shelvesGen != shelvesGeneration) return@withContext
             _extras.value = ex
             // Ratings next: a handful of review sites (Wikidata, Rotten Tomatoes,
             // Metacritic, Letterboxd) asked in parallel and each independently
@@ -1222,11 +1253,13 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
                     // A source that had nothing to say just now is re-asked in
                     // the background; when it finally answers, the strip grows
                     // instead of staying frozen on the first attempt's misses.
-                    onUpdate = { _ratings.value = it },
+                    onUpdate = { if (shelvesGen == shelvesGeneration) _ratings.value = it },
                 )
-            }.getOrDefault(emptyList()).let { _ratings.value = it }
-            _related.value = runCatching { TmdbMeta.related(item) }.getOrDefault(emptyList())
-            _similar.value = runCatching { TmdbMeta.similar(item) }.getOrDefault(emptyList())
+            }.getOrDefault(emptyList()).let { if (shelvesGen == shelvesGeneration) _ratings.value = it }
+            val rel = runCatching { TmdbMeta.related(item) }.getOrDefault(emptyList())
+            if (shelvesGen == shelvesGeneration) _related.value = rel
+            val sim = runCatching { TmdbMeta.similar(item) }.getOrDefault(emptyList())
+            if (shelvesGen == shelvesGeneration) _similar.value = sim
         }
     }
 
@@ -1957,13 +1990,17 @@ fun DetailScreen(
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    // Television: the remote's focus starts on this page's Play button, so
-    // opening a title and pressing Enter plays it — no hunting for the button
-    // with the D-pad first (see com.hikari.app.tv.TvMode). The request itself
-    // lives ON the Play row (see below): the row is a LazyColumn item, so it can
-    // appear long after this page does, and asking for focus before the row
-    // exists would do nothing.
+    // Television: the remote's focus starts on this page's BACK button (top of
+    // the hero), so opening a title and pressing Enter can never scroll the
+    // page — focusing the bottom-anchored Play row pulled the whole page down
+    // on open via bring-into-view, parking the metadata at the top (see the
+    // heroBlock request below). Down from Back reaches Play. Without any focus
+    // the D-pad sat on the nav rail and OK went Home instead of into this page.
     val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Initial focus target on TV (see heroBlock): Back, the topmost item —
+    // taking focus there is a no-op for scrolling, while Play sits at the
+    // hero's bottom edge and focusing it scrolled the metadata into view.
+    val backFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     // The score strip (IMDb / RT / …) on the details block is drawn unless the
     // user switched it off in Settings → App Layout: it is on by default,
     // because a title's score is part of what the page is for.
@@ -4771,36 +4808,31 @@ fun DetailScreen(
                     }
     val heroBlock: @Composable () -> Unit = {
         if (isTvLayout) {
-            // The remote lands on Play the moment the page opens (TV parity
-            // with the phone action row below, which does the same): without
-            // this nothing in the page took focus, so it sat on the nav
-            // rail's Home tab and the next OK press went Home instead of
-            // into this page.
+            // The remote starts on Back, not Play: Back is the topmost item, so
+            // taking focus can never scroll the page (bring-into-view at the
+            // top is a no-op), while Play sits at the hero's bottom edge and
+            // focusing it pulled the whole page down on open — the reported
+            // "auto scroll to metadata". Without any focus the D-pad sat on
+            // the nav rail and OK went Home, so focus must land here.
             LaunchedEffect(Unit) {
                 delay(150L)
-                // Never yank a scrolled page back to the top: only take focus
-                // while the hero is still on screen (the opening position).
-                // Focusing Play after the user scrolled to episodes would
-                // scroll the metadata back into view — the reported "detail
-                // automatically coming to top".
                 if (detailList.firstVisibleItemIndex == 0 && detailList.firstVisibleItemScrollOffset < 200) {
-                    runCatching { playFocus.requestFocus() }
+                    runCatching { backFocus.requestFocus() }
                 }
             }
             // TV detail is a single cinematic hero: artwork, title, metadata,
             // overview and the primary action live in the same focusable scene.
-            // ~94% of the viewport height (88% when the episode panel rides
-            // right), NEVER taller than the viewport itself, so the
-            // bottom-anchored column always has art above it to sit low on —
-            // like the reference banner on 720p, 1080p or any panel. The old
-            // 480dp floor overflowed short viewports (dense windows, small
-            // panels): Play sat off-screen, and the focus request above then
-            // scrolled the whole page to reach it — which is what parked the
-            // metadata at the top. A wrap/minimum height shrinks to the block
-            // and "bottom" becomes "top" (batches 146-147).
+            // The hero fills EXACTLY the visible area (viewport minus status
+            // and navigation bars): any taller and Play sits off-screen, so any
+            // focus or list settling pulls the page and parks the metadata at
+            // the top; any shorter and the bottom-anchored block floats
+            // mid-screen. A wrap/minimum height shrinks to the block and
+            // "bottom" becomes "top" (batches 146-147).
             val cfgH = androidx.compose.ui.platform.LocalConfiguration.current
             val viewportH = cfgH.screenHeightDp.dp
-            val tvHeight = ((viewportH * if (episodePosterStyle) 0.88f else 0.94f).coerceAtMost(viewportH - 12.dp)).coerceAtLeast(280.dp)
+            val topInsetH = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            val bottomInsetH = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            val tvHeight = (viewportH - topInsetH - bottomInsetH - 8.dp).coerceAtLeast(280.dp)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -4823,7 +4855,7 @@ fun DetailScreen(
                 // the hero. The fixed cinematic backdrop must remain visible behind
                 // the episode content as the single continuous image.
                 // Circular glass back button, like the reference client.
-                IconButton(onClick = { nav.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(18.dp).size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)).border(1.dp, Color.White.copy(alpha = 0.30f), CircleShape).tvPress(
+                IconButton(onClick = { nav.popBackStack() }, modifier = Modifier.align(Alignment.TopStart).padding(18.dp).size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)).border(1.dp, Color.White.copy(alpha = 0.30f), CircleShape).focusRequester(backFocus).tvPress(
                     previewPass = true, onClick = { nav.popBackStack() })) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("Back"), tint = Color.White, modifier = Modifier.size(20.dp))
                 }
