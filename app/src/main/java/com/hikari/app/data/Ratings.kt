@@ -234,7 +234,19 @@ object Ratings {
         val list = found.values.sortedBy { it.source.ordinal }
         memory[key] = list
         writeDisk(key, list)
-        finish(list + mdb, tmdb ?: side.badge)
+        val done = finish(list + mdb, tmdb ?: side.badge)
+        // Universal fallback (TMDB -> AniList -> Bangumi): nothing anywhere knew
+        // this title, but an anime source does — wear its score, not a bare strip.
+        if (done.isEmpty()) {
+            runCatching { DonghuaDetails.load(item) }.getOrNull()?.let { a ->
+                anilistBadge(a)?.let { badge ->
+                    memory[key] = listOf(badge)
+                    writeDisk(key, listOf(badge))
+                    return@withContext listOf(badge)
+                }
+            }
+        }
+        done
     }
 
     /**
@@ -749,7 +761,9 @@ object Ratings {
     private suspend fun animeBadges(item: MediaItem): List<TitleRating>? {
         val pick = runCatching { DonghuaDetails.pick(item) }.getOrNull() ?: return null
         if (pick !is DonghuaDetails.Pick.Anime) return null
-        return listOfNotNull(anilistBadge(pick.info))
+        // A scoreless pick is NOT a win: returning an empty list here would
+        // suppress the TMDB path in load() and leave the strip bare.
+        return anilistBadge(pick.info)?.let { listOf(it) }
     }
 
     /** The anime badge: a percent like TMDB's, plus the "8.5/10" average the

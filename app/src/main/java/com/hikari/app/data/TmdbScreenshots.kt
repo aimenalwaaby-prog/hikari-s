@@ -45,20 +45,19 @@ object TmdbScreenshots {
     suspend fun backdropsFor(item: MediaItem): List<String> =
         runCatching {
             if (item.type != MediaType.SERIES && item.type != MediaType.MOVIE) return emptyList()
-            // Anime pick: the anime's own banner/cover, which are absolute
+            // Anime pick with real art: the anime's own banner/cover, which are absolute
             // URLs — never TMDB's mistranslated backdrops. Unprefixed, like
-            // every non-TMDB art source.
+            // every non-TMDB art source. A bare pick (no art, or cover-only with
+            // no overview/score) falls through to TMDB below instead of going bare.
             when (val pick = DonghuaDetails.pick(item)) {
                 is DonghuaDetails.Pick.Anime -> {
                     val list = listOfNotNull(pick.info.banner, pick.info.cover).distinct()
                     if (list.isNotEmpty()) {
                         firstByKey[item.uniqueId] = list.first()
                         listByKey[item.uniqueId] = list
-                    } else {
-                        firstByKey.remove(item.uniqueId)
-                        listByKey.remove(item.uniqueId)
+                        return list
                     }
-                    return list
+                    // else fall through to TMDB — no anime art to show.
                 }
                 else -> {}
             }

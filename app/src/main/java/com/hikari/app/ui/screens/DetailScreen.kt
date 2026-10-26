@@ -4676,7 +4676,7 @@ fun DetailScreen(
                             modifier = Modifier
                                 .focusRequester(playFocus)
                                 .requiredHeight(46.dp)
-                                .widthIn(min = 120.dp)
+                                .widthIn(min = 110.dp)
                                 .tvPress(
                                     previewPass = true,
                                     onClick = { tryPlay(detailBtnEp) }
@@ -4782,12 +4782,13 @@ fun DetailScreen(
             }
             // TV detail is a single cinematic hero: artwork, title, metadata,
             // overview and the primary action live in the same focusable scene.
-            // Fixed and TALLER than the block, so the bottom-anchored column
-            // always has art above it to sit low on: ~80% of the viewport
-            // like the reference banner (floor so short screens keep room
-            // for the block plus art). A wrap/minimum height shrinks to the
-            // block and "bottom" becomes "top" (batches 146-147).
-            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.72f else 0.80f).dp.coerceAtLeast(420.dp)
+            // Fixed and TALLER than the block, adaptive to any TV: ~94% of the
+            // viewport height (88% when the episode panel rides right), so the
+            // bottom-anchored column always has art above it to sit low on —
+            // like the reference banner on 720p, 1080p or any panel. Floor keeps
+            // short screens honest. A wrap/minimum height shrinks to the block
+            // and "bottom" becomes "top" (batches 146-147).
+            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.88f else 0.94f).dp.coerceAtLeast(480.dp)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -5079,12 +5080,12 @@ fun DetailScreen(
                         // reference: a ~1/3-width column, everything small
                         // except a slightly bigger title, the whole block low.
                         .align(Alignment.BottomStart)
-                        .fillMaxWidth(0.34f)
+                        .fillMaxWidth(0.36f)
                         .padding(
                             start = 36.dp,
                             end = 12.dp,
                             top = 8.dp,
-                            bottom = 16.dp,
+                            bottom = 20.dp,
                         )
                 ) {
                     // Provider eyebrow, like the reference client's blue

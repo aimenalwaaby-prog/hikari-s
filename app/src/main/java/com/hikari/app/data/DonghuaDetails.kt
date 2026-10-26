@@ -72,10 +72,17 @@ object DonghuaDetails {
      * can never overwrite the donghua. An empty genre list is unknown, not a
      * verdict — candidates still try the anime sources in that case.
      */
+    /** A hit counts only when it has something to show: overview, score or votes.
+     *  A cover-only / score-zero / blank-overview hit is a miss — the caller
+     *  falls through to TMDB instead of going bare (the DonghuaStream bare case). */
+    fun isUsable(info: AnimeInfo): Boolean =
+        info.overview.isNotBlank() || info.score10 > 0.0 || info.votes > 0
+
     suspend fun pick(item: MediaItem): Pick {
         if (!isAnimeCandidate(item)) return Pick.Tmdb
         if (isTmdbAnimation(item)) return Pick.Tmdb
-        return load(item)?.let { Pick.Anime(it) } ?: Pick.None
+        val info = load(item) ?: return Pick.None
+        return if (isUsable(info)) Pick.Anime(info) else Pick.None
     }
 
     /** TMDB's own details call the title Animation (or not). Null/no genres =

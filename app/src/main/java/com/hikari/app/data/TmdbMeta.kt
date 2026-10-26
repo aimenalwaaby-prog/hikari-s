@@ -61,14 +61,14 @@ object TmdbMeta {
     suspend fun artwork(item: MediaItem): Pair<String?, String?>? {
         if (!runCatching { HikariApp.instance.store.tmdbEnabled() }.getOrDefault(true) ||
             !runCatching { HikariApp.instance.store.tmdbModule("artwork") }.getOrDefault(true)) return null
-        // An anime AniList/Bangumi knew: its art wins outright, and TMDB is
-        // never consulted — TMDB's mistranslation (the Hollywood sitcom for a
-        // donghua called "Big Brother") must never overwrite the anime.
+        // An anime AniList/Bangumi knew with real data: its art wins outright,
+        // and TMDB is never consulted — TMDB's mistranslation (the Hollywood
+        // sitcom for a donghua called "Big Brother") must never overwrite the anime.
+        // A cover-only / score-zero / blank-overview hit is NOT a win (the bare case).
         when (val pick = runCatching { DonghuaDetails.pick(item) }.getOrNull()) {
             is DonghuaDetails.Pick.Anime -> {
                 val a = pick.info
-                if (a.cover == null && a.banner == null) return null
-                return a.cover to a.banner
+                if ((a.cover != null || a.banner != null) && DonghuaDetails.isUsable(a)) return a.cover to a.banner
             }
             else -> {}
         }
@@ -81,6 +81,11 @@ object TmdbMeta {
                 val b = d.tmdbPath("backdrop_path")?.let { IMG_WIDE + it }
                 if (p != null || b != null) return p to b
             }
+        }
+        // Universal fallback (TMDB -> AniList -> Bangumi): any title TMDB missed
+        // gets one anime-source try, so an untagged donghua/anime still resolves.
+        runCatching { DonghuaDetails.load(item) }.getOrNull()?.let { a ->
+            if (a.cover != null || a.banner != null) return a.cover to a.banner
         }
         return imdbArtwork(item)
     }
@@ -437,26 +442,43 @@ object TmdbMeta {
         val useProductions = runCatching { HikariApp.instance.store.tmdbModule("productions") }.getOrDefault(true)
         val useNetworks = runCatching { HikariApp.instance.store.tmdbModule("networks") }.getOrDefault(true)
         val useCollections = runCatching { HikariApp.instance.store.tmdbModule("collections") }.getOrDefault(true)
-        // Anime pick: the detail page gets the anime's own overview, score
-        // and title (see displayOverview) instead of the mistranslated TMDB
-        // entry's credits, trailers and collections. Everything else stays
-        // default — an anime answers no TMDB extras.
+        // Anime pick with real data: the detail page gets the anime's own overview,
+        // score and title (see displayOverview) instead of the mistranslated TMDB
+        // entry's credits, trailers and collections. A cover-only / scoreless /
+        // blank-overview hit is NOT a win — it falls through to TMDB (the bare case).
         when (val pick = runCatching { DonghuaDetails.pick(item) }.getOrNull()) {
             is DonghuaDetails.Pick.Anime -> {
                 val a = pick.info
-                return TitleExtras(
-                    details = TitleDetails(
-                        year = item.year,
-                        rating = a.score10.takeIf { it > 0.0 },
-                        voteCount = a.votes.takeIf { it > 0 },
-                    ),
-                    localizedTitle = a.title,
-                    overview = a.overview.takeIf { it.isNotBlank() },
-                )
+                if (a.overview.isNotBlank() || a.score10 > 0.0) {
+                    return TitleExtras(
+                        details = TitleDetails(
+                            year = item.year,
+                            rating = a.score10.takeIf { it > 0.0 },
+                            voteCount = a.votes.takeIf { it > 0 },
+                        ),
+                        localizedTitle = a.title,
+                        overview = a.overview.takeIf { it.isNotBlank() },
+                    )
+                }
             }
             else -> {}
         }
-        val resolved = runCatching { TmdbResolver.resolve(item) }.getOrNull() ?: return null
+        // Universal fallback builder (TMDB -> AniList -> Bangumi): a title TMDB
+        // cannot resolve gets the anime sources' own overview/score/title.
+        fun animeFallback(): TitleExtras? {
+            val a = runCatching { DonghuaDetails.load(item) }.getOrNull() ?: return null
+            if (a.overview.isBlank() && a.score10 <= 0.0) return null
+            return TitleExtras(
+                details = TitleDetails(
+                    year = item.year,
+                    rating = a.score10.takeIf { it > 0.0 },
+                    voteCount = a.votes.takeIf { it > 0 },
+                ),
+                localizedTitle = a.title,
+                overview = a.overview.takeIf { it.isNotBlank() },
+            )
+        }
+        val resolved = runCatching { TmdbResolver.resolve(item) }.getOrNull() ?: return animeFallback()
         val seg = segment(resolved.mediaType)
         val certKey = if (seg == "movie") "release_dates" else "content_ratings"
         // `videos` is answered in the app's chosen TMDB language TOO, and that
@@ -481,7 +503,7 @@ object TmdbMeta {
         if (videoLang.isNotBlank() && videoLang != "en") {
             query["include_video_language"] = "$videoLang,en,null"
         }
-        val d = TmdbResolver.apiGet("/$seg/${resolved.tmdbId}", query) ?: return null
+        val d = TmdbResolver.apiGet("/$seg/${resolved.tmdbId}", query) ?: return animeFallback()
 
         val isMovie = seg == "movie"
         // Movie runtime is one number; a series carries a per-episode list and,

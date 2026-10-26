@@ -1,3 +1,10 @@
+## 0.11.117 (continuous build only)
+
+### Fixed (batch: adaptive low hero + button gaps + TMDB-Anilist-Bangumi chain)
+- TV detail hero is adaptive and low on any panel: fixed tall banner (~94% viewport, 88% with the episode panel, 480dp floor) with the narrow 0.36f bottom-left column inside — art above, title/text/Play at the very bottom like the reference on 720p/1080p/any TV; phones untouched
+- TV Play row no longer touches: wider 0.36f column + Play min 110dp gives download/trailer real gaps on any TV width, required sizes kept so nothing squashes on focus
+- Metadata is TMDB -> AniList -> Bangumi now: a bare/cover-only anime hit no longer suppresses TMDB (overview/score/votes gate), and any title TMDB misses gets one AniList-then-Bangumi try for art, details/overview and ratings — data comes from wherever it exists
+
 ## 0.11.116 (continuous build only)
 
 ### Fixed (batch: TV hero tall fixed banner, block sits low)
