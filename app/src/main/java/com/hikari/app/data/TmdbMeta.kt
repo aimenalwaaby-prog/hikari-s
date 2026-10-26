@@ -465,7 +465,7 @@ object TmdbMeta {
         }
         // Universal fallback builder (TMDB -> AniList -> Bangumi): a title TMDB
         // cannot resolve gets the anime sources' own overview/score/title.
-        fun animeFallback(): TitleExtras? {
+        suspend fun animeFallback(): TitleExtras? {
             val a = runCatching { DonghuaDetails.load(item) }.getOrNull() ?: return null
             if (a.overview.isBlank() && a.score10 <= 0.0) return null
             return TitleExtras(
