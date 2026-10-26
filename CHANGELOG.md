@@ -1,3 +1,8 @@
+## 0.11.115 (continuous build only)
+
+### Fixed (batch: TV hero fits low like the reference)
+- The TV detail block was bottom-anchored but taller than its fixed hero box, so it spilled upward and the title landed at the top anyway: the hero now only guarantees a minimum height and grows with the block, the column is ~1/3 width, the title/logo/meta/overview are all smaller with tighter gaps, and the overview runs 3 small lines — the whole block truly sits low-left on the art like the reference; phones untouched
+
 ## 0.11.114 (continuous build only)
 
 ### Fixed (batch: TV detail hero like the reference, provider-box D-pad)

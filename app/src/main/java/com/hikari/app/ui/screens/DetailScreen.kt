@@ -4786,7 +4786,11 @@ fun DetailScreen(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(tvHeight.coerceAtLeast(340.dp))
+                    // Minimum height only: the box grows with the block, so
+                    // the whole block always sits low instead of spilling up
+                    // past the hero's top (the old fixed height clipped a
+                    // tall block upward and the title landed at the top).
+                    .heightIn(min = tvHeight.coerceAtLeast(340.dp))
                     
                     .onSizeChanged { headerPx = it.height }
             ) {
@@ -5070,9 +5074,11 @@ fun DetailScreen(
                         // art stays visible on the right instead of sitting
                         // under full-width text. Both hero modes share it —
                         // the full-width column is what the TV photos showed
-                        // text painted edge to edge over the art.
+                        // text painted edge to edge over the art. Like the
+                        // reference: a ~1/3-width column, everything small
+                        // except a slightly bigger title, the whole block low.
                         .align(Alignment.BottomStart)
-                        .fillMaxWidth(0.44f)
+                        .fillMaxWidth(0.34f)
                         .padding(
                             start = 36.dp,
                             end = 12.dp,
@@ -5090,7 +5096,7 @@ fun DetailScreen(
                         Text(
                             tvProviderName,
                             color = Color(0xFF4DA3FF),
-                            fontSize = 11.sp * tvText,
+                            fontSize = 10.sp * tvText,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -5099,12 +5105,12 @@ fun DetailScreen(
                     }
                     if (!heroLogo.isNullOrBlank()) {
                         AsyncImage(model = heroLogo, contentDescription = artTitle, contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxWidth(0.90f).heightIn(max = 76.dp))
+                            modifier = Modifier.fillMaxWidth(0.90f).heightIn(max = 68.dp))
                     } else {
-                        Text(artTitle, fontSize = 21.sp * tvText, lineHeight = 26.sp * tvText, fontWeight = FontWeight.Bold,
+                        Text(artTitle, fontSize = 19.sp * tvText, lineHeight = 24.sp * tvText, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
 
                     // One meta line, like the reference client: year, type,
                     // cert chip inline, runtime, genres — a single small row
@@ -5131,7 +5137,7 @@ fun DetailScreen(
                         ) {
                             if (tvMetaHead.isNotBlank()) Text(
                                 tvMetaHead,
-                                fontSize = 11.sp * tvText,
+                                fontSize = 10.sp * tvText,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.88f),
                                 maxLines = 1,
@@ -5139,7 +5145,7 @@ fun DetailScreen(
                             if (!tvCert.isNullOrBlank()) com.hikari.app.tv.TvCertChip(tvCert)
                             if (tvMetaTail.isNotBlank()) Text(
                                 (if (tvMetaHead.isNotBlank() || !tvCert.isNullOrBlank()) "•  " else "") + tvMetaTail,
-                                fontSize = 11.sp * tvText,
+                                fontSize = 10.sp * tvText,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.72f),
                                 maxLines = 1,
@@ -5175,24 +5181,24 @@ fun DetailScreen(
                         }
                     }
                     if (!displayOverview.isNullOrBlank()) {
-                        // Two lines like the reference client, with its own
-                        // small More button underneath — tapping text or
+                        // Three small lines like the reference client, with its
+                        // own small More button underneath — tapping text or
                         // button toggles the full overview.
                         var tvOverviewFull by remember(displayOverview) { mutableStateOf(false) }
                         Text(
                             displayOverview!!,
-                            fontSize = 12.sp * tvText,
-                            lineHeight = 17.sp * tvText,
+                            fontSize = 11.sp * tvText,
+                            lineHeight = 15.sp * tvText,
                             color = Color.White.copy(alpha = 0.88f),
-                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else 2,
+                            maxLines = if (tvOverviewFull) Int.MAX_VALUE else 3,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                 .clickable { tvOverviewFull = !tvOverviewFull },
                         )
                         TextButton(
                             onClick = { tvOverviewFull = !tvOverviewFull },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                            modifier = Modifier.padding(top = 6.dp).tvPress(
+                            modifier = Modifier.padding(top = 4.dp).tvPress(
                                 previewPass = true,
                                 onClick = { tvOverviewFull = !tvOverviewFull }
                             )
@@ -5209,7 +5215,7 @@ fun DetailScreen(
                     // Play/Resume pill + save and download squares — for
                     // series as well as movies, so the next episode is one
                     // tap away without scrolling.
-                    tvPlayRow(10.dp)
+                    tvPlayRow(8.dp)
                 }
             }
         } else {
