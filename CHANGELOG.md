@@ -1,3 +1,17 @@
+## 0.12.0
+
+- Added new TV UI
+- Added TMDB images in detail screen
+- Added new server page
+- Added novel reader
+- Fixed search tab UI
+- Fixed provider tab
+- Added TMDB hero images
+- Fixed trackers synchronization
+- Added Zangetsu and LNReader repo support
+- Fixed download all issue
+- Fixed many known bugs
+
 ## 0.11.117 (continuous build only)
 
 ### Fixed (batch: adaptive low hero + button gaps + TMDB-Anilist-Bangumi chain)
