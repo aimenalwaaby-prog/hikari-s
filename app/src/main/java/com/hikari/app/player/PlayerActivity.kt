@@ -7063,7 +7063,10 @@ class PlayerActivity : ComponentActivity() {
                 if (tvSheet) {
                     val titleStack = LinearLayout(this@PlayerActivity).apply {
                         orientation = LinearLayout.VERTICAL
-                        addView(TextView(this@PlayerActivity).apply {
+                        // The full-page Sources sheet draws its own title over
+                        // the art (see serverHeader): a second big title here
+                        // only steals the list room, so it is skipped.
+                        if (title.isNotBlank()) addView(TextView(this@PlayerActivity).apply {
                             text = title
                             dpText(if (titleSizeSp > 0f) titleSizeSp else 24f)
                             includeFontPadding = false
@@ -7437,7 +7440,11 @@ class PlayerActivity : ComponentActivity() {
             // windows, which reads as side gaps around a box meant to run edge
             // to edge (the red-marked server-box report).
             setLayout(if (edgeToEdge) panelW else panelW + 2 * halo, WindowManager.LayoutParams.WRAP_CONTENT)
-            if (tvSheet) {
+            // The full-page Sources sheet reads as its own centered page
+            // (like the reference client), never a side sheet pinned to the
+            // window edge, which parked its rows at the bottom bezel.
+            val sourcesFullPage = edgeToEdge && ghostPanel
+            if (tvSheet && !sourcesFullPage) {
                 setGravity(
                     if (sideTvPanel) Gravity.START or Gravity.CENTER_VERTICAL
                     else Gravity.END or Gravity.CENTER_VERTICAL
@@ -9258,7 +9265,7 @@ class PlayerActivity : ComponentActivity() {
             // takes the least room it can — small title up top, tight rows.
             // (Tightened: every gap above the list shaved so more rows fit.)
             val hp = (12 * density).toInt()
-            setPadding(hp, (4 * density).toInt(), hp, (1 * density).toInt())
+            setPadding(hp, (2 * density).toInt(), hp, 0)
         }
         if (logoModel != null) {
             serverHeader.addView(ImageView(this).apply {
@@ -9266,17 +9273,17 @@ class PlayerActivity : ComponentActivity() {
                 adjustViewBounds = true
                 runCatching { load(logoModel) }
             }, LinearLayout.LayoutParams(
-                (resources.displayMetrics.widthPixels * 0.72f).toInt()
-                    .coerceAtMost((560 * density).toInt()),
+                (resources.displayMetrics.widthPixels * 0.55f).toInt()
+                    .coerceAtMost((420 * density).toInt()),
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                bottomMargin = (4 * density).toInt()
+                bottomMargin = (2 * density).toInt()
             })
         } else {
             serverHeader.addView(TextView(this).apply {
                 text = serverTitle.uppercase()
-                dpText(15f)
+                dpText(13f)
                 includeFontPadding = false
                 gravity = Gravity.CENTER
                 isSingleLine = true
@@ -9332,13 +9339,13 @@ class PlayerActivity : ComponentActivity() {
         serverHeader.addView(foundRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = (3 * density).toInt() })
+        ).apply { bottomMargin = (2 * density).toInt() })
         // Pinned filter pills: fixed under the found line, above the progress
         // bar — always reachable, never scrolling away with the rows.
         serverHeader.addView(chipStrip, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = (2 * density).toInt() })
+        ).apply { bottomMargin = (1 * density).toInt() })
         searchBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             indeterminateTintList = ColorStateList.valueOf(withAlpha(accentMidColor, 0.95f))
@@ -9357,7 +9364,7 @@ class PlayerActivity : ComponentActivity() {
         // no way out is lost — only the two pills.
         val hintView = presentGlass(
             dialog,
-            if (forDownload) I18n.t("Download from") else "Sources",
+            if (forDownload) I18n.t("Download from") else "",
             list,
             700f,
             hint = baseHint,
@@ -9447,7 +9454,7 @@ class PlayerActivity : ComponentActivity() {
                 if (!fittingSheet) runCatching {
                     fittingSheet = true
                     try {
-                    val fh = (24 * density).toInt()
+                    val fh = ((if (playerTvRemote()) 56 else 24) * density).toInt()
                     val want = fh + (12 * density).toInt()
                     val minDelta = (3 * density).toInt().coerceAtLeast(3)
                     if (abs(list.paddingBottom - want) >= minDelta) {

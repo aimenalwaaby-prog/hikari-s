@@ -4692,13 +4692,13 @@ fun DetailScreen(
 
                     val tvPlayRow: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { topPad ->
                     // The row is full-width with wrap-sized pills: a cramped
-                    // ancestor (the 0.40f hero column, a narrow viewport) must
+                    // ancestor (the narrow hero column, a narrow viewport) must
                     // never squeeze the pills — required* sizes hold the pill
                     // shape and overflow instead of compressing (the "Play E1 /
                     // heart / download squash when I scroll" report).
                     Row(
                         Modifier.fillMaxWidth().padding(top = topPad),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Button(
@@ -4713,7 +4713,7 @@ fun DetailScreen(
                             modifier = Modifier
                                 .focusRequester(playFocus)
                                 .requiredHeight(50.dp)
-                                .widthIn(min = 180.dp)
+                                .widthIn(min = 140.dp)
                                 .tvPress(
                                     previewPass = true,
                                     onClick = { tryPlay(detailBtnEp) }
@@ -4781,7 +4781,7 @@ fun DetailScreen(
                         // Trailer LAST: the title's own trailer instead of
                         // scrolling for it.
                         extras?.trailers?.firstOrNull()?.let { tvTrailer ->
-                            FilledTonalButton(
+                            OutlinedButton(
                                 onClick = {
                                     openYouTubeVideo(
                                         context,
@@ -5119,12 +5119,12 @@ fun DetailScreen(
                         // text column parked low on the left, so the backdrop
                         // art stays visible on the right instead of sitting
                         // under full-width text. One-to-one with the reference:
-                        // ~40% width, bottom-anchored with the action row just
+                        // ~half width, bottom-anchored with the action row just
                         // off the bottom edge, everything small except the
                         // wordmark/title. NEVER top-anchored: the whole block
                         // must open low and stay low until the user scrolls.
                         .align(Alignment.BottomStart)
-                        .fillMaxWidth(0.40f)
+                        .fillMaxWidth(0.52f)
                         .padding(
                             start = 44.dp,
                             end = 12.dp,

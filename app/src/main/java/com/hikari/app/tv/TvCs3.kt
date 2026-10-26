@@ -55,8 +55,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +74,7 @@ import kotlinx.coroutines.launch
 import com.hikari.app.data.RatingSource
 import com.hikari.app.data.TitleRating
 import com.hikari.app.ui.Artwork
+import com.hikari.app.ui.ExtensionIcons
 import com.hikari.app.ui.components.PosterImage
 
 /**
@@ -606,6 +609,20 @@ fun Cs3EpisodeCard(
                 )
             }
         }
+        // Bottom scrim: text sits directly on full-bleed art, and on a
+        // bright still the synopsis vanished. A bottom-up gradient keeps
+        // every line readable.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(170.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
+                    )
+                ),
+        )
         // Bottom overlay: code, title, synopsis, duration + date.
         Column(
             modifier = Modifier
@@ -646,7 +663,15 @@ fun Cs3EpisodeCard(
                 },
                 fontSize = 14.5.sp * ts,
                 lineHeight = 20.sp * ts,
-                color = Color(0xFFD1D5DB).copy(alpha = if (desc.isNotBlank() && !hideSpoilers) 0.88f else 0.45f),
+                color = Color.White.copy(alpha = if (desc.isNotBlank() && !hideSpoilers) 0.95f else 0.55f),
+                fontWeight = FontWeight.SemiBold,
+                style = androidx.compose.material3.LocalTextStyle.current.copy(
+                    shadow = Shadow(
+                        color = Color.Black.copy(alpha = 0.9f),
+                        offset = Offset(0f, 2f),
+                        blurRadius = 4f,
+                    ),
+                ),
                 minLines = 2,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -1221,8 +1246,15 @@ private fun Cs3PluginIcon(iconUrl: String?, name: String) {
     // expired file) used to paint a blank dark square. The letter fallback
     // now covers both: blank shows it at once, dead swaps to it when the
     // retries give up (see PosterImage.onFinalError).
+    // Repo listings template their icons and the phone row substitutes
+    // the size before display: without the same step here every templated
+    // URL fails to load and the card falls to the letter glyph.
+    val safeIcon = iconUrl
+        ?.replace("%exact_size%", "64")
+        ?.replace("%size%", "64")
+        ?.let { ExtensionIcons.absolute(it, null) }
     var iconDead by remember(iconUrl) { mutableStateOf(false) }
-    if (iconUrl.isNullOrBlank() || iconDead) {
+    if (safeIcon.isNullOrBlank() || iconDead) {
         Box(
             modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Cs3.SurfaceElevated),
             contentAlignment = Alignment.Center,
@@ -1236,7 +1268,7 @@ private fun Cs3PluginIcon(iconUrl: String?, name: String) {
         }
     } else {
         PosterImage(
-            model = iconUrl,
+            model = safeIcon,
             contentDescription = name,
             contentScale = ContentScale.Crop,
             onFinalError = { iconDead = true },

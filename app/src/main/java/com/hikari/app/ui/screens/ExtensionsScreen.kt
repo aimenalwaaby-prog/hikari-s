@@ -8196,12 +8196,23 @@ private fun TvPluginCardEntry(
     cs3SettingsIds: Set<String>,
     modifier: Modifier = Modifier,
 ) {
-    var icon by remember(p.url) { mutableStateOf(p.iconUrl) }
+    // Absolutize the listing icon against the repo file and substitute
+    // templated sizes: without this every templated URL fails in Coil and
+    // the TV card falls back to the letter glyph.
+    var icon by remember(p.url) {
+        mutableStateOf(
+            com.hikari.app.ui.ExtensionIcons.absolute(
+                p.iconUrl?.replace("%exact_size%", "64")?.replace("%size%", "64"),
+                repo.url,
+            ) ?: p.iconUrl
+        )
+    }
     LaunchedEffect(p.url) {
         if (icon.isNullOrBlank()) {
             delay(ICON_SETTLE_MS)
             icon = withContext(Dispatchers.IO) {
                 com.hikari.app.ui.ExtensionIcons.forRepoPlugin(p, repo.kind, repo.url)
+                    ?.replace("%exact_size%", "64")?.replace("%size%", "64")
             }
         }
     }
