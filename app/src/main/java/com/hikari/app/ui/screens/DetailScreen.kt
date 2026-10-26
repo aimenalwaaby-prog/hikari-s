@@ -4782,15 +4782,16 @@ fun DetailScreen(
             }
             // TV detail is a single cinematic hero: artwork, title, metadata,
             // overview and the primary action live in the same focusable scene.
-            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.52f else 0.60f).dp
+            // Fixed and TALLER than the block, so the bottom-anchored column
+            // always has art above it to sit low on: ~80% of the viewport
+            // like the reference banner (floor so short screens keep room
+            // for the block plus art). A wrap/minimum height shrinks to the
+            // block and "bottom" becomes "top" (batches 146-147).
+            val tvHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * if (episodePosterStyle) 0.72f else 0.80f).dp.coerceAtLeast(420.dp)
             Box(
                 Modifier
                     .fillMaxWidth()
-                    // Minimum height only: the box grows with the block, so
-                    // the whole block always sits low instead of spilling up
-                    // past the hero's top (the old fixed height clipped a
-                    // tall block upward and the title landed at the top).
-                    .heightIn(min = tvHeight.coerceAtLeast(340.dp))
+                    .height(tvHeight)
                     
                     .onSizeChanged { headerPx = it.height }
             ) {

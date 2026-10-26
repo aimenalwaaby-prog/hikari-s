@@ -1,3 +1,8 @@
+## 0.11.116 (continuous build only)
+
+### Fixed (batch: TV hero tall fixed banner, block sits low)
+- The bottom anchor had no room to work in: the hero wrapped the block so bottom behaved like top. The hero is a fixed tall banner again (~80% of the viewport like the reference, 420dp floor on short screens) with the narrow bottom-left column inside it — art above, title/text/Play low on the image. TV only, phones untouched
+
 ## 0.11.115 (continuous build only)
 
 ### Fixed (batch: TV hero fits low like the reference)
