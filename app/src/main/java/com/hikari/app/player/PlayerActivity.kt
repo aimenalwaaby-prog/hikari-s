@@ -8835,7 +8835,7 @@ class PlayerActivity : ComponentActivity() {
                                     I18n.t("No link to open."),
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
-                                return@serverRefRow
+                                return@serverRow
                             }
                             runCatching {
                                 startActivity(
