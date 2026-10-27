@@ -117,6 +117,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.AlertDialog
@@ -894,6 +895,7 @@ fun SettingsScreen(nav: NavHostController) {
                     // lives here — it is a decision about SERVERS — and only here:
                     // the same card used to show up in the Player folder too.
                     item { SettingsCard { PlaybackStartCard(app) } }
+                    item { SettingsCard { ServerLayoutCard(app) } }
                 }
                 SettingsFolder.NETWORK -> {
                     item {
@@ -5117,6 +5119,89 @@ private fun PlaybackStartCard(app: HikariApp) {
                     scope.launch { runCatching { app.store.setPlayScopeAsk(it) } }
                 },
             )
+        }
+    }
+}
+
+/**
+ * Settings → Playback & Servers → Server page layout.
+ *
+ * Two looks for the player's Sources sheet: HORIZONTAL (rows floating over
+ * the title's landscape backdrop art, like now) and VERTICAL (compact solid
+ * cards over the title's portrait poster art). Read through the synchronous
+ * ServerLayouts mirror (see HikariApp), because the sheet is View-based.
+ */
+private fun ServerLayoutCard(app: HikariApp) {
+    val scope = rememberCoroutineScope()
+    var layout by remember { mutableStateOf(com.hikari.app.player.ServerLayouts.HORIZONTAL) }
+
+    LaunchedEffect(Unit) {
+        layout = runCatching { app.store.serverLayout() }
+            .getOrDefault(com.hikari.app.player.ServerLayouts.HORIZONTAL)
+    }
+
+    fun persist(next: String) {
+        layout = com.hikari.app.player.ServerLayouts.namespace(next)
+        scope.launch { runCatching { app.store.setServerLayout(layout) } }
+    }
+
+    SettingsSection(
+        id = "player.sources_layout",
+        icon = Icons.Filled.ViewModule,
+        title = tr("Server page layout"),
+        summary = if (com.hikari.app.player.ServerLayouts.namespace(layout) == com.hikari.app.player.ServerLayouts.VERTICAL) {
+            tr("Vertical — compact cards over poster art")
+        } else {
+            tr("Horizontal — rows over backdrop art")
+        },
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { persist(com.hikari.app.player.ServerLayouts.HORIZONTAL) }
+                // A remote lands on the ROW — the radio button alone is a small
+                // right-hand target the focus search skips past. See [Modifier.tvToggle].
+                .tvToggle(layout != com.hikari.app.player.ServerLayouts.VERTICAL, onValueChange = {
+                    if (it) persist(com.hikari.app.player.ServerLayouts.HORIZONTAL)
+                }),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = layout != com.hikari.app.player.ServerLayouts.VERTICAL, onClick = null)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    tr("Horizontal"),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    tr("Wide rows over backdrop art, like now"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { persist(com.hikari.app.player.ServerLayouts.VERTICAL) }
+                // See the row above: the whole line is the target, so the D-pad
+                // can reach this choice too.
+                .tvToggle(layout == com.hikari.app.player.ServerLayouts.VERTICAL, onValueChange = {
+                    if (it) persist(com.hikari.app.player.ServerLayouts.VERTICAL)
+                }),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = layout == com.hikari.app.player.ServerLayouts.VERTICAL, onClick = null)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    tr("Vertical"),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    tr("Compact cards over portrait poster art"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
