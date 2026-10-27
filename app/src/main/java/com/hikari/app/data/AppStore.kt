@@ -700,6 +700,9 @@ class AppStore(private val ctx: Context) {
          *  the built-in budget; 20–100 overrides it. See [serverTimeoutAllSecs]
          *  for the "same time for every extension" master switch. */
         val SERVER_TIMEOUT_ALL = intPreferencesKey("serverTimeoutAllSecs")
+        /** "horizontal" (backdrop rows, like now) | "vertical" (compact
+         *  cards + portrait art). See [com.hikari.app.player.ServerLayouts]. */
+        val SERVER_LAYOUT = stringPreferencesKey("serverLayout")
         /** providerId → seconds (20–100), as JSON. Only the extensions the user
          *  touched are in here; everything else reads the built-in budget. */
         val SERVER_TIMEOUTS = stringPreferencesKey("serverTimeouts")
@@ -1432,6 +1435,17 @@ class AppStore(private val ctx: Context) {
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     suspend fun heroStyle(): String = heroStyleFlow().first()
+
+    /** The Sources sheet's page layout (Settings → Playback & Servers). */
+    fun serverLayoutFlow(): Flow<String> =
+        store.data.map { com.hikari.app.player.ServerLayouts.namespace(it[K.SERVER_LAYOUT] ?: com.hikari.app.player.ServerLayouts.HORIZONTAL) }
+            .distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    suspend fun serverLayout(): String = serverLayoutFlow().first()
+
+    suspend fun setServerLayout(key: String) {
+        write("SERVER_LAYOUT") { it[K.SERVER_LAYOUT] = com.hikari.app.player.ServerLayouts.namespace(key) }
+    }
 
     suspend fun setHeroStyle(key: String) {
         write("HERO_STYLE") { it[K.HERO_STYLE] = com.hikari.app.ui.components.HeroStyles.normalize(key) }
