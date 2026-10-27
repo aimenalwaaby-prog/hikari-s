@@ -6615,10 +6615,12 @@ class PlayerActivity : ComponentActivity() {
 
     /**
      * One server as a compact vertical card: the reference Sources card look
-     * (red provider line + red size badge, title, filename block, fact chips)
-     * with a Play / Download / Open strip underneath. Used when the Server
-     * page layout is Vertical (see ServerLayouts) — same servers, same data
-     * as [serverRefRow], only the presentation changes.
+     * (red provider line + red size badge, title, filename block, fact chips),
+     * card only — no action strip, exactly like the 0.11.33 reference. Used
+     * when the Server page layout is Vertical (see ServerLayouts) — same
+     * servers, same data as [serverRefRow], only the presentation changes.
+     * Tap plays (or opens the download picker in download mode); long-press
+     * downloads, so nothing the strip used to cover is lost.
      */
     private fun serverVertRow(
         src: PlayerSource,
@@ -6627,7 +6629,6 @@ class PlayerActivity : ComponentActivity() {
         onDownload: () -> Unit,
         onExternal: () -> Unit,
     ): View {
-        val density = resources.displayMetrics.density
         val quality = com.hikari.app.data.ServerMeta.rowQuality(src.name, src.details)
         var facts = com.hikari.app.data.ServerMeta.enrichedDetails(src.name, src.details, src.url)
         if (quality != "SRC") {
@@ -6649,68 +6650,20 @@ class PlayerActivity : ComponentActivity() {
         val size = runCatching {
             com.hikari.app.data.ServerMeta.sizeOf(src.name, src.details)
         }.getOrNull()?.takeIf { it.isNotBlank() }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        col.addView(
-            serverCard(
-                GlassOption(
-                    label = serverLabel(src),
-                    sub = metaLine.takeIf { it.isNotBlank() },
-                    badge = size,
-                    selected = selected,
-                    labelMaxLines = 2,
-                    topLabel = src.providerName.takeIf { it.isNotBlank() },
-                    chips = chips,
-                ),
-                onClick = { onPlay() },
+        val card = serverCard(
+            GlassOption(
+                label = serverLabel(src),
+                sub = metaLine.takeIf { it.isNotBlank() },
+                badge = size,
+                selected = selected,
+                labelMaxLines = 2,
+                topLabel = src.providerName.takeIf { it.isNotBlank() },
+                chips = chips,
             ),
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ),
+            onClick = { onPlay() },
         )
-        // Play / Download / Open stay one tap away in vertical mode too —
-        // the card tap plays, and this strip covers the rest without the
-        // horizontal row's round buttons.
-        col.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            fun action(label: String, accent: Boolean, onClick: () -> Unit) {
-                addView(TextView(this@PlayerActivity).apply {
-                    text = label
-                    dpText(11f)
-                    includeFontPadding = false
-                    gravity = Gravity.CENTER
-                    isSingleLine = true
-                    setTypeface(typeface, Typeface.BOLD)
-                    setTextColor(if (accent) withAlpha(accentMidColor, 0.95f) else 0xFFDCE3EE.toInt())
-                    val hp = (14 * density).toInt()
-                    val vp = (8 * density).toInt()
-                    setPadding(hp, vp, hp, vp)
-                    background = GradientDrawable().apply {
-                        shape = GradientDrawable.RECTANGLE
-                        cornerRadius = 8f * density
-                        setStroke((1 * density).toInt().coerceAtLeast(1), if (accent) withAlpha(accentMidColor, 0.7f) else 0x38FFFFFF)
-                    }
-                    isClickable = true
-                    if (playerTvRemote()) {
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                        if (foreground == null) foreground = tvFocusRing()
-                    }
-                    setOnClickListener { onClick() }
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = (6 * density).toInt()
-                    marginEnd = (6 * density).toInt()
-                })
-            }
-            action(I18n.t("Play"), true) { onPlay() }
-            action(I18n.t("Download"), false) { onDownload() }
-            action(I18n.t("Open"), false) { onExternal() }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = (6 * density).toInt() })
-        return col
+        card.setOnLongClickListener { onDownload(); true }
+        return card
     }
 
     /** Sources row in the user's chosen page layout (see ServerLayouts).
@@ -7092,7 +7045,7 @@ class PlayerActivity : ComponentActivity() {
          *  passes the title's TMDB/AniList/Bangumi backdrop, the desktop
          *  client's look): a scrim keeps the rows readable. Null = no art,
          *  every other panel unchanged. */
-        artUrl: String? = null,
+        artUrl: Any? = null,
         /** The chooser passes a smaller title size so its header stays compact
          *  and the list gets the room; every other caller keeps the default. */
         titleSizeSp: Float = 0f,
@@ -7476,13 +7429,14 @@ class PlayerActivity : ComponentActivity() {
         }
 
         dialog.setContentView(
-            if (artUrl.isNullOrBlank()) root else android.widget.FrameLayout(this).apply {
+            if (artUrl == null || (artUrl is String && artUrl.isBlank())) root else android.widget.FrameLayout(this).apply {
                 addView(android.widget.ImageView(this@PlayerActivity).apply {
                     scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
                     // Tagged so the server screen can find its own backdrop
                     // and rotate it (see the art loop at the chooser call).
                     tag = "glassArtView"
-                    runCatching { load(artUrl) }
+                    val artModel = artUrl
+                    runCatching { load(artModel) }
                 }, android.widget.FrameLayout.LayoutParams(
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT
@@ -8464,9 +8418,12 @@ class PlayerActivity : ComponentActivity() {
             startChooserShown = true
             // The start chooser is a landscape screen like the reference: the
             // server rows read full-bleed over the title art on phones too.
+            // Vertical (phone-only) instead opens portrait, so the whole
+            // sheet is a portrait page like the 0.11.33 reference; the
+            // dismiss below frees the lock again (see verticalPortrait).
             if (!playerTvRemote()) {
                 runCatching {
-                    requestedOrientation = SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    requestedOrientation = if (com.hikari.app.player.ServerLayouts.isVertical() && !com.hikari.app.tv.TvMode.isTv) SCREEN_ORIENTATION_PORTRAIT else SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 }
             }
             // Backing out of a download chooser must NOT fall back to playing
@@ -9299,6 +9256,12 @@ class PlayerActivity : ComponentActivity() {
             chooserScrollListener?.let { runCatching { verticalScrollerOf(list)?.viewTreeObserver?.removeOnScrollChangedListener(it) } }
             chooserScrollListener = null
             if (serverChooserDialog === dialog) serverChooserDialog = null
+            // A vertical sheet opened portrait (see the startMode lock above):
+            // free the lock so playback follows the video again instead of
+            // staying portrait. Phone-only, like the lock itself.
+            if (com.hikari.app.player.ServerLayouts.isVertical() && !com.hikari.app.tv.TvMode.isTv && !playerTvRemote()) {
+                runCatching { requestedOrientation = SCREEN_ORIENTATION_UNSPECIFIED }
+            }
             // Closed without a pick (the back button, the ✕, a tap outside):
             // fall back to the remembered/best server rather than leaving the
             // player blank on the loading card. A tap on a row has already
@@ -9516,15 +9479,18 @@ class PlayerActivity : ComponentActivity() {
             // (see the art loop after the show below).
             artUrl = run {
                 // Vertical reads portrait: the TMDB poster the detail screen
-                // passes (histPoster, a vertical image) over the landscape
-                // backdrops, single frame, no rotation. Without a poster the
-                // first backdrop is used, still single frame behind the box.
-                // Horizontal keeps the backdrop rotation as now.
+                // passes (histPoster, a vertical image), resolved through
+                // PosterLoader so data/token posters load too — single
+                // frame, no rotation, CENTER_CROP fills the portrait page.
+                // Without a poster the first backdrop is used, still single
+                // frame behind the box. Horizontal keeps the backdrop
+                // rotation as now.
                 if (verticalSheet) {
                     val poster = intent?.getStringExtra("histPoster")?.takeIf { it.isNotBlank() }
-                    if (poster != null) {
-                        artLoopUrls = listOf(poster)
-                        poster
+                    val resolved = poster?.let { PosterLoader.model(it) }
+                    if (resolved != null) {
+                        artLoopUrls = emptyList()
+                        resolved
                     } else {
                         val loop = intent?.getStringArrayListExtra("serverArts")
                             ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
