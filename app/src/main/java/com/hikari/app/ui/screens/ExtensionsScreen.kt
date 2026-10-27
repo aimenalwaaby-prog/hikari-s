@@ -6244,6 +6244,10 @@ private fun RepoBrowserView(
                         com.hikari.app.tv.TvSettingsSourceCard(icon = icon, title = title, subtitle = sub, onClick = onClick, modifier = Modifier.weight(1f))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        srcCard(Icons.Filled.Folder, tr("All installed repos"), tr("All repos you've added · ") + repos.size + " total", onOpenAllRepos)
+                        srcCard(Icons.Filled.Extension, tr("Installed extensions"), tr("Manage, toggle & uninstall · ") + providers.size + " installed", onOpenInstalled)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Cloud, tr("CloudStream repos"), tr("repo.json · CloudStream extensions"), { onOpenFolder(SourceFolder.CLOUDSTREAM) })
                         srcCard(HikariTorii, tr("Hikari repos"), tr("repo.json · Hikari extensions"), { onOpenFolder(SourceFolder.HIKARI) })
                     }
@@ -6279,10 +6283,6 @@ private fun RepoBrowserView(
                         srcCard(Icons.Filled.Add, tr("Install Aniyomi extension (.apk)"), tr("Aniyomi extension · from a URL or a local file"), onAddAniyomiUrl)
                         srcCard(Icons.Filled.Public, tr("Add website"), tr("Opens in the ad-free web view"), onAddSite)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Folder, tr("All installed repos"), tr("All repos you've added · ") + repos.size + " total", onOpenAllRepos)
-                        srcCard(Icons.Filled.Extension, tr("Installed extensions"), tr("Manage, toggle & uninstall · ") + providers.size + " installed", onOpenInstalled)
-                    }
                 }
             } else {
             GlassCard(
@@ -6291,6 +6291,20 @@ private fun RepoBrowserView(
                     .padding(horizontal = 16.dp)
             ) {
                 Column {
+                    SourceActionRow(
+                        icon = Icons.Filled.Folder,
+                        title = tr("All installed repos"),
+                        subtitle = tr("All repos you've added · ") + repos.size + " total",
+                        onClick = onOpenAllRepos
+                    )
+                    SourceDivider()
+                    SourceActionRow(
+                        icon = Icons.Filled.Extension,
+                        title = tr("Installed extensions"),
+                        subtitle = tr("Manage, toggle & uninstall · ") + providers.size + " installed",
+                        onClick = onOpenInstalled
+                    )
+                    SourceDivider()
                     SourceActionRow(
                         icon = Icons.Filled.Cloud,
                         title = tr("CloudStream repos"),
@@ -6423,20 +6437,6 @@ private fun RepoBrowserView(
                         title = tr("Add website"),
                         subtitle = tr("Opens in the ad-free web view"),
                         onClick = onAddSite
-                    )
-                    SourceDivider()
-                    SourceActionRow(
-                        icon = Icons.Filled.Folder,
-                        title = tr("All installed repos"),
-                        subtitle = tr("All repos you've added · ") + repos.size + " total",
-                        onClick = onOpenAllRepos
-                    )
-                    SourceDivider()
-                    SourceActionRow(
-                        icon = Icons.Filled.Extension,
-                        title = tr("Installed extensions"),
-                        subtitle = tr("Manage, toggle & uninstall · ") + providers.size + " installed",
-                        onClick = onOpenInstalled
                     )
                 }
             }
