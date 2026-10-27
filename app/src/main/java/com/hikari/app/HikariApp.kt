@@ -639,6 +639,12 @@ class HikariApp : Application() {
         appScope.launch {
             store.playerSkinFlow().collect { com.hikari.app.player.PlayerSkins.setCurrent(it) }
         }
+        // Sources sheet page layout (Settings → Playback & Servers → Server
+        // page layout): mirrored into ServerLayouts for the same reason —
+        // PlayerActivity builds its sheet synchronously.
+        appScope.launch {
+            store.serverLayoutFlow().collect { com.hikari.app.player.ServerLayouts.setCurrent(it) }
+        }
         // Adult content (Settings → Content → NSFW): mirrored into [NsfwGate]
         // because the gate is read on the DRAW path — a list being composed cannot
         // await DataStore. Seeded with a first read of the flow so a screen that
@@ -688,6 +694,9 @@ class HikariApp : Application() {
             // the flow, so a player opened immediately after launch (before the
             // flow's first emission) still gets the right skin.
             runCatching { com.hikari.app.player.PlayerSkins.setCurrent(store.playerSkin()) }
+            // Sources sheet layout: seed the synchronous mirror too, so a
+            // sheet opened immediately after launch gets the stored layout.
+            runCatching { com.hikari.app.player.ServerLayouts.setCurrent(store.serverLayout()) }
             // Registering extractor aliases initializes the jar's full extractor
             // registry — do it off the main thread.
             com.hikari.app.cs3.HikariExtractorRegistry.register()
