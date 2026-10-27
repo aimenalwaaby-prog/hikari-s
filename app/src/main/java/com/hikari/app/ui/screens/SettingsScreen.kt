@@ -5131,6 +5131,7 @@ private fun PlaybackStartCard(app: HikariApp) {
  * cards over the title's portrait poster art). Read through the synchronous
  * ServerLayouts mirror (see HikariApp), because the sheet is View-based.
  */
+@Composable
 private fun ServerLayoutCard(app: HikariApp) {
     val scope = rememberCoroutineScope()
     var layout by remember { mutableStateOf(com.hikari.app.player.ServerLayouts.HORIZONTAL) }
