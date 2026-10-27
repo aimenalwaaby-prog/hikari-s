@@ -6713,7 +6713,8 @@ class PlayerActivity : ComponentActivity() {
         return col
     }
 
-    /** Sources row in the user's chosen page layout (see ServerLayouts). */
+    /** Sources row in the user's chosen page layout (see ServerLayouts).
+     *  Phone-only: TV always keeps the horizontal rows. */
     private fun serverRow(
         src: PlayerSource,
         selected: Boolean,
@@ -6721,7 +6722,7 @@ class PlayerActivity : ComponentActivity() {
         onDownload: () -> Unit,
         onExternal: () -> Unit,
     ): View =
-        if (com.hikari.app.player.ServerLayouts.isVertical()) serverVertRow(src, selected, onPlay, onDownload, onExternal)
+        if (com.hikari.app.player.ServerLayouts.isVertical() && !com.hikari.app.tv.TvMode.isTv) serverVertRow(src, selected, onPlay, onDownload, onExternal)
         else serverRefRow(src, selected, onPlay, onDownload, onExternal)
 
     private fun glassRow(option: GlassOption, onClick: (() -> Unit)?): View {
@@ -9468,6 +9469,11 @@ class PlayerActivity : ComponentActivity() {
         // the panel builds (the intent's plural header art, first = opening
         // frame). The loop starts after the show, further below.
         var artLoopUrls: List<String> = emptyList()
+        // Vertical (phone-only, Settings → Playback & Servers): the whole
+        // sheet goes narrow portrait like the 0.11.33 reference — a boxed
+        // solid panel (capped at 560dp, centered) over the portrait poster —
+        // instead of the full-bleed ghost rows. TV always keeps horizontal.
+        val verticalSheet = com.hikari.app.player.ServerLayouts.isVertical() && !com.hikari.app.tv.TvMode.isTv
         // Batch 137: the footer pills are gone — the red-marked filled pill
         // plus the small outlined pill beside it. The dialog stays
         // Back-dismissable (presentGlass defaults cancelable to true, and the
@@ -9490,29 +9496,42 @@ class PlayerActivity : ComponentActivity() {
             // the marked length): the panel already spans edge-to-edge in
             // width — this makes it use the full room in height too, so the
             // list reads as its own page with no cut-off bottom gap.
-            fillFractionY = 1.0f,
-            // The main box covers left to right (the red-marked report): no
+            // Vertical uses the default boxed height (700dp capped by room).
+            fillFractionY = if (verticalSheet) 0f else 1.0f,
+            // Horizontal covers left to right (the red-marked report): no
             // floating-panel side insets on this screen, and a tight halo so
-            // the vertical box reads big.
-            edgeToEdge = true,
-            tightHalo = true,
+            // the vertical box reads big. Vertical is a narrow centered box.
+            edgeToEdge = !verticalSheet,
+            tightHalo = !verticalSheet,
             // The server list is a full-page Sources screen (like the reference):
             // servers are a full-width result list, not a narrow side sheet.
             // Full-window on both phone and TV so the list reads as its own page.
-            fillFractionX = 1.0f,
+            // Vertical skips the fill width so the default capped path
+            // (max 560dp) makes it a narrow portrait column even in landscape.
+            fillFractionX = if (verticalSheet) 0f else 1.0f,
             // Title art behind the panel: the first of the plural header
             // backdrops (the detail screen passes them in), else the single
             // backdrop — the desktop client's look. Null keeps the plain
             // dimmed-video background. The rest of the list rotates every 2s
             // (see the art loop after the show below).
             artUrl = run {
-                // Vertical layout reads portrait: prefer the poster art the
-                // detail screen passes (histPoster) over the landscape
-                // backdrops. Horizontal keeps the backdrop rotation as now.
-                val poster = intent?.getStringExtra("histPoster")?.takeIf { it.isNotBlank() }
-                if (com.hikari.app.player.ServerLayouts.isVertical() && poster != null) {
-                    artLoopUrls = listOf(poster)
-                    poster
+                // Vertical reads portrait: the TMDB poster the detail screen
+                // passes (histPoster, a vertical image) over the landscape
+                // backdrops, single frame, no rotation. Without a poster the
+                // first backdrop is used, still single frame behind the box.
+                // Horizontal keeps the backdrop rotation as now.
+                if (verticalSheet) {
+                    val poster = intent?.getStringExtra("histPoster")?.takeIf { it.isNotBlank() }
+                    if (poster != null) {
+                        artLoopUrls = listOf(poster)
+                        poster
+                    } else {
+                        val loop = intent?.getStringArrayListExtra("serverArts")
+                            ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
+                        artLoopUrls = emptyList()
+                        (loop.firstOrNull()
+                            ?: intent?.getStringExtra("serverArt"))?.takeIf { it.isNotBlank() }
+                    }
                 } else {
                     val loop = intent?.getStringArrayListExtra("serverArts")
                         ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
@@ -9522,14 +9541,16 @@ class PlayerActivity : ComponentActivity() {
                 }
             },
             // Lighter window dim so the title art reads through the scrim.
-            dimAmount = 0.30f,
+            // Vertical keeps the default boxed dim over the poster.
+            dimAmount = if (verticalSheet) 0.65f else 0.30f,
                 headerView = serverHeader,
                 // Compact title: the reference sheet's header is a small line
             // over the art, not a billboard — the list gets the room.
             titleSizeSp = 16f,
             // Ghost panel: reference glass READY rows float directly over the
             // art, with no dark box between the header and the list.
-            ghostPanel = true,
+            // Vertical is the boxed 0.11.33 look: solid dark panel.
+            ghostPanel = !verticalSheet,
         )
         // Backdrop rotation, every 2.5s: the art view was tagged in
         // presentGlass, and artLoopUrls (filled by the artUrl block above)
