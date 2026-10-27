@@ -1308,8 +1308,9 @@ fun HomeScreen(nav: NavHostController) {
                         providerName = row.providerName,
                         items = row.items,
                         keeperKey = "homeRow:" + row.key.ifBlank { "${row.providerName}|${row.title}" },
-                        // No Show All entry on home shelves (user request).
-                        showViewAll = false,
+                        // Every shelf carries Show All into its full catalogue
+                        // page, which pages without end as it is scrolled.
+                        showViewAll = true,
                         onClick = { item ->
                             Routes.safeNavigate(
                                 nav,
@@ -3758,10 +3759,27 @@ private fun HomeSearchOverlay(
                 if (extra.isNullOrEmpty()) return item
                 return item.copy(genres = (item.genres + extra).distinct())
             }
-            val shownResults = remember(results, enrichedGenres, kindKey, genre) {
+            // A typed query must always surface its real matches: an exact
+            // title hit bypasses the kind chip (searching "jailer" with the
+            // Anime chip picked hid the film and left only loose anime
+            // matches), and exact/starts-with hits sort first so the real
+            // result is never buried under partial ones.
+            val shownResults = remember(results, enrichedGenres, kindKey, genre, applied) {
                 results.map { withTags(it) }
-                    .filter { homeKindKeep(it, kindKey) && homeGenreKeep(it, genre) }
+                    .filter {
+                        (homeKindKeep(it, kindKey) || (applied.isNotBlank() && it.title.contains(applied, ignoreCase = true))) &&
+                            homeGenreKeep(it, genre)
+                    }
                     .distinctBy { it.uniqueId }
+                    .let { list ->
+                        if (applied.isBlank()) list
+                        else list.sortedWith(
+                            compareBy(
+                                { if (it.title.equals(applied, ignoreCase = true)) 0 else 1 },
+                                { if (it.title.startsWith(applied, ignoreCase = true)) 0 else 1 },
+                            ),
+                        )
+                    }
             }
             // An empty query with a kind browses the provider's CATALOGUES, not
             // just the rows Home already loaded: the feed only holds the first
