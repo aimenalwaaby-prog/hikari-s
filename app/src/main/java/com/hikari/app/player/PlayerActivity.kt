@@ -6613,6 +6613,117 @@ class PlayerActivity : ComponentActivity() {
         return row
     }
 
+    /**
+     * One server as a compact vertical card: the reference Sources card look
+     * (red provider line + red size badge, title, filename block, fact chips)
+     * with a Play / Download / Open strip underneath. Used when the Server
+     * page layout is Vertical (see ServerLayouts) — same servers, same data
+     * as [serverRefRow], only the presentation changes.
+     */
+    private fun serverVertRow(
+        src: PlayerSource,
+        selected: Boolean,
+        onPlay: () -> Unit,
+        onDownload: () -> Unit,
+        onExternal: () -> Unit,
+    ): View {
+        val density = resources.displayMetrics.density
+        val quality = com.hikari.app.data.ServerMeta.rowQuality(src.name, src.details)
+        var facts = com.hikari.app.data.ServerMeta.enrichedDetails(src.name, src.details, src.url)
+        if (quality != "SRC") {
+            val segs = facts.split(" • ").toMutableList()
+            if (segs.isNotEmpty() && segs[0].equals(quality, ignoreCase = true)) segs.removeAt(0)
+            facts = segs.joinToString(" • ")
+        }
+        val badgeLine = listOfNotNull(
+            if (src.isM3u8) "HLS" else null,
+            if (src.isMpd) "DASH" else null,
+            if (src.isTorrent || src.torrentStream) "TORRENT" else null,
+            if (src.subtitles.isNotEmpty()) "SUBS " + src.subtitles.size else null,
+        ).joinToString(" · ")
+        val metaLine = listOf(badgeLine, facts)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+            .ifBlank { hostOf(src.url).orEmpty() }
+        val chips = com.hikari.app.data.ServerMeta.chipsOf(src.name, src.details, src.url)
+        val size = runCatching {
+            com.hikari.app.data.ServerMeta.sizeOf(src.name, src.details)
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        col.addView(
+            serverCard(
+                GlassOption(
+                    label = serverLabel(src),
+                    sub = metaLine.takeIf { it.isNotBlank() },
+                    badge = size,
+                    selected = selected,
+                    labelMaxLines = 2,
+                    topLabel = src.providerName.takeIf { it.isNotBlank() },
+                    chips = chips,
+                ),
+                onClick = { onPlay() },
+            ),
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ),
+        )
+        // Play / Download / Open stay one tap away in vertical mode too —
+        // the card tap plays, and this strip covers the rest without the
+        // horizontal row's round buttons.
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            fun action(label: String, accent: Boolean, onClick: () -> Unit) {
+                addView(TextView(this@PlayerActivity).apply {
+                    text = label
+                    dpText(11f)
+                    includeFontPadding = false
+                    gravity = Gravity.CENTER
+                    isSingleLine = true
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(if (accent) withAlpha(accentMidColor, 0.95f) else 0xFFDCE3EE.toInt())
+                    val hp = (14 * density).toInt()
+                    val vp = (8 * density).toInt()
+                    setPadding(hp, vp, hp, vp)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = 8f * density
+                        setStroke((1 * density).toInt().coerceAtLeast(1), if (accent) withAlpha(accentMidColor, 0.7f) else 0x38FFFFFF)
+                    }
+                    isClickable = true
+                    if (playerTvRemote()) {
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                        if (foreground == null) foreground = tvFocusRing()
+                    }
+                    setOnClickListener { onClick() }
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = (6 * density).toInt()
+                    marginEnd = (6 * density).toInt()
+                })
+            }
+            action(I18n.t("Play"), true) { onPlay() }
+            action(I18n.t("Download"), false) { onDownload() }
+            action(I18n.t("Open"), false) { onExternal() }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = (6 * density).toInt() })
+        return col
+    }
+
+    /** Sources row in the user's chosen page layout (see ServerLayouts). */
+    private fun serverRow(
+        src: PlayerSource,
+        selected: Boolean,
+        onPlay: () -> Unit,
+        onDownload: () -> Unit,
+        onExternal: () -> Unit,
+    ): View =
+        if (com.hikari.app.player.ServerLayouts.isVertical()) serverVertRow(src, selected, onPlay, onDownload, onExternal)
+        else serverRefRow(src, selected, onPlay, onDownload, onExternal)
+
     private fun glassRow(option: GlassOption, onClick: (() -> Unit)?): View {
         // Server results are rectangular full-width cards like the reference
         // Sources screen — never stadium pills, on phone and TV alike.
@@ -8691,7 +8802,7 @@ class PlayerActivity : ComponentActivity() {
                 rowViews[key]?.let { return it }
                 return runCatching {
                     val src = sources[i]
-                    val v = serverRefRow(
+                    val v = serverRow(
                         src = src,
                         selected = playbackCommitted && i == currentIndex,
                         onPlay = {
@@ -9395,11 +9506,20 @@ class PlayerActivity : ComponentActivity() {
             // dimmed-video background. The rest of the list rotates every 2s
             // (see the art loop after the show below).
             artUrl = run {
-                val loop = intent?.getStringArrayListExtra("serverArts")
-                    ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
-                artLoopUrls = loop
-                (loop.firstOrNull()
-                    ?: intent?.getStringExtra("serverArt"))?.takeIf { it.isNotBlank() }
+                // Vertical layout reads portrait: prefer the poster art the
+                // detail screen passes (histPoster) over the landscape
+                // backdrops. Horizontal keeps the backdrop rotation as now.
+                val poster = intent?.getStringExtra("histPoster")?.takeIf { it.isNotBlank() }
+                if (com.hikari.app.player.ServerLayouts.isVertical() && poster != null) {
+                    artLoopUrls = listOf(poster)
+                    poster
+                } else {
+                    val loop = intent?.getStringArrayListExtra("serverArts")
+                        ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
+                    artLoopUrls = loop
+                    (loop.firstOrNull()
+                        ?: intent?.getStringExtra("serverArt"))?.takeIf { it.isNotBlank() }
+                }
             },
             // Lighter window dim so the title art reads through the scrim.
             dimAmount = 0.30f,
