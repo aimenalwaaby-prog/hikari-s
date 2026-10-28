@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Movie
@@ -109,6 +110,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -5895,6 +5897,19 @@ private fun RepoBrowserView(
     // repos that haven't loaded yet, so a fresh install still finds the
     // not-yet-installed entries instead of only the installed ones.
     var query by rememberSaveable { mutableStateOf("") }
+    // Source-language dialog state + its groups (same grouping the old
+    // All-sources section used): a language-grouped view of every installed
+    // source with an enable-all toggle per group.
+    var showSourceLang by remember { mutableStateOf(false) }
+    val langGroups = remember(providers) { SourceLangs.groupsOf(providers) }
+    val langOnCount = remember(providers) { providers.count { it.config.enabled } }
+    // Static labels captured in composable scope (never call tr() inside
+    // lazy content).
+    val sourceLangTitle = tr("Source language")
+    val sourceLangSubtitle = remember(langGroups, langOnCount, providers) {
+        I18n.t("%s languages").replace("%s", langGroups.size.toString()) +
+            " · " + langOnCount + " / " + providers.size
+    }
     // Captured once in composable scope for the lazy branches below: a
     // LazyListScope (and the search-items helper) cannot call TvMode itself.
     val tvBrowser = com.hikari.app.tv.TvMode.current()
@@ -6237,6 +6252,51 @@ private fun RepoBrowserView(
                 }
             }
         }
+        // Source language: a medium row (not a big card) — the label always
+        // fits in full. Opens the Select Language dialog.
+        item {
+            GlassCard(
+                onClick = { showSourceLang = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        horizontal = if (com.hikari.app.tv.TvMode.current()) 20.dp else 16.dp,
+                        vertical = 4.dp
+                    )
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SettingsThemeTile(Icons.Filled.Language, "Language", 40.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            sourceLangTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            sourceLangSubtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
         item { SectionHeader("Add a source") }
         item {
             if (com.hikari.app.tv.TvMode.current()) {
@@ -6271,17 +6331,10 @@ private fun RepoBrowserView(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.LiveTv, tr("IPTV playlists"), tr("M3U / M3U8 links and files · live channels"), { onOpenFolder(SourceFolder.IPTV) })
+                        srcCard(Icons.Filled.Language, sourceLangTitle, sourceLangSubtitle, { showSourceLang = true })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         srcCard(Icons.Filled.Build, tr("Add universal scraper"), tr("JSON config · scriptable scraper"), onAddScraper)
-                        srcCard(Icons.Filled.Download, tr("Install .cs3 plugin"), tr("From a URL or a local file"), onAddCs3Url)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Add, tr("Install .hiki extension"), tr("From a URL or a local file"), onAddHikiUrl)
-                        srcCard(Icons.Filled.Add, tr("Install .sky extension"), tr("SkyStream plugin · from a URL or a local file"), onAddSkyStreamUrl)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        srcCard(Icons.Filled.Add, tr("Install Aniyomi extension (.apk)"), tr("Aniyomi extension · from a URL or a local file"), onAddAniyomiUrl)
                         srcCard(Icons.Filled.Public, tr("Add website"), tr("Opens in the ad-free web view"), onAddSite)
                     }
                 }
@@ -6398,42 +6451,6 @@ private fun RepoBrowserView(
                     )
                     SourceDivider()
                     SourceActionRow(
-                        icon = Icons.Filled.Download,
-                        title = tr("Install .cs3 plugin"),
-                        subtitle = tr("From a URL or a local file"),
-                        onClick = onAddCs3Url,
-                        trailingIcon = Icons.Filled.FolderOpen,
-                        onTrailing = onPickCs3File
-                    )
-                    SourceDivider()
-                    SourceActionRow(
-                        icon = Icons.Filled.Add,
-                        title = tr("Install .hiki extension"),
-                        subtitle = tr("From a URL or a local file"),
-                        onClick = onAddHikiUrl,
-                        trailingIcon = Icons.Filled.FolderOpen,
-                        onTrailing = onPickHikiFile
-                    )
-                    SourceDivider()
-                    SourceActionRow(
-                        icon = Icons.Filled.Add,
-                        title = tr("Install .sky extension"),
-                        subtitle = tr("SkyStream plugin · from a URL or a local file"),
-                        onClick = onAddSkyStreamUrl,
-                        trailingIcon = Icons.Filled.FolderOpen,
-                        onTrailing = onPickSkyStreamFile
-                    )
-                    SourceDivider()
-                    SourceActionRow(
-                        icon = Icons.Filled.Add,
-                        title = tr("Install Aniyomi extension (.apk)"),
-                        subtitle = tr("Aniyomi extension · from a URL or a local file"),
-                        onClick = onAddAniyomiUrl,
-                        trailingIcon = Icons.Filled.FolderOpen,
-                        onTrailing = onPickAniyomiFile
-                    )
-                    SourceDivider()
-                    SourceActionRow(
                         icon = Icons.Filled.Public,
                         title = tr("Add website"),
                         subtitle = tr("Opens in the ad-free web view"),
@@ -6453,6 +6470,206 @@ private fun RepoBrowserView(
             )
         }
         item { Spacer(Modifier.height(8.dp)) }
+    }
+    // Select Language dialog: the language-grouped source list (same groups
+    // the old All-sources section drew) in a Mihon-style shell — title,
+    // All Languages master row, scrollable groups, Cancel/Confirm.
+    if (showSourceLang) {
+        SourceLanguageDialog(
+            groups = langGroups,
+            onToggleProvider = onToggleProvider,
+            onDismiss = { showSourceLang = false }
+        )
+    }
+}
+
+/**
+ * Select Language dialog (Extensions tab → Source language): the same
+ * language-grouped source list, in a Mihon-style shell — centered title,
+ * an All Languages master row, scrollable groups each with an enable-all
+ * toggle and per-source checkboxes, Cancel/Confirm to close. Toggles apply
+ * immediately through the provider switch, so search, shelves and downloads
+ * follow at once; the buttons only dismiss.
+ */
+@Composable
+private fun SourceLanguageDialog(
+    groups: List<SourceLangs.LangGroup>,
+    onToggleProvider: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val title = tr("Select Language")
+    val allTitle = tr("All Languages")
+    val cancel = tr("Cancel")
+    val confirm = tr("Confirm")
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 20.dp, bottom = 12.dp)
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+                val allMembers = remember(groups) { groups.flatMap { it.members } }
+                val allOn = allMembers.isNotEmpty() && allMembers.all { it.config.enabled }
+                val allCount = allMembers.count { it.config.enabled }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            allTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "$allCount / ${allMembers.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                    Switch(
+                        checked = allOn,
+                        onCheckedChange = { on ->
+                            allMembers.forEach { m -> onToggleProvider(m.config.id, on) }
+                        }
+                    )
+                }
+                HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+                LazyColumn(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 430.dp)
+                ) {
+                    groups.forEach { group ->
+                        item(key = "dlgheader-" + group.code) {
+                            SourceLangHeaderRow(group = group, onToggleProvider = onToggleProvider)
+                        }
+                        items(group.members, key = { "dlgsrc-" + group.code + "-" + it.config.id }) { p ->
+                            SourceLangSourceRow(p = p, onToggleProvider = onToggleProvider)
+                        }
+                    }
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilledTonalButton(onClick = onDismiss) { Text(cancel) }
+                    Spacer(Modifier.width(12.dp))
+                    Button(onClick = onDismiss) { Text(confirm) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One language header inside the Select Language dialog: the group name, how
+ * many of its sources are on, and the enable-all toggle. Labels are plain
+ * strings (SourceLangs), so this is safe inside lazy content.
+ */
+@Composable
+private fun SourceLangHeaderRow(
+    group: SourceLangs.LangGroup,
+    onToggleProvider: (String, Boolean) -> Unit,
+) {
+    val allOn = group.members.all { it.config.enabled }
+    val onCount = group.members.count { it.config.enabled }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                group.display,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "$onCount / ${group.members.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+        Switch(
+            checked = allOn,
+            onCheckedChange = { on ->
+                group.members.forEach { m -> onToggleProvider(m.config.id, on) }
+            }
+        )
+    }
+}
+
+/** One source row inside the Select Language dialog: icon, name, engine, checkbox. */
+@Composable
+private fun SourceLangSourceRow(
+    p: ContentProvider,
+    onToggleProvider: (String, Boolean) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onToggleProvider(p.config.id, !p.config.enabled) }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            ProviderIcon(p, Modifier.size(24.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                p.config.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                p.config.type.groupLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Checkbox(
+            checked = p.config.enabled,
+            onCheckedChange = { on -> onToggleProvider(p.config.id, on) }
+        )
     }
 }
 
@@ -9418,16 +9635,6 @@ private fun SourcesOverviewView(
             else providers.filter { it.config.name.contains(extFilter, ignoreCase = true) },
         )
     }
-    // Mihon-style language groups for the installed list below: every source
-    // in exactly one group (Multi, English, हिन्दी, … — or Other when it
-    // declares and names none), each group with its own enable-all toggle.
-    // Grouped once per filter/provider change, like the packs above.
-    val langGroups = remember(providers, extFilter) {
-        SourceLangs.groupsOf(
-            if (extFilter.isBlank()) providers
-            else providers.filter { it.config.name.contains(extFilter, ignoreCase = true) },
-        )
-    }
     val cs3GroupTitle = tr("CloudStream")
     val hikiGroupTitle = tr("Hikari")
     val nuvioGroupTitle = tr("Nuvio")
@@ -9690,15 +9897,10 @@ private fun SourcesOverviewView(
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
-            // Mihon-style language groups: every installed source sits under
-            // exactly one language header (Multi, English, हिन्दी, … — or
-            // Other when it declares and names none), each header with an
-            // enable-all toggle and each source with its own checkbox. The
-            // toggle writes through the same provider switch as every other
-            // list, so search, shelves and downloads follow it at once.
-            // (Labels come from SourceLangs as plain strings — tr() is a
-            // composable and must never run inside lazy content.)
-            if (langGroups.isEmpty()) {
+            val filteredProviders = providers.filter {
+                extFilter.isBlank() || it.config.name.contains(extFilter, ignoreCase = true)
+            }
+            if (filteredProviders.isEmpty()) {
                 item {
                     EmptyState(
                         title = if (providers.isEmpty()) "No extensions yet" else "No matches",
@@ -9711,84 +9913,24 @@ private fun SourcesOverviewView(
                     )
                 }
             }
-            langGroups.forEach { group ->
-                val allOn = group.members.all { it.config.enabled }
-                val onCount = group.members.count { it.config.enabled }
-                item(key = "langheader-" + group.code) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                group.display,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                "$onCount / ${group.members.size} enabled",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
-                            )
+            items(installedPacks, key = { "inst-" + it.key }) { pack ->
+                ProviderRecordRow(
+                    pack = pack,
+                    statusFor = { p -> pluginStatus(p) },
+                    onToggleProvider = onToggleProvider,
+                    onDeleteProvider = onDeleteProvider,
+                    settingsFor = { p ->
+                        when {
+                            // A playlist has no settings screen — the gear opens what
+                            // it IS instead: where it was read from, how many channels
+                            // it holds, and a way to read it again.
+                            p.config.type == ProviderType.IPTV -> { { onOpenSettings(p) } }
+                            hasSettingsScreen(p, cs3SettingsIds) -> { { onOpenSettings(p) } }
+                            else -> null
                         }
-                        Switch(
-                            checked = allOn,
-                            onCheckedChange = { on ->
-                                group.members.forEach { m -> onToggleProvider(m.config.id, on) }
-                            }
-                        )
-                    }
-                }
-                items(group.members, key = { "langsrc-" + group.code + "-" + it.config.id }) { p ->
-                    GlassCard(
-                        onClick = { onToggleProvider(p.config.id, !p.config.enabled) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 3.dp)
-                    ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                ProviderIcon(p, Modifier.size(28.dp))
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    p.config.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    p.config.type.groupLabel,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Checkbox(
-                                checked = p.config.enabled,
-                                onCheckedChange = { on -> onToggleProvider(p.config.id, on) }
-                            )
-                        }
-                    }
-                }
+                    },
+                    reinstallFor = reinstallFor,
+                )
             }
         }
     }

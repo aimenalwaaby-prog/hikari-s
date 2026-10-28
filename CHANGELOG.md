@@ -1,3 +1,9 @@
+## 0.12.6 (continuous build only)
+
+- Extensions tab gains a Source language entry (medium row, full label, phone + TV) opening a Select Language dialog: All Languages master toggle plus every language group with its own enable-all toggle and per-source checkboxes, Cancel/Confirm to close — toggles apply instantly so search, shelves and downloads follow; the language list moves out of the All sources page, which is a repo list again
+- Removed the Install .cs3 plugin / .hiki / .sky / Aniyomi file rows from the Extensions landing (phone + TV) — nobody installs extensions by picking a file
+- Search survives the round trip: what a scan had found is snapshotted to disk as it lands, so coming back from a result or the player instantly re-shows every result and the scan keeps running in the background until finished — it only stops on a new query or when the search is fully left
+
 ## 0.12.5 (continuous build only)
 
 - Sources screen groups installed sources by language: Multi, English, हिन्दी, Español, Français, Deutsch, Português (Brasil), Polski, Русский, Українська, العربية, ไทย, 中文, 日本語, 한국어 and the rest — with an Other bucket for sources that declare and name none — each group with an enable-all toggle and each source with its own checkbox, across anime/manga/novels and every extension type; the toggles use the same provider switch as everywhere else, so search, shelves and downloads follow them at once
