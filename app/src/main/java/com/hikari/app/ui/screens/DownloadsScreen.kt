@@ -96,13 +96,15 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
         if (tasks.isEmpty()) {
             item {
                 EmptyState(
-                    title = tr("No downloads yet"),
-                    subtitle = tr("Tap the Download button while watching a video to save it for " + "offline viewing inside Hikari, or into your phone's Downloads folder."),
+                    title = tr("No downloads yet"),                    subtitle = tr("Tap the Download button while watching a video to save it for " + "offline viewing inside Hikari, or into your phone's Downloads folder."),
                     actionLabel = tr("Browse"),
                     action = { Routes.navigateTab(nav, Routes.HOME) }
                 )
             }
         } else {
+            // Shared fallback for untitled tasks, read once up here: tr() is
+            // @Composable and can't run inside groupBy {} below.
+            val blankTitle = tr("Video")
             if (active.isNotEmpty()) {
                 item {
                     Text(
@@ -122,7 +124,7 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
                 // the whole screen goes down with it. Same rule as the Extensions
                 // list that produced the reported crash.
                 val activeGroups = active.distinctBy { it.id }
-                    .groupBy { it.title.ifBlank { tr("Video") } }
+                    .groupBy { it.title.ifBlank { blankTitle } }
                 for ((folder, folderTasks) in activeGroups) {
                     item(key = "active-folder-$folder") {
                         Text(
@@ -150,7 +152,7 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
                     )
                 }
                 val doneGroups = done.distinctBy { it.id }
-                    .groupBy { it.title.ifBlank { tr("Video") } }
+                    .groupBy { it.title.ifBlank { blankTitle } }
                 for ((folder, folderTasks) in doneGroups) {
                     item(key = "done-folder-$folder") {
                         Text(
