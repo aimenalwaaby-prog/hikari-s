@@ -9437,6 +9437,12 @@ class PlayerActivity : ComponentActivity() {
         // solid panel (capped at 560dp, centered) over the portrait poster —
         // instead of the full-bleed ghost rows. TV always keeps horizontal.
         val verticalSheet = com.hikari.app.player.ServerLayouts.isVertical() && !com.hikari.app.tv.TvMode.isTv
+        // Vertical opens portrait (see the startMode lock above): the rotation
+        // lands asynchronously AFTER this point, so measuring the window now
+        // would size a landscape-wide box that then hangs off the portrait
+        // screen's right edge — the clipped sheet in the report. Wait for the
+        // portrait window first (bounded), then build + show exactly as below.
+        fun showSheet() {
         // Batch 137: the footer pills are gone — the red-marked filled pill
         // plus the small outlined pill beside it. The dialog stays
         // Back-dismissable (presentGlass defaults cancelable to true, and the
@@ -9752,6 +9758,25 @@ class PlayerActivity : ComponentActivity() {
             }
             chooserScrollListener = scrollListener
             sv0?.viewTreeObserver?.addOnScrollChangedListener(scrollListener)
+        }
+        } // showSheet — see above: portrait window first in vertical mode.
+        if (verticalSheet && runCatching { windowSize().x > windowSize().y }.getOrDefault(false) && !isFinishing && !isDestroyed) {
+            var sheetTries = 0
+            val sheetHandler = Handler(Looper.getMainLooper())
+            fun kickSheet() {
+                if (isFinishing || isDestroyed) return
+                if (sheetTries++ < 12) {
+                    val now = runCatching { windowSize() }.getOrNull()
+                    if (now != null && now.x > now.y) {
+                        sheetHandler.postDelayed({ kickSheet() }, 80)
+                        return
+                    }
+                }
+                showSheet()
+            }
+            sheetHandler.postDelayed({ kickSheet() }, 120)
+        } else {
+            showSheet()
         }
     }
 
