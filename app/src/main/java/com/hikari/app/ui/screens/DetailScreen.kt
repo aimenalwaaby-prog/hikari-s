@@ -4682,6 +4682,20 @@ fun DetailScreen(
     var logoSizePx by remember { mutableStateOf(0) }
     // Detail page position held across visits (see ScrollKeeper): leaving
     // for an episode and coming back lands where the page was.
+    // TV exception: a re-opened title always starts at the TOP. Restoring a
+    // mid-page position strands the remote: the opening focus grab (see
+    // heroBlock) only fires at the top, and nothing else takes focus down in
+    // the episode area — so up/down/click go dead while Back still works.
+    // Starting at the top keeps the grab, the D-pad, and the expected page.
+    // (Returning from the player without leaving the page keeps its live
+    // position naturally — this only clears a stale saved one on re-entry.)
+    if (isTvLayout) {
+        val dk = "detail:$providerId|$mediaId"
+        val ds = com.hikari.app.ui.components.ScrollKeeper.load(dk)
+        if (ds != null && (ds.index > 0 || ds.offset > 200)) {
+            com.hikari.app.ui.components.ScrollKeeper.drop(dk)
+        }
+    }
     val detailList = com.hikari.app.ui.components.keptListState("detail:$providerId|$mediaId")
     LaunchedEffect(m?.uniqueId) {
         val item = m ?: return@LaunchedEffect

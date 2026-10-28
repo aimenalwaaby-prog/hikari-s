@@ -885,8 +885,8 @@ class PlayerActivity : ComponentActivity() {
     private var openDownloadPending = false
 
     /** True while the startMode chooser is up waiting for the user's pick, so
-     *  that backing out of it falls back to the remembered server. A dismiss
-     *  caused by the user's own tap must NOT also trigger that fallback. */
+     *  that backing out of it abandons the play instead of auto-playing. A dismiss
+     *  caused by the user's own tap must NOT also trigger that abandon. */
     private var startChoicePending = false
 
     /** Set the instant a server row is TAPPED in the chooser, before the dismiss
@@ -6176,7 +6176,8 @@ class PlayerActivity : ComponentActivity() {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 6f * density
                 setColor(0x22FFFFFF)
-                setStroke((1 * density).toInt().coerceAtLeast(1), 0x30FFFFFF)
+                // Black-tinted chip border to match the row borders.
+                setStroke((1 * density).toInt().coerceAtLeast(1), 0x59000000)
             }
         }
     }
@@ -6216,15 +6217,18 @@ class PlayerActivity : ComponentActivity() {
         val cardShape = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
             intArrayOf(
-                if (option.selected) withAlpha(accentMidColor, 0.22f) else 0x201A2430,
-                if (option.selected) withAlpha(accentEndColor, 0.16f) else 0x14141D28
+                // Glass like the horizontal rows: translucent white, so the
+                // portrait art reads through instead of a solid dark card.
+                if (option.selected) withAlpha(accentMidColor, 0.22f) else 0x14FFFFFF,
+                if (option.selected) withAlpha(accentEndColor, 0.16f) else 0x14FFFFFF
             )
         ).apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = 14f * density
             setStroke(
                 ((if (option.selected) 1.6f else 1.0f) * density).roundToInt().coerceAtLeast(1),
-                if (option.selected) withAlpha(accentMidColor, 0.95f) else 0x38FFFFFF
+                // Black-tinted card border (vertical layout), same as rows.
+                if (option.selected) withAlpha(accentMidColor, 0.95f) else 0x59000000
             )
         }
         val card = LinearLayout(this).apply {
@@ -6390,7 +6394,9 @@ class PlayerActivity : ComponentActivity() {
             setColor(if (selected) withAlpha(accentMidColor, 0.22f) else 0x14FFFFFF)
             setStroke(
                 (1 * density).toInt().coerceAtLeast(1),
-                if (selected) withAlpha(accentMidColor, 0.9f) else 0x30FFFFFF
+                // Black-tinted row border (both layouts): the white hairline
+                // washed out over bright art, black reads on anything.
+                if (selected) withAlpha(accentMidColor, 0.9f) else 0x59000000
             )
         }
         val row = LinearLayout(this).apply {
@@ -8394,8 +8400,9 @@ class PlayerActivity : ComponentActivity() {
      * The list is rebuilt whenever [notifySourcesChanged] fires, so servers that
      * land while the sheet is open (the detail screen keeps searching) appear
      * without a re-open. [startMode] is the "don't play directly" chooser: it
-     * stays up until the user picks, and backing out of it falls back to the
-     * remembered/best server rather than leaving the player blank.
+     * stays up until the user picks, and backing out of it abandons the play
+     * (the player closes, nothing auto-starts) rather than falling back to
+     * a server the user never picked.
      */
     private fun showServerChooser(startMode: Boolean = false, forDownload: Boolean = false) {
         // startMode is the "don't play directly" chooser, which is opened the
@@ -8438,9 +8445,6 @@ class PlayerActivity : ComponentActivity() {
         val dialog = Dialog(this, android.R.style.Theme_Translucent_NoTitleBar)
         serverChooserDialog = dialog
         var chip = "All"
-        // Cancel (footer) abandons without fallback: the onDismiss reopen
-        // below must not fire for it.
-        var cancelLoad = false
 
         /**
          * Pulls the live session straight into this chooser — the same dedup as
@@ -9267,22 +9271,16 @@ class PlayerActivity : ComponentActivity() {
                 runCatching { requestedOrientation = SCREEN_ORIENTATION_UNSPECIFIED }
             }
             // Closed without a pick (the back button, the ✕, a tap outside):
-            // fall back to the remembered/best server rather than leaving the
-            // player blank on the loading card. A tap on a row has already
-            // cleared the flag and gone on to play that row, so this never
-            // starts a *different* server than the one the user chose.
+            // abandon the play entirely — do NOT fall back to auto-playing
+            // (the report: backing out of the server list started playback
+            // anyway). A tap on a row has already cleared the flag and gone
+            // on to play that row, so a real pick still plays. Finishing the
+            // player here also keeps the abandoned search from re-opening
+            // anything: the detail screen's once-only launch guard stays
+            // armed, so no relaunch follows.
             if (startChoicePending) {
                 startChoicePending = false
-                if (sources.isNotEmpty()) {
-                    lifecycleScope.launch { playSource(preferredStartIndex()) }
-                } else {
-                    // Backed out of the chooser before ANY server had landed —
-                    // there was nothing to pick. Don't fail the play; let the
-                    // live search keep running and re-open the chooser (once)
-                    // when the first server actually arrives — unless Cancel
-                    // abandoned the play (see [cancelLoad]).
-                    if (!cancelLoad) startChooserShown = false
-                }
+                if (!isFinishing && !isDestroyed && !isChangingConfigurations) finish()
             }
             // Backed out of the DOWNLOAD chooser without picking a server: there
             // is no playback to fall back to, so leave the player instead of
@@ -9347,13 +9345,19 @@ class PlayerActivity : ComponentActivity() {
             setPadding(hp, (2 * density).toInt(), hp, 0)
         }
         if (logoModel != null) {
+            // TV keeps this compact like the small-title reference: a wide
+            // logo at 55% of a landscape screen renders very tall and pushes
+            // the server list to the bottom, so on TV the logo is narrower
+            // AND height-capped — the rows start mid-screen again.
+            val tvHead = com.hikari.app.tv.TvMode.isTv
             serverHeader.addView(ImageView(this).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 adjustViewBounds = true
+                if (tvHead) maxHeight = (96 * density).toInt()
                 runCatching { load(logoModel) }
             }, LinearLayout.LayoutParams(
-                (resources.displayMetrics.widthPixels * 0.55f).toInt()
-                    .coerceAtMost((420 * density).toInt()),
+                (resources.displayMetrics.widthPixels * (if (tvHead) 0.30f else 0.55f)).toInt()
+                    .coerceAtMost(((if (tvHead) 300 else 420) * density).toInt()),
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
@@ -9436,10 +9440,11 @@ class PlayerActivity : ComponentActivity() {
         // the panel builds (the intent's plural header art, first = opening
         // frame). The loop starts after the show, further below.
         var artLoopUrls: List<String> = emptyList()
-        // Vertical (phone-only, Settings → Playback & Servers): the whole
-        // sheet goes narrow portrait like the 0.11.33 reference — a boxed
-        // solid panel (capped at 560dp, centered) over the portrait poster —
-        // instead of the full-bleed ghost rows. TV always keeps horizontal.
+       // Vertical (phone-only, Settings → Playback & Servers): the whole
+        // sheet goes narrow portrait like the 0.11.33 reference (capped at
+        // 560dp, centered) over the portrait poster — but with the same
+        // glass look as horizontal: the rows float directly over the art,
+        // no dark box behind them. TV always keeps horizontal.
         val verticalSheet = com.hikari.app.player.ServerLayouts.isVertical() && !com.hikari.app.tv.TvMode.isTv
         // Vertical opens portrait (see the startMode lock above): the rotation
         // lands asynchronously AFTER this point, so measuring the window now
@@ -9523,10 +9528,11 @@ class PlayerActivity : ComponentActivity() {
                 // Compact title: the reference sheet's header is a small line
             // over the art, not a billboard — the list gets the room.
             titleSizeSp = 16f,
-            // Ghost panel: reference glass READY rows float directly over the
-            // art, with no dark box between the header and the list.
-            // Vertical is the boxed 0.11.33 look: solid dark panel.
-            ghostPanel = !verticalSheet,
+            // Ghost panel: glass READY rows float directly over the art,
+            // with no dark box between the header and the list — both
+            // layouts. Vertical only stays a narrow centered column (see
+            // fillFractionX/centered), the panel behind the rows is gone.
+            ghostPanel = true,
             centered = verticalSheet,
         )
         // Backdrop rotation, every 2.5s: the art view was tagged in

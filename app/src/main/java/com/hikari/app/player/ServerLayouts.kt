@@ -6,9 +6,9 @@ package com.hikari.app.player
  *
  *  - HORIZONTAL — today's look: full-bleed rows floating over the title's
  *    landscape backdrop art.
- *  - VERTICAL — compact solid cards (provider line + size badge + title +
- *    details + fact chips + Play/Download/Open) over the title's portrait
- *    poster art.
+ *  - VERTICAL — same glass rows floating over art, but the sheet is a
+ *    narrow portrait column (capped at 560dp, centered) over the title's
+ *    portrait poster art instead of full-bleed.
  *
  * Stored under AppStore.SERVER_LAYOUT and mirrored into the volatile
  * [current] below at startup (HikariApp), because the player is a View-based

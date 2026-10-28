@@ -1,3 +1,11 @@
+## 0.12.4 (continuous build only)
+
+- Vertical server page is glass like horizontal: the rows float directly over the portrait poster art with no dark box behind them (still a narrow centered column); row, card and chip borders are black-tinted in both layouts so they read on bright art
+- Downloads are foldered by title in both destinations: an episode download creates a "<Title>" folder holding that episode, and later episodes join the same folder — Downloads/Hikari/<Title>/ on phone storage, title folders in app storage, and title folder headers in the Downloads screen
+- TV server page header stays compact: the title logo is width- and height-capped on TV, so servers start mid-screen like the small-title reference instead of being pushed to the bottom by a huge logo
+- TV detail re-opens at the top: a stale mid-page scroll restore stranded the remote (opening focus grab only fires at the top), leaving up/down/click dead — re-entry now starts at the top with focus working
+- Backing out of the server list abandons the play: no more auto-starting the first server when you press Back without picking anything
+
 ## 0.12.0
 
 - Added new TV UI
