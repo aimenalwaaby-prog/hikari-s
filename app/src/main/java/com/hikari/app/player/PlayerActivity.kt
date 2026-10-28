@@ -7061,6 +7061,10 @@ class PlayerActivity : ComponentActivity() {
          *  bending (a curved-pane concern) is skipped. Null = a boxed panel,
          *  every other caller unchanged. */
         ghostPanel: Boolean = false,
+        /** Centered phone sheet (the vertical Sources page): skips the TV
+         *  side-dock (gravity END + slide-in) even when TV panels are on, so
+         *  the box sits centered like the reference. */
+        centered: Boolean = false,
     ): TextView? {
         val density = resources.displayMetrics.density
         // The halo is where the curved pane's neon blooms. A flat panel (every
@@ -7328,7 +7332,7 @@ class PlayerActivity : ComponentActivity() {
             else base.coerceAtMost(w.x - 2 * halo - (8 * density).toInt())
                 .coerceAtLeast((140 * density).toInt())
         }
-        val panelW = if (tvSheet) {
+        val panelW = if (tvSheet && !centered) {
             // With the TV-panel preference enabled, every sheet gets at least
             // half of the actual player width. A caller can request a wider
             // results panel (the live server chooser does this below).
@@ -7510,17 +7514,17 @@ class PlayerActivity : ComponentActivity() {
             // (like the reference client), never a side sheet pinned to the
             // window edge, which parked its rows at the bottom bezel.
             val sourcesFullPage = edgeToEdge && ghostPanel
-            if (tvSheet && !sourcesFullPage) {
+            if (tvSheet && !sourcesFullPage && !centered) {
                 setGravity(
                     if (sideTvPanel) Gravity.START or Gravity.CENTER_VERTICAL
                     else Gravity.END or Gravity.CENTER_VERTICAL
                 )
             } else setGravity(Gravity.CENTER)
-            setDimAmount(if (tvSheet) 0.50f else dimAmount)
+            setDimAmount(if (tvSheet && !centered) 0.50f else dimAmount)
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
 
-        if (tvSheet) {
+        if (tvSheet && !centered) {
             dialog.window?.decorView?.translationX = if (sideTvPanel) (-12 * density) else (22 * density)
             dialog.window?.decorView?.alpha = 0f
             dialog.window?.decorView?.animate()
@@ -7680,7 +7684,7 @@ class PlayerActivity : ComponentActivity() {
             if (now.x == lastWinW && now.y == lastWinH) return
             lastWinW = now.x
             lastWinH = now.y
-            val w = if (tvSheet) {
+            val w = if (tvSheet && !centered) {
                 (now.x * (if (fillFractionX > 0f) fillFractionX else if (sideTvPanel) 0.62f else 0.70f).coerceIn(0.50f, if (edgeToEdge) 1f else 0.94f)).toInt().coerceAtMost(now.x - 2 * halo - (if (edgeToEdge) 0 else (18 * density).toInt()))
             } else {
                 panelWidthFor(now)
@@ -9523,6 +9527,7 @@ class PlayerActivity : ComponentActivity() {
             // art, with no dark box between the header and the list.
             // Vertical is the boxed 0.11.33 look: solid dark panel.
             ghostPanel = !verticalSheet,
+            centered = verticalSheet,
         )
         // Backdrop rotation, every 2.5s: the art view was tagged in
         // presentGlass, and artLoopUrls (filled by the artUrl block above)
