@@ -68,6 +68,9 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
 
     val active = tasks.filter { it.status != DownloadStatus.DONE }
     val done = tasks.filter { it.status == DownloadStatus.DONE }
+    // Untitled-task fallback, read here in the @Composable body: tr() can't
+    // run inside LazyColumn's content lambda or groupBy {} below.
+    val blankTitle = tr("Video")
 
     LazyColumn(
         // Downloads position held across visits (see ScrollKeeper).
@@ -102,9 +105,6 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
                 )
             }
         } else {
-            // Shared fallback for untitled tasks, read once up here: tr() is
-            // @Composable and can't run inside groupBy {} below.
-            val blankTitle = tr("Video")
             if (active.isNotEmpty()) {
                 item {
                     Text(
