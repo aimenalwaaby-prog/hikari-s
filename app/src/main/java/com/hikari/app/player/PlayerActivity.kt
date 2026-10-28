@@ -9491,27 +9491,43 @@ class PlayerActivity : ComponentActivity() {
             // backdrops (the detail screen passes them in), else the single
             // backdrop — the desktop client's look. Null keeps the plain
             // dimmed-video background. The rest of the list rotates every 2s
-            // (see the art loop after the show below).
+            // (see the art loop after the show below). Vertical passes the
+            // plural portrait posters instead, same rotation.
             artUrl = run {
-                // Vertical reads portrait: the TMDB poster the detail screen
-                // passes (histPoster, a vertical image), resolved through
-                // PosterLoader so data/token posters load too — single
-                // frame, no rotation, CENTER_CROP fills the portrait page.
-                // Without a poster the first backdrop is used, still single
-                // frame behind the box. Horizontal keeps the backdrop
+                // Vertical reads portrait (CENTER_CROP fills the page):
+                // the plural TMDB posters when there are several (they
+                // rotate — see the art loop after the show), else the
+                // single histPoster resolved through PosterLoader, else
+                // the first backdrop. Horizontal keeps the backdrop
                 // rotation as now.
                 if (verticalSheet) {
-                    val poster = intent?.getStringExtra("histPoster")?.takeIf { it.isNotBlank() }
-                    val resolved = poster?.let { PosterLoader.model(it) }
-                    if (resolved != null) {
+                    // Vertical reads portrait: the plural TMDB posters the
+                    // detail screen passes rotate every 2.5s like the
+                    // horizontal backdrops (see the art loop after the show).
+                    // A lone poster — or none — keeps the old single-frame
+                    // path: the histPoster resolved through PosterLoader so
+                    // data/token posters load too, else the first backdrop.
+                    val posters = intent?.getStringArrayListExtra("serverPosters")
+                        ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
+                    if (posters.size > 1) {
+                        artLoopUrls = posters
+                        posters.first()
+                    } else if (posters.size == 1) {
                         artLoopUrls = emptyList()
-                        resolved
+                        posters.first()
                     } else {
-                        val loop = intent?.getStringArrayListExtra("serverArts")
-                            ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
-                        artLoopUrls = emptyList()
-                        (loop.firstOrNull()
-                            ?: intent?.getStringExtra("serverArt"))?.takeIf { it.isNotBlank() }
+                        val poster = intent?.getStringExtra("histPoster")?.takeIf { it.isNotBlank() }
+                        val resolved = poster?.let { PosterLoader.model(it) }
+                        if (resolved != null) {
+                            artLoopUrls = emptyList()
+                            resolved
+                        } else {
+                            val loop = intent?.getStringArrayListExtra("serverArts")
+                                ?.filter { it.isNotBlank() }?.distinct()?.take(8).orEmpty()
+                            artLoopUrls = emptyList()
+                            (loop.firstOrNull()
+                                ?: intent?.getStringExtra("serverArt"))?.takeIf { it.isNotBlank() }
+                        }
                     }
                 } else {
                     val loop = intent?.getStringArrayListExtra("serverArts")

@@ -148,6 +148,7 @@ import com.hikari.app.ui.FlagIcon
 import com.hikari.app.ui.ProviderFlags
 import com.hikari.app.ui.ProviderPack
 import com.hikari.app.ui.ProviderPacks
+import com.hikari.app.ui.SourceLangs
 import com.hikari.app.ui.components.EmptyState
 import com.hikari.app.ui.components.GlassCard
 import com.hikari.app.ui.components.GlassSearchField
@@ -9417,6 +9418,16 @@ private fun SourcesOverviewView(
             else providers.filter { it.config.name.contains(extFilter, ignoreCase = true) },
         )
     }
+    // Mihon-style language groups for the installed list below: every source
+    // in exactly one group (Multi, English, हिन्दी, … — or Other when it
+    // declares and names none), each group with its own enable-all toggle.
+    // Grouped once per filter/provider change, like the packs above.
+    val langGroups = remember(providers, extFilter) {
+        SourceLangs.groupsOf(
+            if (extFilter.isBlank()) providers
+            else providers.filter { it.config.name.contains(extFilter, ignoreCase = true) },
+        )
+    }
     val cs3GroupTitle = tr("CloudStream")
     val hikiGroupTitle = tr("Hikari")
     val nuvioGroupTitle = tr("Nuvio")
@@ -9679,10 +9690,15 @@ private fun SourcesOverviewView(
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
-            val filteredProviders = providers.filter {
-                extFilter.isBlank() || it.config.name.contains(extFilter, ignoreCase = true)
-            }
-            if (filteredProviders.isEmpty()) {
+            // Mihon-style language groups: every installed source sits under
+            // exactly one language header (Multi, English, हिन्दी, … — or
+            // Other when it declares and names none), each header with an
+            // enable-all toggle and each source with its own checkbox. The
+            // toggle writes through the same provider switch as every other
+            // list, so search, shelves and downloads follow it at once.
+            // (Labels come from SourceLangs as plain strings — tr() is a
+            // composable and must never run inside lazy content.)
+            if (langGroups.isEmpty()) {
                 item {
                     EmptyState(
                         title = if (providers.isEmpty()) "No extensions yet" else "No matches",
@@ -9695,24 +9711,84 @@ private fun SourcesOverviewView(
                     )
                 }
             }
-            items(installedPacks, key = { "inst-" + it.key }) { pack ->
-                ProviderRecordRow(
-                    pack = pack,
-                    statusFor = { p -> pluginStatus(p) },
-                    onToggleProvider = onToggleProvider,
-                    onDeleteProvider = onDeleteProvider,
-                    settingsFor = { p ->
-                        when {
-                            // A playlist has no settings screen — the gear opens what
-                            // it IS instead: where it was read from, how many channels
-                            // it holds, and a way to read it again.
-                            p.config.type == ProviderType.IPTV -> { { onOpenSettings(p) } }
-                            hasSettingsScreen(p, cs3SettingsIds) -> { { onOpenSettings(p) } }
-                            else -> null
+            langGroups.forEach { group ->
+                val allOn = group.members.all { it.config.enabled }
+                val onCount = group.members.count { it.config.enabled }
+                item(key = "langheader-" + group.code) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                group.display,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "$onCount / ${group.members.size} enabled",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
                         }
-                    },
-                    reinstallFor = reinstallFor,
-                )
+                        Switch(
+                            checked = allOn,
+                            onCheckedChange = { on ->
+                                group.members.forEach { m -> onToggleProvider(m.config.id, on) }
+                            }
+                        )
+                    }
+                }
+                items(group.members, key = { "langsrc-" + group.code + "-" + it.config.id }) { p ->
+                    GlassCard(
+                        onClick = { onToggleProvider(p.config.id, !p.config.enabled) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 3.dp)
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                ProviderIcon(p, Modifier.size(28.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    p.config.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    p.config.type.groupLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Checkbox(
+                                checked = p.config.enabled,
+                                onCheckedChange = { on -> onToggleProvider(p.config.id, on) }
+                            )
+                        }
+                    }
+                }
             }
         }
     }

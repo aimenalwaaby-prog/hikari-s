@@ -19,8 +19,14 @@ import java.util.concurrent.ConcurrentHashMap
 object TmdbScreenshots {
 
     private const val IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280"
+    /** Portrait art for the vertical server page — one step down from the
+     *  backdrop size, enough for a 560dp column. */
+    private const val IMG_POSTER = "https://image.tmdb.org/t/p/w500"
 
     private val mem = ConcurrentHashMap<String, List<String>>()
+
+    /** Portrait-art twin of [mem]: one `/images` call carries both lists. */
+    private val posterMem = ConcurrentHashMap<String, List<String>>()
 
     /** First header-sized art per title id, filled whenever [backdropsFor]
      *  succeeds — the Play intent reads this synchronously (it cannot suspend)
@@ -42,6 +48,22 @@ object TmdbScreenshots {
      *  Never throws. */
     fun allCached(uniqueId: String): List<String> = listByKey[uniqueId] ?: emptyList()
 
+    /** First portrait art per title id — the vertical server page's opening
+     *  frame. Synchronous, like [firstCached]. Never throws. */
+    private val firstPosterByKey = ConcurrentHashMap<String, String>()
+
+    /** The FULL plural portrait list behind [firstPosterCached], per title
+     *  id — the Play intent carries it so the vertical server page rotates
+     *  through portraits the way the horizontal one rotates backdrops.
+     *  Empty until loaded. Never throws. */
+    private val listPosterByKey = ConcurrentHashMap<String, List<String>>()
+
+    /** Synchronous read of the portrait art (null until loaded). */
+    fun firstPosterCached(uniqueId: String): String? = firstPosterByKey[uniqueId]
+
+    /** Synchronous read of the full portrait-art list (empty until loaded). */
+    fun allPostersCached(uniqueId: String): List<String> = listPosterByKey[uniqueId] ?: emptyList()
+
     suspend fun backdropsFor(item: MediaItem): List<String> =
         runCatching {
             if (item.type != MediaType.SERIES && item.type != MediaType.MOVIE) return emptyList()
@@ -55,6 +77,13 @@ object TmdbScreenshots {
                     if (list.isNotEmpty()) {
                         firstByKey[item.uniqueId] = list.first()
                         listByKey[item.uniqueId] = list
+                        // The anime's own cover is its portrait art — the
+                        // vertical server page rotates through it the same way
+                        // the horizontal one rotates backdrops.
+                        listOfNotNull(pick.info.cover).takeIf { it.isNotEmpty() }?.let {
+                            firstPosterByKey[item.uniqueId] = it.first()
+                            listPosterByKey[item.uniqueId] = it
+                        }
                         return list
                     }
                     // else fall through to TMDB — no anime art to show.
@@ -78,6 +107,16 @@ object TmdbScreenshots {
                         firstByKey.remove(item.uniqueId)
                         listByKey.remove(item.uniqueId)
                     }
+                    // The portraits fetched alongside live in the twin cache.
+                    posterMem[seg + "/" + r.tmdbId]?.let { posters ->
+                        if (posters.isNotEmpty()) {
+                            firstPosterByKey[item.uniqueId] = posters.first()
+                            listPosterByKey[item.uniqueId] = posters
+                        } else {
+                            firstPosterByKey.remove(item.uniqueId)
+                            listPosterByKey.remove(item.uniqueId)
+                        }
+                    }
                     return it
                 }
             }
@@ -92,6 +131,36 @@ object TmdbScreenshots {
                     "/$seg/${resolved.tmdbId}/images",
                     emptyMap(),
                 ) ?: return@withContext emptyList()
+                // Portraits ride the same response (`posters`) under the same
+                // rule — the vertical page rotates these, capped like the
+                // backdrops so the intent stays small. Parsed (and banked)
+                // first, so a response without backdrops still leaves them.
+                runCatching {
+                    val parr = obj.optJSONArray("posters") ?: return@runCatching
+                    val posterPref = ArrayList<Pair<Double, String>>()
+                    val posterRest = ArrayList<Pair<Double, String>>()
+                    for (i in 0 until parr.length()) {
+                        val o = parr.optJSONObject(i) ?: continue
+                        val path = o.optString("file_path").trim()
+                            .takeIf { it.isNotBlank() && it != "null" } ?: continue
+                        val lang = o.optString("iso_639_1")
+                        (if (lang == "en" || lang.isBlank() || lang == "null") posterPref else posterRest)
+                            .add(o.optDouble("vote_average", 0.0) to path)
+                    }
+                    val posters = (posterPref.sortedByDescending { it.first } + posterRest.sortedByDescending { it.first })
+                        .take(8).map { IMG_POSTER + it.second }
+                    if (resolved != null) {
+                        if (posterMem.size >= 200) posterMem.clear()
+                        if (posters.isNotEmpty()) {
+                            posterMem[seg + "/" + resolved.tmdbId] = posters
+                            firstPosterByKey[item.uniqueId] = posters.first()
+                            listPosterByKey[item.uniqueId] = posters
+                        } else {
+                            firstPosterByKey.remove(item.uniqueId)
+                            listPosterByKey.remove(item.uniqueId)
+                        }
+                    }
+                }
                 val arr = obj.optJSONArray("backdrops") ?: return@withContext emptyList()
                 val pref = ArrayList<Pair<Double, String>>()
                 val rest = ArrayList<Pair<Double, String>>()
@@ -125,6 +194,10 @@ object TmdbScreenshots {
                     if (fb.isNotEmpty()) {
                         firstByKey[item.uniqueId] = fb.first()
                         listByKey[item.uniqueId] = fb
+                        listOfNotNull(a.cover).takeIf { it.isNotEmpty() }?.let {
+                            firstPosterByKey[item.uniqueId] = it.first()
+                            listPosterByKey[item.uniqueId] = it
+                        }
                         return fb
                     }
                 }

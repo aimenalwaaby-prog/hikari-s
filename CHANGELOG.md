@@ -1,3 +1,8 @@
+## 0.12.5 (continuous build only)
+
+- Sources screen groups installed sources by language: Multi, English, हिन्दी, Español, Français, Deutsch, Português (Brasil), Polski, Русский, Українська, العربية, ไทย, 中文, 日本語, 한국어 and the rest — with an Other bucket for sources that declare and name none — each group with an enable-all toggle and each source with its own checkbox, across anime/manga/novels and every extension type; the toggles use the same provider switch as everywhere else, so search, shelves and downloads follow them at once
+- Vertical server page rotates portrait art: the detail screen hands over the plural TMDB posters and the portrait column turns them over every 2.5s like the horizontal backdrop rotation (a lone poster, or none, keeps the old single-frame path)
+
 ## 0.12.4 (continuous build only)
 
 - Vertical server page is glass like horizontal: the rows float directly over the portrait poster art with no dark box behind them (still a narrow centered column); row, card and chip borders are black-tinted in both layouts so they read on bright art

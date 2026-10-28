@@ -2445,6 +2445,15 @@ fun DetailScreen(
                         (if (m != null) TmdbScreenshots.allCached(m.uniqueId) else emptyList()).take(8)
                     )
                 )
+                // The plural PORTRAIT art for the vertical server page: the
+                // player rotates these the same way, so the portrait column
+                // turns over instead of sitting on one frame. Same cap.
+                putStringArrayListExtra(
+                    "serverPosters",
+                    ArrayList(
+                        (if (m != null) TmdbScreenshots.allPostersCached(m.uniqueId) else emptyList()).take(8)
+                    )
+                )
                 putExtra("showLoadingBanner", showLoadingCoverSetting)
                 putExtra("loadingStyle", loadingStyleSetting)
                 putExtra("loadingEffect", com.hikari.app.ui.LoadingEffects.encode(loadingEffectsSetting))
