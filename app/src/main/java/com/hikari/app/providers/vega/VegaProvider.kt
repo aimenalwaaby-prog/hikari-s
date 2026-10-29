@@ -142,8 +142,9 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
         if (f.isFile) f.length().toString() + "@" + f.lastModified() else "missing"
     }.getOrDefault("?")
 
-    /** One shared-log line per title: post URL + raw per-entry titles (see
-     *  [getMeta]). Never throws; logging must not break a detail open. */
+    /** One shared-log line per title: post URL + raw per-entry titles, written
+     *  from the detail job so it prints on every open, saved header or not.
+     *  Never throws; logging must not break a detail open. */
     private fun logLinkList(item: MediaItem, info: JSONObject) {
         if (!loggedLists.add(item.id)) return
         runCatching {
@@ -351,22 +352,12 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     override suspend fun getMeta(item: MediaItem): MediaItem = withContext(Dispatchers.IO) {
-        // Never blocks the open: a stale module is replaced in the background
-        // and the next open parses with it (see [refreshIfStale]).
-        refreshIfStale()
         // The detail job, not [infoFor]: this is the call the detail page makes,
         // and the job is what puts the meta document AND the season list in one
         // engine instead of two (see [VegaRuntime.detail]). The header still
         // paints the moment the meta half answers — the job completes `info`
         // then, while its episodes are still being fetched.
         val info = detailJob(item).info.await() ?: infoFor(item) ?: return@withContext item
-        // Raw-data capture for the "Vega shows seasons, Hikari shows bare
-        // rows" report: one line per title per session with the opened post
-        // URL plus every entry title the module returned. Same URL + bare
-        // titles = the site served different markup; different URL = search
-        // picked another post. The two have different fixes, so the line
-        // settles it instead of another round of guessing.
-        logLinkList(item, info)
         val type = info.optString("type").trim().lowercase()
         MediaItem(
             providerId = item.providerId,
@@ -426,6 +417,11 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
                         ?.also { infoCache[item.id] = it }
                 }
                 if (!job.info.isCompleted) job.info.complete(info)
+                // Every detail open lands here — saved header or not — so the
+                // raw-entry line and the staleness check live here, not in
+                // [getMeta], whose saved-details cache would skip them.
+                info?.let { logLinkList(item, it) }
+                refreshIfStale()
                 job.episodes.complete(packEpisodesFrom(data, info))
             } catch (e: Throwable) {
                 if (!job.info.isCompleted) job.info.complete(null)

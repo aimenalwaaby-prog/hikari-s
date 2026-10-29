@@ -1,3 +1,7 @@
+## 0.12.12 (continuous build only)
+
+- Vega diagnostic line + provider self-refresh moved into the detail job, which runs on every open — the saved-header shortcut had been skipping both, so reopened titles never printed the raw-entry line and never checked for a stale parser
+
 ## 0.12.11 (continuous build only)
 
 - Vega providers now refresh themselves like the Vega app's do: once per session per provider, in the background without delaying the open, the installed parser is hashed against the repo's and replaced on mismatch (same validated reinstall path as a manual reinstall, outcome written to the log) — a stale parser can no longer serve bare "Source 1" rows forever while the repo moved on
