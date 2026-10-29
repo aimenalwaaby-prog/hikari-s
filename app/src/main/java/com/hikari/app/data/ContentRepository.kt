@@ -7371,6 +7371,26 @@ class ContentRepository(private val manager: ProviderManager) {
     }
 
     /**
+     * The picked Vega pack's TV key (see
+     * [com.hikari.app.providers.vega.VegaTvKey]) for a single-season episode
+     * list — null for every other provider, for multi-season lists, and
+     * whenever the pack title names no explicit season. The TMDB enrichment
+     * below follows this key instead of the show title, so a picked
+     * "[Season 3]" pack reads season 3's names and details instead of season
+     * 1's. Never throws; enrichment is a nicety, never a gate.
+     */
+    private suspend fun vegaTvKey(
+        item: MediaItem,
+        eps: List<Episode>,
+    ): com.hikari.app.providers.vega.VegaTvKey? {
+        if (!item.providerId.startsWith("vega|")) return null
+        if (eps.map { it.season }.toSet().size != 1) return null
+        val p = manager.byId(item.providerId)
+            as? com.hikari.app.providers.vega.VegaProvider ?: return null
+        return runCatching { p.tvKeyFor(item) }.getOrNull()
+    }
+
+    /**
      * Upgrades episode names to English where TMDB has an English title for
      * that episode, leaving the extension's own list — count, order and
      * numbering — exactly as it is, and never reordering or shortening it.
@@ -7398,7 +7418,15 @@ class ContentRepository(private val manager: ProviderManager) {
         // block the lookup: TMDB is asked for each number once and every twin
         // takes the same name.
         val multiSeason = anilistNamed.map { it.season }.toSet().size > 1
-        val numbers = if (multiSeason) (1..anilistNamed.size).toSet() else eps.map { it.number }.toSet()
+        // A picked Vega pack names its own season ("[Season 3]"): the lookup
+        // follows the pack, not the show title — otherwise every pack of a
+        // multi-season post reads season 1's names. Cour parts ("PART - 2")
+        // hold the season's second half, so their numbers shift past the
+        // earlier part's files. Single-season lists only; everything else
+        // keeps the long-standing title behavior exactly.
+        val vegaTv = if (!multiSeason) vegaTvKey(item, anilistNamed) else null
+        val vegaShift = vegaTv?.offset ?: 0
+        val numbers = if (multiSeason) (1..anilistNamed.size).toSet() else eps.map { it.number + vegaShift }.toSet()
         // The episode-name lookup keys off the show's ORIGINAL name (a display
         // title localized by the app's TMDB language is not what the wiki knows
         // it as).
@@ -7424,13 +7452,13 @@ class ContentRepository(private val manager: ProviderManager) {
                 acc += rows.size
             }
         }
-        fun absOf(e: Episode): Int = if (!multiSeason) e.number else (seasonBase[e.season] ?: 0) + e.number
+        fun absOf(e: Episode): Int = if (!multiSeason) e.number + vegaShift else (seasonBase[e.season] ?: 0) + e.number
         val names = withTimeoutOrNull(20_000) {
             val resolvedId = withTimeoutOrNull(8_000) {
                 runCatching { com.hikari.app.nuvio.TmdbResolver.resolve(item) }.getOrNull()
             }?.takeIf { it.mediaType.equals("tv", true) }?.tmdbId?.toIntOrNull()?.takeIf { it > 0 }
             if (resolvedId != null) {
-                runCatching { EpisodeTitles.lookupForId(resolvedId, numbers, seasonHint, language) }.getOrNull()?.takeIf { !it.isEmpty() }
+                runCatching { EpisodeTitles.lookupForId(resolvedId, numbers, vegaTv?.season ?: seasonHint, language) }.getOrNull()?.takeIf { !it.isEmpty() }
                     ?: runCatching { EpisodeTitles.lookup(showName, item.year, numbers, language) }.getOrNull()
             } else {
                 runCatching { EpisodeTitles.lookup(showName, item.year, numbers, language) }.getOrNull()
@@ -7522,9 +7550,14 @@ class ContentRepository(private val manager: ProviderManager) {
         // Same duplicate-number rule as [withRealEpisodeNames]: twins share one
         // TMDB row and each twin gets the same details filled in.
         val singleSeason = list.map { it.season }.toSet().size == 1
-        val numbers = if (singleSeason) list.map { it.number }.toSet() else (1..list.size).toSet()
+        // Same pack-follows-season rule as [withRealEpisodeNames]: a picked
+        // "[Season 3]" pack fills its blanks from season 3, shifted past an
+        // earlier cour part's files when the pack is a second half.
+        val vegaTv = if (singleSeason) vegaTvKey(item, list) else null
+        val vegaShift = vegaTv?.offset ?: 0
+        val numbers = if (singleSeason) list.map { it.number + vegaShift }.toSet() else (1..list.size).toSet()
         val language = com.hikari.app.nuvio.TmdbResolver.contentLanguage.takeIf { it.isNotBlank() }
-        val seasonHint = TmdbMeta.seasonHint(item.searchTitle)
+        val seasonHint = vegaTv?.season ?: TmdbMeta.seasonHint(item.searchTitle)
         val map = withTimeoutOrNull(22_000) {
             val resolvedId = withTimeoutOrNull(8_000) {
                 runCatching { com.hikari.app.nuvio.TmdbResolver.resolve(item) }.getOrNull()
@@ -7539,7 +7572,7 @@ class ContentRepository(private val manager: ProviderManager) {
         if (map.isEmpty()) return list
         var changed = false
         val out = list.map { e ->
-            val d = if (singleSeason) map[e.number]
+            val d = if (singleSeason) map[e.number + vegaShift]
             else map.values.firstOrNull { it.season == e.season && it.number == e.number }
             if (d == null) return@map e
             val ov = if (e.overview.isNullOrBlank()) d.overview else e.overview

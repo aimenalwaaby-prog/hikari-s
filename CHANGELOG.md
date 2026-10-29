@@ -1,3 +1,7 @@
+## 0.12.14 (continuous build only)
+
+- Vega packs show their own season's episode names: picking "[Season 3]" fills the rows from TMDB's season 3 instead of season 1's, and a "PART - 2" second cour shifts past the first part's files so its rows align with the season's second half — the metadata lookup follows the picked entry's explicitly named season (single-season lists only, everything else unchanged)
+
 ## 0.12.13 (continuous build only)
 
 - GokuHD multi-season posts show their seasons: the provider's heading lookup stopped at the inner button wrapper while the season/quality heading sits beside it, so every row fell back to bare "Source N" — installs now carry a compatibility patch that climbs the button's ancestors for the heading (exact-match, self-disabling the moment upstream fixes it for real), the background self-refresh compares against the patched build so it stops reinstalling once the fix is in, and the diagnostic line carries a SHA fingerprint that reads equal for equal builds

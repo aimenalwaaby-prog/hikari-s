@@ -672,8 +672,7 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             // positional fallback. The post title is deliberately NOT read
             // here: one multi-season post would number every pack's episodes
             // under the same season.
-            val packSeason = seasonFromEpisodeTitle(pack.title)
-                ?: seasonNumberOf(pack.title, pack.index + 1)
+            val packSeason = packSeasonOf(pack)
             val out = ArrayList<Episode>()
             var number = 0
             fetched?.let { arr ->
@@ -902,6 +901,79 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     /**
+     * The season a pack's episodes are stamped with (see [getPackEpisodes]):
+     * the episode titles' own season markers first, then the pack title's
+     * own number, then the positional fallback.
+     */
+    private fun packSeasonOf(pack: VegaPack): Int =
+        seasonFromEpisodeTitle(pack.title) ?: seasonNumberOf(pack.title, pack.index + 1)
+
+    /**
+     * The cour/part ordinal a pack title names ("[Season 2 PART – 2]",
+     * "Season 2 Part 1", "Cour 2") — null when the title names none.
+     */
+    private fun partNumberOf(title: String): Int? {
+        if (title.isBlank()) return null
+        // \u2013/\u2014 are the en/em dashes sites actually print ("PART – 2").
+        val m = Regex("(?i)\\b(?:part|cour)\\s*[\u2013\u2014\\-:]?\\s*(\\d{1,2})\\b").find(title)
+        return m?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1..99 }
+    }
+
+    /** Entries of one pack's answer that become rows (see
+     *  [getPackEpisodes]): objects with a non-blank link. Direct links count
+     *  the same way they append in the episode list. */
+    private fun playableCount(arr: JSONArray?): Int {
+        if (arr == null) return 0
+        var n = 0
+        for (i in 0 until arr.length()) {
+            if (arr.optJSONObject(i)?.optString("link")?.trim().isNullOrBlank()) continue
+            n++
+        }
+        return n
+    }
+
+    /**
+     * Which TMDB season the picked pack's rows belong to, and — for split
+     * cours packs ("[Season 2 PART - 2]") — where inside that season its
+     * files start. A pack's rows are numbered from 1, but a second-cour pack
+     * holds the season's SECOND half, so the metadata lookup must be shifted
+     * past the earlier part's files (see the episode enrichment in
+     * ContentRepository, which reads this key).
+     *
+     * Null unless the picked entry's title explicitly names a season (the
+     * strict patterns in [seasonFromEpisodeTitle] — a bare "Source 2" mirror
+     * of season 3 is NOT season 2, so the loose fallback is never trusted
+     * here), and null as well when a later part's offset cannot be
+     * established from the detail job's already-collected answers: no new
+     * engine is ever booted for this, and callers keep their previous
+     * behavior on null.
+     */
+    suspend fun tvKeyFor(item: MediaItem): VegaTvKey? {
+        if (item.type == MediaType.MOVIE) return null
+        val info = infoFor(item) ?: return null
+        val packs = packsOf(info)
+        if (packs.isEmpty()) return null
+        val picked = selectedPack[item.id]?.let { idx -> packs.firstOrNull { it.index == idx } }
+            ?: packs.first()
+        val season = seasonFromEpisodeTitle(picked.title) ?: return null
+        val part = partNumberOf(picked.title) ?: 1
+        var offset = 0
+        if (part > 1) {
+            val answers = runCatching {
+                synchronized(detailJobs) { detailJobs[item.id] }?.episodes
+                    ?.takeIf { it.isCompleted }?.getCompleted()
+            }.getOrNull() ?: return null
+            for (q in packs) {
+                if (q.index == picked.index) continue
+                if (seasonFromEpisodeTitle(q.title) != season) continue
+                if ((partNumberOf(q.title) ?: 1) >= part) continue
+                offset += playableCount(answers[q.index]) + playableCount(q.direct)
+            }
+        }
+        return VegaTvKey(season, part, offset)
+    }
+
+    /**
      * The season an episode title carries itself ("S01 E01", "S01E01",
      * "Season 2", "2x03") — null when the title names no season. Providers
      * that serve a whole show per audio pack title every row this way, so
@@ -954,4 +1026,18 @@ data class VegaPackSummary(
     val index: Int,
     val seasons: List<Int>,
     val episodeCount: Int,
+)
+
+/**
+ * Which TMDB season a picked Vega pack's rows belong to, and where inside
+ * that season its files start ([offset] is 0 except for split-cour packs
+ * like "[Season 2 PART - 2]", whose rows continue after the earlier part's
+ * files). The detail page's TMDB enrichment reads this so a picked Season 3
+ * pack shows season 3's names instead of season 1's (see
+ * [VegaProvider.tvKeyFor]).
+ */
+data class VegaTvKey(
+    val season: Int,
+    val part: Int,
+    val offset: Int,
 )
