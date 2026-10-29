@@ -7056,7 +7056,14 @@ private fun vegaPackLabel(
     val verbatim = pack.title.ifBlank {
         tr("Option %s").replace("%s", (pack.index + 1).toString())
     }
-    if (summary == null || summary.episodeCount <= 0) return verbatim
+    // The entry's own quality tag, shown once — most provider titles already
+    // carry it ("… 720p …"), so one that repeats it is skipped. The Vega app's
+    // rows always pair the title with its quality this way.
+    val qualityPart = pack.quality.trim().takeIf { it.isNotBlank() }
+        ?.takeUnless { verbatim.contains(it, ignoreCase = true) }
+    if (summary == null || summary.episodeCount <= 0) {
+        return if (qualityPart != null) "$verbatim • $qualityPart" else verbatim
+    }
     val seasonPart = when (summary.seasons.size) {
         0 -> null
         1 -> tr("Season %s").replace("%s", summary.seasons[0].toString())
@@ -7065,7 +7072,7 @@ private fun vegaPackLabel(
             .replaceFirst("%s", summary.seasons.last().toString())
     }
     val countPart = tr("%s episodes").replace("%s", summary.episodeCount.toString())
-    return listOfNotNull(seasonPart, countPart).joinToString(" • ").ifBlank { verbatim }
+    return listOfNotNull(seasonPart, qualityPart, countPart).joinToString(" • ").ifBlank { verbatim }
 }
 
 /**

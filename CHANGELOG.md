@@ -1,3 +1,8 @@
+## 0.12.9 (continuous build only)
+
+- Vega picker rows read like the Vega app's SeasonList: each entry's own quality tag is carried through and shown next to its title (deduped, so titles that already carry it don't repeat it), and packs with bare mirror titles fall back to the post's own season — a "[Season 3]" post whose rows and episodes name no season now reads "Season 3 • 720p • 12 episodes" instead of "9 episodes", with the same verbatim titles and per-pack episodes as before
+- Donghua mistranslations fixed at the gate: untagged anime items (site scrapers never tag) used to go straight to TMDB, where a live-action namesake wins — "Big Brother" wore the US reality show's backdrop, overview and companies. Now a single exact-title AniList probe runs first, and when TMDB's own details aren't Animation and the probe is exact-level confident, the anime's own overview, score and art win (stable misses cached 12h, failed requests retry next open; TMDB and tracker rows are never second-guessed)
+
 ## 0.12.8 (continuous build only)
 
 - Vega detail picker names seasons like the Vega app: packs whose provider titles are bare mirror rows ("Source 1") now read what their episodes actually hold ("Season 3 • 12 episodes") instead of "Source 1 / Source 2" — real provider titles still show verbatim, and picking a pack still loads that pack's own episodes

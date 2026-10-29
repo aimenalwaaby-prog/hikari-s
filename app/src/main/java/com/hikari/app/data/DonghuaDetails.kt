@@ -79,10 +79,72 @@ object DonghuaDetails {
         info.overview.isNotBlank() || info.score10 > 0.0 || info.votes > 0
 
     suspend fun pick(item: MediaItem): Pick {
-        if (!isAnimeCandidate(item)) return Pick.Tmdb
+        // Site scrapers never tag anime, so untagged items used to go straight
+        // to TMDB — where a live-action namesake wins ("Big Brother" → the US
+        // reality show). Those get one exact-title anime probe first instead.
+        if (!isAnimeCandidate(item)) return secondChancePick(item)
         if (isTmdbAnimation(item)) return Pick.Tmdb
         val info = load(item) ?: return Pick.None
         return if (isUsable(info)) Pick.Anime(info) else Pick.None
+    }
+
+    /**
+     * Second chance for items no provider tagged as anime. TMDB-first already
+     * resolved them, possibly to a live-action namesake — one exact-title
+     * AniList probe decides whether an anime namesake exists, and when TMDB's
+     * own details are not Animation and the probe is exact-level confident,
+     * the anime wins outright. Namespaced providers (TMDB rows, tracker rows)
+     * already resolve correctly and are never second-guessed.
+     */
+    private suspend fun secondChancePick(item: MediaItem): Pick {
+        val p = item.providerId.lowercase()
+        if (p == "tmdb" || p.startsWith("tmdb|") ||
+            p in setOf("anilist", "simkl", "mal", "kitsu", "shikimori", "trakt")
+        ) return Pick.Tmdb
+        if (isTmdbAnimation(item)) return Pick.Tmdb
+        val info = secondChanceAnime(item) ?: return Pick.None
+        return if (isUsable(info)) Pick.Anime(info) else Pick.None
+    }
+
+    /** Stable-miss memory for the second-chance probe: an AniList answer that
+     *  names nothing is a fact, not a hiccup, so it is remembered (12h) — but
+     *  a failed request is never remembered and retries on the next open. */
+    private val missMem = ConcurrentHashMap<String, Long>()
+    private const val MISS_TTL_MS = 12 * 60 * 60 * 1000L
+
+    /** One exact-title AniList probe (single request): is there an anime by
+     *  this exact name? Exact-level only (score 60) — a prefix/containment
+     *  match must never flip a correctly resolved live-action title onto an
+     *  anime namesake. */
+    private suspend fun secondChanceAnime(item: MediaItem): AnimeInfo? {
+        val q = item.searchTitle.trim()
+        if (q.isBlank()) return null
+        val key = "probe|" + item.providerId.lowercase() + "|" + q.lowercase()
+        missMem[key]?.let { if (System.currentTimeMillis() - it < MISS_TTL_MS) return null }
+        val media = withContext(Dispatchers.IO) { anilistSearch(q) } ?: return null
+        val queries = linkedSetOf(q)
+        item.allTitles.forEach { t -> if (t.isNotBlank()) queries.add(t.trim()) }
+        var best: JSONObject? = null
+        var bestScore = 0
+        for (i in 0 until media.length()) {
+            val m = media.optJSONObject(i) ?: continue
+            val names = anilistNames(m)
+            if (names.isEmpty()) continue
+            var score = 0
+            for (v in queries) for (n in names) {
+                score = maxOf(score, TmdbMeta.titleScore(v, n))
+            }
+            if (score > bestScore) {
+                bestScore = score
+                best = m
+            }
+        }
+        if (best == null || bestScore < 60) {
+            if (missMem.size >= 500) missMem.clear()
+            missMem[key] = System.currentTimeMillis()
+            return null
+        }
+        return buildInfo(best, item.searchTitle)
     }
 
     /** TMDB's own details call the title Animation (or not). Null/no genres =
@@ -189,13 +251,21 @@ object DonghuaDetails {
         }
         val m = best ?: return null
         if (bestScore <= 0) return null
+        return buildInfo(m, item.searchTitle)
+    }
+
+    /** Shared AniList media → AnimeInfo mapping for [fromAniList] and the
+     *  second-chance probe (see [secondChanceAnime]). A scoreless coverless
+     *  bannerless hit is a miss — the caller falls through to TMDB instead of
+     *  going bare. */
+    private fun buildInfo(m: JSONObject, fallbackTitle: String): AnimeInfo? {
         val id = m.optInt("id", 0)
         if (id <= 0) return null
         val title = m.optJSONObject("title")
         val name = title?.optString("english")?.takeIf { it.isNotBlank() && it != "null" }
             ?: title?.optString("romaji")?.takeIf { it.isNotBlank() && it != "null" }
             ?: title?.optString("native")?.takeIf { it.isNotBlank() && it != "null" }
-            ?: item.searchTitle
+            ?: fallbackTitle
         val cover = m.optJSONObject("coverImage")
         val coverUrl = cover?.optString("extraLarge")?.takeIf { it.isNotBlank() && it != "null" }
             ?: cover?.optString("large")?.takeIf { it.isNotBlank() && it != "null" }

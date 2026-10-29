@@ -367,10 +367,13 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             val direct = e.optJSONArray("directLinks")
             val epLink = e.optString("episodesLink").trim()
             val single = e.optString("link").trim()
+            // The module extracts one quality tag per row — carried through so
+            // the picker can show it next to the title like the Vega app does.
+            val quality = e.optString("quality").trim()
             if (direct != null && direct.length() > 0) {
-                packs += VegaPack(i, e.optString("title").trim().ifBlank { "Option ${i + 1}" }, direct, epLink, "")
+                packs += VegaPack(i, e.optString("title").trim().ifBlank { "Option ${i + 1}" }, direct, epLink, "", quality)
             } else if (epLink.isNotBlank()) {
-                packs += VegaPack(i, e.optString("title").trim().ifBlank { "Option ${i + 1}" }, null, epLink, "")
+                packs += VegaPack(i, e.optString("title").trim().ifBlank { "Option ${i + 1}" }, null, epLink, "", quality)
             } else if (single.isNotBlank()) {
                 packs += VegaPack(
                     i,
@@ -378,6 +381,7 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
                     JSONArray().put(JSONObject().put("link", single).put("title", e.optString("title"))),
                     "",
                     single,
+                    quality,
                 )
             }
         }
@@ -417,6 +421,13 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             val answers = withTimeoutOrNull(45_000L) { job.episodes.await() }
                 ?: return@withContext emptyMap()
             val out = HashMap<Int, VegaPackSummary>()
+            // The post's own title usually names its season ("… [Season 3] …")
+            // even when every download row is a bare mirror label and every
+            // episode row is a bare "Episode N" — the way the Vega app's rows
+            // name their season. Only a fallback for packs whose own rows name
+            // no season at all (episode titles win whenever they carry one),
+            // and never taken from the pack's own mirror number.
+            val infoSeason = seasonFromEpisodeTitle(info.optString("title"))
             for (pack in generic) {
                 val arr = answers[pack.index] ?: continue
                 var count = 0
@@ -428,11 +439,13 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
                     seasonFromEpisodeTitle(o.optString("title").trim().ifBlank { null })
                         ?.let { seasons += it }
                 }
+                val named = if (seasons.isNotEmpty()) seasons.toList()
+                    else infoSeason?.let { listOf(it) }.orEmpty()
                 // A bare mirror row with no parseable season still names its
                 // size; the pack title's own number is NOT trusted here (a
                 // "Source 2" mirror of season 3 is not season 2).
-                if (count == 0 && seasons.isEmpty()) continue
-                out[pack.index] = VegaPackSummary(pack.index, seasons.toList(), count)
+                if (count == 0 && named.isEmpty()) continue
+                out[pack.index] = VegaPackSummary(pack.index, named, count)
             }
             out
         }
@@ -566,7 +579,13 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             val key = "${item.id}|pack:${pack.index}"
             episodeCache[key]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
             val fetched = fetchedPackEpisodes(item, pack)
-            val packSeason = seasonNumberOf(pack.title, pack.index + 1)
+            // Episode titles first, then the pack's own title, then the post's
+            // title (a "[Season 3]" post whose rows are all bare mirrors still
+            // numbers its episodes under season 3), and only then the old
+            // positional fallback.
+            val packSeason = seasonFromEpisodeTitle(pack.title)
+                ?: seasonFromEpisodeTitle(info.optString("title"))
+                ?: seasonNumberOf(pack.title, pack.index + 1)
             val out = ArrayList<Episode>()
             var number = 0
             fetched?.let { arr ->
@@ -823,6 +842,10 @@ class VegaPack(
     val direct: JSONArray?,
     val episodesLink: String,
     val link: String = "",
+    /** The entry's own quality tag ("720p", "1080p", …) the provider module
+     *  extracts per row (see [packsOf]) — the detail picker shows it next to
+     *  the title the way the Vega app's SeasonList does. */
+    val quality: String = "",
 )
 
 /** One playable movie option: a quality row inside a pack (`label`) and the
