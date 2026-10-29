@@ -6212,7 +6212,18 @@ class PlayerActivity : ComponentActivity() {
      * it static. No radio marker — the card itself is the target; the active
      * server keeps its check mark.
      */
-    private fun serverCard(option: GlassOption, onClick: (() -> Unit)?): View {
+    private fun serverCard(
+        option: GlassOption,
+        onClick: (() -> Unit)?,
+        /** Vertical server cards read bigger so every detail line fits (see
+         *  [serverVertRow]); every other card keeps the classic metrics. */
+        titleLines: Int = 2,
+        subLines: Int = 3,
+        maxIconChips: Int = 4,
+        maxTextChips: Int = 6,
+        padHdp: Int = 12,
+        padVdp: Int = 10,
+    ): View {
         val density = resources.displayMetrics.density
         val cardShape = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
@@ -6244,8 +6255,8 @@ class PlayerActivity : ComponentActivity() {
                 if (foreground == null) foreground = tvFocusRing()
             }
             setPadding(
-                (12 * density).toInt(), (10 * density).toInt(),
-                (12 * density).toInt(), (10 * density).toInt()
+                (padHdp * density).toInt(), (padVdp * density).toInt(),
+                (padHdp * density).toInt(), (padVdp * density).toInt()
             )
             background = if (onClick == null) cardShape
             else RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), cardShape, cardShape)
@@ -6278,14 +6289,15 @@ class PlayerActivity : ComponentActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = (4 * density).toInt() })
         }
-        // Title: the choice being made, up to two lines.
+        // Title: the choice being made; vertical server cards allow three lines
+        // so long provider names are read, not cut.
         card.addView(TextView(this).apply {
             text = option.label
             dpText(13f)
             includeFontPadding = false
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(if (option.selected) 0xFFFFFFFF.toInt() else 0xFFDCE3EE.toInt())
-            maxLines = 2
+            maxLines = titleLines
             ellipsize = TextUtils.TruncateAt.END
         })
         // Filename / details block.
@@ -6295,7 +6307,7 @@ class PlayerActivity : ComponentActivity() {
                 dpText(10f)
                 includeFontPadding = false
                 setTextColor(0xFF98A3B5.toInt())
-                maxLines = 3
+                maxLines = subLines
                 ellipsize = TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
@@ -6306,7 +6318,7 @@ class PlayerActivity : ComponentActivity() {
         // HEVC, Blu-ray, DTS — see ServerMeta.badgeIconRes) draws its logo;
         // the rest keep their text pills below. Never invented: only chips
         // the name/details/url already stated get either treatment.
-        val iconChips = option.chips.filter { ServerMeta.badgeIconRes(it) != 0 }.distinct().take(4)
+        val iconChips = option.chips.filter { ServerMeta.badgeIconRes(it) != 0 }.distinct().take(maxIconChips)
         if (iconChips.isNotEmpty()) {
             card.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -6328,7 +6340,7 @@ class PlayerActivity : ComponentActivity() {
             ).apply { topMargin = (6 * density).toInt() })
         }
         // Fact chips, greedily wrapped into rows by estimated width.
-        val chips = option.chips.filter { ServerMeta.badgeIconRes(it) == 0 }.take(6)
+        val chips = option.chips.filter { ServerMeta.badgeIconRes(it) == 0 }.take(maxTextChips)
         if (chips.isNotEmpty()) {
             val rows = ArrayList<LinearLayout>()
             var cur = LinearLayout(this).apply {
@@ -6454,10 +6466,25 @@ class PlayerActivity : ComponentActivity() {
         val metaLine = listOf(badgeLine, facts)
             .filter { it.isNotBlank() }
             .joinToString(" · ")
-            .ifBlank { hostOf(src.url).orEmpty() }
+        // (No host fallback here: the host has its own detail line above,
+        // so falling back would print it twice.)
         row.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
+            // Provider header, the reference look: the red engine/provider
+            // name above every row (vertical cards already draw it — see
+            // serverVertRow), so the horizontal list names its servers too.
+            if (src.providerName.isNotBlank()) {
+                addView(TextView(this@PlayerActivity).apply {
+                    text = src.providerName
+                    dpText(9.5f)
+                    includeFontPadding = false
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(0xFFFF6B6B.toInt())
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                })
+            }
             addView(TextView(this@PlayerActivity).apply {
                 text = serverLabel(src)
                 dpText(titleSp)
@@ -6470,6 +6497,22 @@ class PlayerActivity : ComponentActivity() {
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
             })
+            // Host/link detail line, like the vertical card's filename block
+            // and the reference rows ("pixeldrain.dev"): the raw host the
+            // file comes from, which the facts line below never states.
+            hostOf(src.url)?.takeIf { it.isNotBlank() }?.let { host ->
+                addView(TextView(this@PlayerActivity).apply {
+                    text = host
+                    dpText(metaSp)
+                    includeFontPadding = false
+                    setTextColor(0xFF98A3B5.toInt())
+                    setShadowLayer(6f, 0f, 2f, 0xCC000000.toInt())
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (2 * density).toInt() })
+            }
             // Logo + fact badges, the reference Sources look: every parsed
             // fact with real logo artwork (4K, DV, Atmos, HEVC, Blu-ray, DTS,
             // DD+, TrueHD, 1080p, …) draws its logo; the rest keep small text
@@ -6648,10 +6691,15 @@ class PlayerActivity : ComponentActivity() {
             if (src.isTorrent || src.torrentStream) "TORRENT" else null,
             if (src.subtitles.isNotEmpty()) "SUBS " + src.subtitles.size else null,
         ).joinToString(" · ")
-        val metaLine = listOf(badgeLine, facts)
+        // Host on its own line above the facts, the way the reference rows
+        // print it ("pixeldrain.dev"): the facts state quality/codec/size,
+        // never where the file lives.
+        val hostLine = hostOf(src.url)?.takeIf { it.isNotBlank() }
+        val factsLine = listOf(badgeLine, facts)
             .filter { it.isNotBlank() }
             .joinToString(" · ")
-            .ifBlank { hostOf(src.url).orEmpty() }
+        val metaLine = listOfNotNull(hostLine, factsLine.takeIf { it.isNotBlank() })
+            .joinToString("\n")
         val chips = com.hikari.app.data.ServerMeta.chipsOf(src.name, src.details, src.url)
         val size = runCatching {
             com.hikari.app.data.ServerMeta.sizeOf(src.name, src.details)
@@ -6667,6 +6715,14 @@ class PlayerActivity : ComponentActivity() {
                 chips = chips,
             ),
             onClick = { onPlay() },
+            // Roomier than classic cards so the host line, the full facts
+            // and every chip fit instead of being cut.
+            titleLines = 3,
+            subLines = 6,
+            maxIconChips = 6,
+            maxTextChips = 10,
+            padHdp = 13,
+            padVdp = 12,
         )
         card.setOnLongClickListener { onDownload(); true }
         return card
