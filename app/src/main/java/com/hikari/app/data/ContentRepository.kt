@@ -6586,6 +6586,17 @@ class ContentRepository(private val manager: ProviderManager) {
         }
 
     /**
+     * What each generic-titled pack of a Vega title holds (see
+     * [com.hikari.app.providers.vega.VegaProvider.packSummaries]) — the
+     * detail page's picker labels. Empty for every other engine.
+     */
+    suspend fun vegaPackSummaries(item: MediaItem): Map<Int, com.hikari.app.providers.vega.VegaPackSummary> =
+        withContext(Dispatchers.IO) {
+            (manager.byId(item.providerId) as? com.hikari.app.providers.vega.VegaProvider)
+                ?.packSummaries(item).orEmpty()
+        }
+
+    /**
      * A Vega movie's playable quality rows in provider order — the detail
      * page's quality picker. Empty for every other engine.
      */

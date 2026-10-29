@@ -1,3 +1,7 @@
+## 0.12.8 (continuous build only)
+
+- Vega detail picker names seasons like the Vega app: packs whose provider titles are bare mirror rows ("Source 1") now read what their episodes actually hold ("Season 3 • 12 episodes") instead of "Source 1 / Source 2" — real provider titles still show verbatim, and picking a pack still loads that pack's own episodes
+
 ## 0.12.7 (continuous build only)
 
 - Select Language dialog gains a search box: typing a language name jumps straight to its group, and typing a source name filters matching sources across all language groups

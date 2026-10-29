@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -387,6 +388,66 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     suspend fun packsFor(item: MediaItem): List<VegaPack> = withContext(Dispatchers.IO) {
         val info = infoFor(item) ?: return@withContext emptyList()
         packsOf(info)
+    }
+
+    /**
+     * What each pack of a title actually holds — seasons covered and episode
+     * count — for packs whose own title says nothing ("Source 1", "Option 2",
+     * blank). The detail page's picker shows titles verbatim when the
+     * provider wrote real ones (the Vega app's SeasonList dropdown does the
+     * same), and falls back to these summaries only for the generic rows, so
+     * a mirror list reads "Season 3 • 12 episodes" instead of "Source 1".
+     *
+     * Zero extra engines: the answers come from the detail job's already
+     * collected per-pack arrays (see [packEpisodesFrom]) — the same data the
+     * episode list waits for. A pack with no answer gets no summary and keeps
+     * its verbatim title.
+     */
+    suspend fun packSummaries(item: MediaItem): Map<Int, VegaPackSummary> =
+        withContext(Dispatchers.IO) {
+            val info = infoFor(item) ?: return@withContext emptyMap()
+            val packs = packsOf(info)
+            val generic = packs.filter { isGenericPackTitle(it.title) }
+            if (generic.isEmpty()) return@withContext emptyMap()
+            val job = synchronized(detailJobs) { detailJobs[item.id] }
+                ?: return@withContext emptyMap()
+            // Same data the picked pack's episode list awaits — no new engine,
+            // just the shared deferred. Bounded: labels must never hold the
+            // picker hostage past a stuck pack.
+            val answers = withTimeoutOrNull(45_000L) { job.episodes.await() }
+                ?: return@withContext emptyMap()
+            val out = HashMap<Int, VegaPackSummary>()
+            for (pack in generic) {
+                val arr = answers[pack.index] ?: continue
+                var count = 0
+                val seasons = sortedSetOf<Int>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    if (o.optString("link").trim().isBlank()) continue
+                    count++
+                    seasonFromEpisodeTitle(o.optString("title").trim().ifBlank { null })
+                        ?.let { seasons += it }
+                }
+                // A bare mirror row with no parseable season still names its
+                // size; the pack title's own number is NOT trusted here (a
+                // "Source 2" mirror of season 3 is not season 2).
+                if (count == 0 && seasons.isEmpty()) continue
+                out[pack.index] = VegaPackSummary(pack.index, seasons.toList(), count)
+            }
+            out
+        }
+
+    /**
+     * True when a pack title carries no information of its own — blank, or a
+     * bare mirror/server/option label with an optional number ("Source 1").
+     * Real titles ("Season 3 1080p", "Hindi dub") are never generic, even
+     * when they END with a mirror suffix ("… (Source 1)").
+     */
+    private fun isGenericPackTitle(title: String): Boolean {
+        val t = title.trim()
+        if (t.isEmpty()) return true
+        return Regex("(?i)^(source|server|mirror|option|link|part|ep|episode|stream|src)\\s*\\d*\$")
+            .matches(t)
     }
 
     /** The UI-picked series pack for a title (see [selectedPack]). */
@@ -770,4 +831,16 @@ data class VegaMovieOption(
     val label: String,
     val link: String,
     val packTitle: String,
+)
+
+/**
+ * What one generic-titled pack of a title holds: the seasons its episodes
+ * name plus how many playable entries it has. The detail page turns this
+ * into a "Season 3 • 12 episodes"-style picker label (see
+ * [VegaProvider.packSummaries]).
+ */
+data class VegaPackSummary(
+    val index: Int,
+    val seasons: List<Int>,
+    val episodeCount: Int,
 )

@@ -403,6 +403,19 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     val vegaPackIndex: StateFlow<Int> = _vegaPackIndex.asStateFlow()
 
     /**
+     * What each generic-titled pack holds (seasons + episode count), keyed by
+     * pack index. The picker turns these into "Season 3 • 12 episodes"-style
+     * labels for the mirror rows whose own titles say nothing ("Source 1") —
+     * the Vega app's entries name their season, so these stand in where the
+     * provider did not. Empty until the pack answers arrive, and real titles
+     * always win over a summary.
+     */
+    private val _vegaPackSummaries =
+        MutableStateFlow<Map<Int, com.hikari.app.providers.vega.VegaPackSummary>>(emptyMap())
+    val vegaPackSummaries: StateFlow<Map<Int, com.hikari.app.providers.vega.VegaPackSummary>> =
+        _vegaPackSummaries.asStateFlow()
+
+    /**
      * A Vega movie's playable quality rows in provider order, for the quality
      * picker under the Play row. Picking one resolves Play through THAT row's
      * link (see `selectedLink` in the provider) instead of always the first
@@ -866,6 +879,7 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
             // same title.
             _vegaPacks.value = emptyList()
             _vegaMovieOptions.value = emptyList()
+            _vegaPackSummaries.value = emptyMap()
             _vegaPackIndex.value = 0
             _vegaMovieIndex.value = 0
             if (activeProvider.startsWith("vega|")) {
@@ -1203,6 +1217,9 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
         if (!item.providerId.startsWith("vega|")) return
         _vegaPacks.value = runCatching { repo.vegaPacksFor(item) }.getOrDefault(emptyList())
         _vegaMovieOptions.value = runCatching { repo.vegaMovieOptions(item) }.getOrDefault(emptyList())
+        // Summaries land with the pack answers (same background call, no new
+        // engine); the picker upgrades generic rows when they arrive.
+        _vegaPackSummaries.value = runCatching { repo.vegaPackSummaries(item) }.getOrDefault(emptyMap())
     }
 
     /** Picks a Vega series pack and loads ITS episodes (see [reloadEpisodes]). */
@@ -1914,6 +1931,7 @@ fun DetailScreen(
     // pack's answer — the picker only switches which pack that is.
     val vegaPacks by vm.vegaPacks.collectAsState()
     val vegaPackIndex by vm.vegaPackIndex.collectAsState()
+    val vegaPackSummaries by vm.vegaPackSummaries.collectAsState()
     val vegaMovieOptions by vm.vegaMovieOptions.collectAsState()
     val vegaMovieIndex by vm.vegaMovieIndex.collectAsState()
     val loading by vm.loading.collectAsState()
@@ -6237,7 +6255,7 @@ fun DetailScreen(
                                 .takeIf { it >= 0 } ?: 0
                             VegaOptionPicker(
                                 options = vegaPacks.map {
-                                    it.title.ifBlank { tr("Option %s").replace("%s", (it.index + 1).toString()) }
+                                    vegaPackLabel(it, vegaPackSummaries[it.index])
                                 },
                                 selected = packPos,
                                 onPick = { vm.setVegaPack(vegaPacks[it].index) },
@@ -7028,6 +7046,34 @@ fun DetailScreen(
  * season and range pickers use, so the D-pad walks it the same way.
  */
 @Composable
+/**
+ * One Vega pack's picker label: the provider's own title, verbatim — unless
+ * the provider wrote a bare mirror row ("Source 1") and the pack's answers
+ * have since named what it holds, in which case the seasons + episode count
+ * stand in ("Season 3 • 12 episodes"), the way the Vega app's entries name
+ * their season. The summaries arrive after the packs, so a generic row
+ * upgrades in place; order and selection are untouched.
+ */
+@Composable
+private fun vegaPackLabel(
+    pack: com.hikari.app.providers.vega.VegaPack,
+    summary: com.hikari.app.providers.vega.VegaPackSummary?,
+): String {
+    val verbatim = pack.title.ifBlank {
+        tr("Option %s").replace("%s", (pack.index + 1).toString())
+    }
+    if (summary == null || summary.episodeCount <= 0) return verbatim
+    val seasonPart = when (summary.seasons.size) {
+        0 -> null
+        1 -> tr("Season %s").replace("%s", summary.seasons[0].toString())
+        else -> tr("Seasons %s–%s")
+            .replaceFirst("%s", summary.seasons.first().toString())
+            .replaceFirst("%s", summary.seasons.last().toString())
+    }
+    val countPart = tr("%s episodes").replace("%s", summary.episodeCount.toString())
+    return listOfNotNull(seasonPart, countPart).joinToString(" • ").ifBlank { verbatim }
+}
+
 private fun VegaOptionPicker(
     options: List<String>,
     selected: Int,
