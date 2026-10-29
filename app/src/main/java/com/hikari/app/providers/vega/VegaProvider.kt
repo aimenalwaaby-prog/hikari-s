@@ -85,6 +85,31 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     /** The stream link a movie's own meta resolved to. */
     private val movieLinkCache = ConcurrentHashMap<String, String>()
 
+    /** Item ids whose raw entry list was already logged this session. */
+    private val loggedLists = ConcurrentHashMap.newKeySet<String>()
+
+    /** One shared-log line per title: post URL + raw per-entry titles (see
+     *  [getMeta]). Never throws; logging must not break a detail open. */
+    private fun logLinkList(item: MediaItem, info: JSONObject) {
+        if (!loggedLists.add(item.id)) return
+        runCatching {
+            val list = info.optJSONArray("linkList") ?: return
+            val rows = (0 until list.length()).mapNotNull { i ->
+                list.optJSONObject(i)?.let { e ->
+                    "\"" + e.optString("title").trim().take(120) +
+                        "\" q=" + e.optString("quality").trim()
+                }
+            }
+            com.hikari.app.data.Logs.log(
+                "Vega",
+                "detail " + config.id + " url=" + item.id +
+                    " infoTitle=\"" + info.optString("title").trim().take(140) +
+                    "\" entries=" + rows.size +
+                    " [" + rows.take(24).joinToString(" | ") + "]",
+            )
+        }
+    }
+
     /**
      * The UI-picked pack per title (series audio/season pack, see [VegaPack]).
      * The detail page's dropdown writes it and the episode lookup reads it, so
@@ -278,6 +303,13 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
         // paints the moment the meta half answers — the job completes `info`
         // then, while its episodes are still being fetched.
         val info = detailJob(item).info.await() ?: infoFor(item) ?: return@withContext item
+        // Raw-data capture for the "Vega shows seasons, Hikari shows bare
+        // rows" report: one line per title per session with the opened post
+        // URL plus every entry title the module returned. Same URL + bare
+        // titles = the site served different markup; different URL = search
+        // picked another post. The two have different fixes, so the line
+        // settles it instead of another round of guessing.
+        logLinkList(item, info)
         val type = info.optString("type").trim().lowercase()
         MediaItem(
             providerId = item.providerId,
@@ -421,13 +453,6 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             val answers = withTimeoutOrNull(45_000L) { job.episodes.await() }
                 ?: return@withContext emptyMap()
             val out = HashMap<Int, VegaPackSummary>()
-            // The post's own title usually names its season ("… [Season 3] …")
-            // even when every download row is a bare mirror label and every
-            // episode row is a bare "Episode N" — the way the Vega app's rows
-            // name their season. Only a fallback for packs whose own rows name
-            // no season at all (episode titles win whenever they carry one),
-            // and never taken from the pack's own mirror number.
-            val infoSeason = seasonFromEpisodeTitle(info.optString("title"))
             for (pack in generic) {
                 val arr = answers[pack.index] ?: continue
                 var count = 0
@@ -439,13 +464,15 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
                     seasonFromEpisodeTitle(o.optString("title").trim().ifBlank { null })
                         ?.let { seasons += it }
                 }
-                val named = if (seasons.isNotEmpty()) seasons.toList()
-                    else infoSeason?.let { listOf(it) }.orEmpty()
-                // A bare mirror row with no parseable season still names its
-                // size; the pack title's own number is NOT trusted here (a
+                // Never guessed from the post title: one multi-season post
+                // would stamp every row with the same season (the reported
+                // "all Season 3"). A pack whose rows name no season shows its
+                // count only — the way the Vega app shows a bare entry instead
+                // of inventing a season for it.
+                // The pack title's own number is NOT trusted here (a
                 // "Source 2" mirror of season 3 is not season 2).
-                if (count == 0 && named.isEmpty()) continue
-                out[pack.index] = VegaPackSummary(pack.index, named, count)
+                if (count == 0 && seasons.isEmpty()) continue
+                out[pack.index] = VegaPackSummary(pack.index, seasons.toList(), count)
             }
             out
         }
@@ -579,12 +606,11 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             val key = "${item.id}|pack:${pack.index}"
             episodeCache[key]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
             val fetched = fetchedPackEpisodes(item, pack)
-            // Episode titles first, then the pack's own title, then the post's
-            // title (a "[Season 3]" post whose rows are all bare mirrors still
-            // numbers its episodes under season 3), and only then the old
-            // positional fallback.
+            // Episode titles first, then the pack's own title, then the old
+            // positional fallback. The post title is deliberately NOT read
+            // here: one multi-season post would number every pack's episodes
+            // under the same season.
             val packSeason = seasonFromEpisodeTitle(pack.title)
-                ?: seasonFromEpisodeTitle(info.optString("title"))
                 ?: seasonNumberOf(pack.title, pack.index + 1)
             val out = ArrayList<Episode>()
             var number = 0

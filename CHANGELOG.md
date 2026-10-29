@@ -1,3 +1,8 @@
+## 0.12.10 (continuous build only)
+
+- Vega picker stops guessing seasons from the post title: on a multi-season post that painted every row "Season 3", rows with bare provider titles now show their count (+ quality) instead of the wrong season — real titles still render verbatim, and episode-title seasons still apply where the rows carry them
+- Vega detail open writes one diagnostic line (post URL + raw per-entry titles) to the on-device log, so the next "Vega shows seasons, Hikari shows bare rows" report shows whether search picked a different post or the site served different markup
+
 ## 0.12.9 (continuous build only)
 
 - Vega picker rows read like the Vega app's SeasonList: each entry's own quality tag is carried through and shown next to its title (deduped, so titles that already carry it don't repeat it), and packs with bare mirror titles fall back to the post's own season — a "[Season 3]" post whose rows and episodes name no season now reads "Season 3 • 720p • 12 episodes" instead of "9 episodes", with the same verbatim titles and per-pack episodes as before
