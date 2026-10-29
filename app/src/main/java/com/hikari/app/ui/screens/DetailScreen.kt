@@ -7041,12 +7041,6 @@ fun DetailScreen(
 }
 
 /**
- * A Vega pack / quality picker: one outlined button opening the provider's own
- * option titles, verbatim. The same OutlinedButton+DropdownMenu shape the
- * season and range pickers use, so the D-pad walks it the same way.
- */
-@Composable
-/**
  * One Vega pack's picker label: the provider's own title, verbatim — unless
  * the provider wrote a bare mirror row ("Source 1") and the pack's answers
  * have since named what it holds, in which case the seasons + episode count
@@ -7074,6 +7068,12 @@ private fun vegaPackLabel(
     return listOfNotNull(seasonPart, countPart).joinToString(" • ").ifBlank { verbatim }
 }
 
+/**
+ * A Vega pack / quality picker: one outlined button opening the provider's own
+ * option titles, verbatim. The same OutlinedButton+DropdownMenu shape the
+ * season and range pickers use, so the D-pad walks it the same way.
+ */
+@Composable
 private fun VegaOptionPicker(
     options: List<String>,
     selected: Int,
