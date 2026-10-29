@@ -2,6 +2,7 @@ package com.hikari.app.providers.vega
 
 import com.hikari.app.HikariApp
 import com.hikari.app.data.CatalogRef
+import com.hikari.app.data.Cs3RepoPlugin
 import com.hikari.app.data.Episode
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
@@ -88,6 +89,59 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     /** Item ids whose raw entry list was already logged this session. */
     private val loggedLists = ConcurrentHashMap.newKeySet<String>()
 
+    /** Values already freshness-checked this session (see [refreshIfStale]). */
+    private val freshnessChecked = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * The reference Vega app refreshes its providers on its own; a Hikari
+     * install stays frozen, so an old parse keeps serving bare rows long
+     * after the repo fixed them (the reported "Vega shows seasons, Hikari
+     * shows Source 1"). Once per session per provider, in the background and
+     * never delaying the open, the installed meta.js is hashed against the
+     * repo's: a mismatch reinstalls the provider exactly the way a manual
+     * reinstall does (validated, caches retired), so the next open parses
+     * with the current module. The outcome is written to the shared log —
+     * auditable, never silent.
+     */
+    private fun refreshIfStale() {
+        if (!freshnessChecked.add(value)) return
+        detailScope.launch {
+            runCatching {
+                val dist = config.extra?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() }
+                    ?: return@launch
+                val local = File(dir, "meta.js")
+                if (!local.isFile) return@launch
+                val remote = Http.fetchBytesCancellable("$dist/meta.js") ?: return@launch
+                if (remote.contentEquals(local.readBytes())) return@launch
+                val res = VegaPluginManager.install(
+                    HikariApp.instance,
+                    Cs3RepoPlugin(
+                        name = config.name.ifBlank { value },
+                        description = "",
+                        url = dist,
+                        iconUrl = config.iconUrl,
+                        version = 1,
+                        tvTypes = emptyList(),
+                    ),
+                )
+                com.hikari.app.data.Logs.log(
+                    "Vega",
+                    "provider $value auto-refresh: " +
+                        if (res.isSuccess) "updated to the repo build"
+                        else "update failed: " + res.exceptionOrNull()?.message?.take(140),
+                )
+            }
+        }
+    }
+
+    /** Installed meta.js fingerprint for the diagnostic line (see
+     *  [logLinkList]): byte size + install time, enough to tell a stale
+     *  module from the current repo build. */
+    private fun metaFp(): String = runCatching {
+        val f = File(dir, "meta.js")
+        if (f.isFile) f.length().toString() + "@" + f.lastModified() else "missing"
+    }.getOrDefault("?")
+
     /** One shared-log line per title: post URL + raw per-entry titles (see
      *  [getMeta]). Never throws; logging must not break a detail open. */
     private fun logLinkList(item: MediaItem, info: JSONObject) {
@@ -102,7 +156,7 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
             }
             com.hikari.app.data.Logs.log(
                 "Vega",
-                "detail " + config.id + " url=" + item.id +
+                "detail " + config.id + " meta=" + metaFp() + " url=" + item.id +
                     " infoTitle=\"" + info.optString("title").trim().take(140) +
                     "\" entries=" + rows.size +
                     " [" + rows.take(24).joinToString(" | ") + "]",
@@ -297,6 +351,9 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     override suspend fun getMeta(item: MediaItem): MediaItem = withContext(Dispatchers.IO) {
+        // Never blocks the open: a stale module is replaced in the background
+        // and the next open parses with it (see [refreshIfStale]).
+        refreshIfStale()
         // The detail job, not [infoFor]: this is the call the detail page makes,
         // and the job is what puts the meta document AND the season list in one
         // engine instead of two (see [VegaRuntime.detail]). The header still

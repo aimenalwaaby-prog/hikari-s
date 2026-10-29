@@ -1,3 +1,8 @@
+## 0.12.11 (continuous build only)
+
+- Vega providers now refresh themselves like the Vega app's do: once per session per provider, in the background without delaying the open, the installed parser is hashed against the repo's and replaced on mismatch (same validated reinstall path as a manual reinstall, outcome written to the log) — a stale parser can no longer serve bare "Source 1" rows forever while the repo moved on
+- Vega diagnostic log line also carries the installed parser's fingerprint (size + install time), so the next bare-rows report shows whether the module was stale
+
 ## 0.12.10 (continuous build only)
 
 - Vega picker stops guessing seasons from the post title: on a multi-season post that painted every row "Season 3", rows with bare provider titles now show their count (+ quality) instead of the wrong season — real titles still render verbatim, and episode-title seasons still apply where the rows carry them
