@@ -71,6 +71,60 @@ object VegaPluginManager {
     private fun safe(name: String): String =
         name.replace(Regex("[^A-Za-z0-9_.-]"), "_").ifBlank { "provider" }
 
+    /**
+     * Compatibility patch for the GokuHD provider's `sourceHeading` helper
+     * (multi-season download posts reading "Source 1 / Source 2" with no
+     * season or quality).
+     *
+     * The page groups its buttons under `h4` season/quality headings that sit
+     * BESIDE the `<p><center>` button wrapper, but the shipped helper searches
+     * from `anchor.closest("center, p, div")` — which stops at the inner
+     * `<center>` — so `prevAll("h4, …")` finds nothing and every row falls
+     * back to the bare button text. The replacement climbs up to four
+     * ancestors, checking each level's preceding headings (h2–h5) for the
+     * season/quality line instead of stopping at the first wrapper.
+     *
+     * Pure and exact-match: a build that does not carry the known-buggy
+     * snippet — including a future upstream fix, which will read different —
+     * passes through byte-identical, so this self-disables the moment the
+     * repo fixes it for real. Applied to `meta` only.
+     */
+    fun compatPatch(fileName: String, bytes: ByteArray): ByteArray {
+        if (fileName != "meta") return bytes
+        val text = runCatching { bytes.toString(Charsets.UTF_8) }.getOrNull() ?: return bytes
+        if (!text.contains("function sourceHeading(")) return bytes
+        var out = text
+        out = out.replace(DIST_SOURCE_HEADING_BUGGY, DIST_SOURCE_HEADING_FIXED)
+        out = out.replace(TS_SOURCE_HEADING_BUGGY, TS_SOURCE_HEADING_FIXED)
+        if (out == text) return bytes
+        return out.toByteArray(Charsets.UTF_8)
+    }
+
+    /** The shipped (minified dist) `sourceHeading` that loses the headings. */
+    private val DIST_SOURCE_HEADING_BUGGY = """function sourceHeading($,anchor){let heading=anchor.closest("center, p, div").prevAll("h4, h3, h2").first();return heading.length||(heading=anchor.prevAll("h4, h3, h2").first()),heading.text().replace(/\s+/g," ").trim()}"""
+
+    /** Its replacement: walk up the ancestors for the heading. */
+    private val DIST_SOURCE_HEADING_FIXED = """function sourceHeading($,anchor){var node=anchor;for(var d=0;d<4&&node&&node.length;d++){var hdg=node.prevAll("h4, h3, h2, h5").first();if(hdg.length)return hdg.text().replace(/\s+/g," ").trim();node=node.parent()}return ""}"""
+
+    /** The same helper in TypeScript-source form (unbundled repo layouts). */
+    private val TS_SOURCE_HEADING_BUGGY = """function sourceHeading($: any, anchor: any): string {
+  const container = anchor.closest("center, p, div");
+  let heading = container.prevAll("h4, h3, h2").first();
+  if (!heading.length) heading = anchor.prevAll("h4, h3, h2").first();
+  return heading.text().replace(/\s+/g, " ").trim();
+}"""
+
+    /** Its replacement: walk up the ancestors for the heading. */
+    private val TS_SOURCE_HEADING_FIXED = """function sourceHeading($: any, anchor: any): string {
+  let node: any = anchor;
+  for (let d = 0; d < 4 && node && node.length; d++) {
+    const hdg = node.prevAll("h4, h3, h2, h5").first();
+    if (hdg.length) return hdg.text().replace(/\s+/g, " ").trim();
+    node = node.parent();
+  }
+  return "";
+}"""
+
     /** Adds the official Vega repo once, so the folder is never empty. No
      *  provider is pre-installed — there are 50+ and which ones work changes
      *  with the sites, so the user picks. Non-fatal on failure. */
@@ -146,7 +200,12 @@ object VegaPluginManager {
             }.map { it.await() }
         }
         val files = fetched.filter { (_, bytes) -> bytes != null && bytes.isNotEmpty() }
-            .associate { (name, bytes) -> name to bytes!! }
+            // Installs carry compatPatch's fixes (e.g. the GokuHD heading
+            // walk-up): live with the patched build, and the background
+            // freshness check compares against it too, so a patched install
+            // reads "current" instead of reinstalling every session. Exact
+            // match only — an upstream-fixed build passes through untouched.
+            .associate { (name, bytes) -> name to compatPatch(name, bytes!!) }
         if (files.isEmpty()) {
             return@withContext Result.failure(
                 Exception("Could not download this provider — its repo did not serve any of its files")

@@ -1,3 +1,7 @@
+## 0.12.13 (continuous build only)
+
+- GokuHD multi-season posts show their seasons: the provider's heading lookup stopped at the inner button wrapper while the season/quality heading sits beside it, so every row fell back to bare "Source N" — installs now carry a compatibility patch that climbs the button's ancestors for the heading (exact-match, self-disabling the moment upstream fixes it for real), the background self-refresh compares against the patched build so it stops reinstalling once the fix is in, and the diagnostic line carries a SHA fingerprint that reads equal for equal builds
+
 ## 0.12.12 (continuous build only)
 
 - Vega diagnostic line + provider self-refresh moved into the detail job, which runs on every open — the saved-header shortcut had been skipping both, so reopened titles never printed the raw-entry line and never checked for a stale parser

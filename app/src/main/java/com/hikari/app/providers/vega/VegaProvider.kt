@@ -98,7 +98,9 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
      * after the repo fixed them (the reported "Vega shows seasons, Hikari
      * shows Source 1"). Once per session per provider, in the background and
      * never delaying the open, the installed meta.js is hashed against the
-     * repo's: a mismatch reinstalls the provider exactly the way a manual
+     * repo's — through the same compatPatch installs carry, so a patched
+     * install reads "current" instead of reinstalling every session: a
+     * mismatch reinstalls the provider exactly the way a manual
      * reinstall does (validated, caches retired), so the next open parses
      * with the current module. The outcome is written to the shared log —
      * auditable, never silent.
@@ -112,7 +114,11 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
                 val local = File(dir, "meta.js")
                 if (!local.isFile) return@launch
                 val remote = Http.fetchBytesCancellable("$dist/meta.js") ?: return@launch
-                if (remote.contentEquals(local.readBytes())) return@launch
+                // Compare against the patched build (see
+                // VegaPluginManager.compatPatch): installs carry the heading
+                // fix, so raw remote bytes would read "different" forever
+                // and reinstall every session.
+                if (VegaPluginManager.compatPatch("meta", remote).contentEquals(local.readBytes())) return@launch
                 val res = VegaPluginManager.install(
                     HikariApp.instance,
                     Cs3RepoPlugin(
@@ -135,11 +141,14 @@ class VegaProvider(override val config: ProviderConfig) : ContentProvider {
     }
 
     /** Installed meta.js fingerprint for the diagnostic line (see
-     *  [logLinkList]): byte size + install time, enough to tell a stale
-     *  module from the current repo build. */
+     *  [logLinkList]): SHA-256 (first 8 hex) + byte size, so equal builds —
+     *  patched or upstream-fixed — read equal and a stale module stands out. */
     private fun metaFp(): String = runCatching {
         val f = File(dir, "meta.js")
-        if (f.isFile) f.length().toString() + "@" + f.lastModified() else "missing"
+        if (!f.isFile) return@runCatching "missing"
+        val bytes = f.readBytes()
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+        digest.take(4).joinToString("") { "%02x".format(it) } + ":" + bytes.size
     }.getOrDefault("?")
 
     /** One shared-log line per title: post URL + raw per-entry titles, written
