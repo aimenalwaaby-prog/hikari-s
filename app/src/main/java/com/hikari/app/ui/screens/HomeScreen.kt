@@ -4122,7 +4122,18 @@ private fun HomeSearchOverlay(
                             // "…" until every catalogue has answered empty, so
                             // "keep scroll and keep loading until all really
                             // ends" is what the list actually does.
-                            val browseGridState = com.hikari.app.ui.components.keptGridState("homeBrowse:$label:$applied:$genre")
+                            //
+                            // Position held per query+kind+genre (see
+                            // ScrollKeeper) with the item keys as the anchor:
+                            // Back from a title lands on that same cell even
+                            // when late catalogue pages stream in above it. The
+                            // key names the picked extensions (not their
+                            // display label) so a provider list reloading
+                            // mid-visit cannot move the slot.
+                            val browseIdsKey = remember(providerIds) { providerIds.sorted().joinToString(",") }
+                            val browseGridKey = remember(browseIdsKey, applied, genre, kindKey) { "homeBrowse:$browseIdsKey:$applied:$genre:$kindKey" }
+                            val browseKeys = remember(blankShown) { blankShown.map { it.uniqueId } }
+                            val browseGridState = com.hikari.app.ui.components.keptGridState(browseGridKey, itemKeys = browseKeys)
                             val tailIndex = browseGridState.layoutInfo.visibleItemsInfo
                                 .lastOrNull()?.index ?: 0
                             LaunchedEffect(tailIndex, blankShown.size, browseDone, browseMoreLoading) {
@@ -4168,8 +4179,22 @@ private fun HomeSearchOverlay(
                     // crash in Compose, so repeats are dropped before the grid is
                     // built — the same treatment the feed and the catalog page
                     // give their own lists.
+                    //
+                    // Position held per query+kind+genre (see ScrollKeeper)
+                    // with the cell keys as the anchor: Back from a title
+                    // lands on that same cell instead of dropping further
+                    // down as late pages stream in. The key names the picked
+                    // extensions (not their display label) so a provider
+                    // list reloading mid-visit cannot move the slot. This
+                    // grid used to keep no state at all, so every return
+                    // from a title lost the spot entirely.
                     val unique = rememberVisibleItems(combinedResults)
+                    val searchIdsKey = remember(providerIds) { providerIds.sorted().joinToString(",") }
+                    val searchGridKey = remember(searchIdsKey, applied, kindKey, genre) { "homeSearch:$searchIdsKey:$applied:$kindKey:$genre" }
+                    val searchGridKeys = remember(unique) { unique.map { it.uniqueId } }
+                    val searchGridState = com.hikari.app.ui.components.keptGridState(searchGridKey, itemKeys = searchGridKeys)
                     LazyVerticalGrid(
+                        state = searchGridState,
                         columns = GridCells.Adaptive(minSize = TvUi.gridMinFor(96)),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(

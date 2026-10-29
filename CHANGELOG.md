@@ -1,3 +1,10 @@
+## 0.12.7 (continuous build only)
+
+- Select Language dialog gains a search box: typing a language name jumps straight to its group, and typing a source name filters matching sources across all language groups
+- Select Language dialog buttons float over the list like the Select Provider sheet's Close button — no more half-height bar with a divider
+- Home search keeps its scroll spot: opening a movie or series and going back lands on the same cell instead of dropping further down
+- Extensions tab is instant: the tab ViewModel is activity-scoped so switching tabs no longer rebuilds every provider and refetches every repo listing over the network; language grouping and installed-kind mapping are computed once per provider change on a background thread and shared by the landing, folders and repo pages instead of recomputed on the main thread on every page visit
+
 ## 0.12.6 (continuous build only)
 
 - Extensions tab gains a Source language entry (medium row, full label, phone + TV) opening a Select Language dialog: All Languages master toggle plus every language group with its own enable-all toggle and per-source checkboxes, Cancel/Confirm to close — toggles apply instantly so search, shelves and downloads follow; the language list moves out of the All sources page, which is a repo list again

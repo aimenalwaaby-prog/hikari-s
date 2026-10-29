@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -104,6 +105,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -221,6 +223,26 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
     val bundleRepos = MutableStateFlow<Set<String>>(emptySet())
     val sites = MutableStateFlow<List<Site>>(emptyList())
 
+    /**
+     * Language groups for the Source language dialog, computed once per
+     * provider change on a background thread (see [SourceLangs.groupsOf]).
+     * It walks every installed source with a regex per known language, which
+     * on a big library is hundreds of milliseconds — far too much for first
+     * composition, where it used to run on the main thread on EVERY landing
+     * visit (the page swap disposes the landing's remembers, so going into a
+     * repo folder and back recomputed it) and made the whole tab feel like it
+     * loads a second late. Collected here, it is computed once and shared by
+     * the landing and the dialog.
+     */
+    val langGroups = MutableStateFlow<List<SourceLangs.LangGroup>>(emptyList())
+
+    /**
+     * What the app has installed, by package name (see the repo page's
+     * `kindOf`): computed with the groups above, for the same reason — the
+     * repo page used to derive it on its own first composition.
+     */
+    val installedKinds = MutableStateFlow<Map<String, String>>(emptyMap())
+
     // Install/uninstall/busy status lives in the ViewModel (not the
     // composition) so it survives tab switches: the old screen-local state was
     // cancelled the moment the user navigated away, which silently killed
@@ -325,6 +347,32 @@ class ExtensionsViewModel(app: Application) : AndroidViewModel(app) {
                 delay(UPDATE_QUIET_MS)
                 adoptAdultFlags()
                 checkUpdates()
+            }
+        }
+        // Background grouping (see [langGroups]/[installedKinds]): one pass
+        // per provider change, off the main thread, shared by every page.
+        viewModelScope.launch {
+            manager.providers.collectLatest { list ->
+                val groups = withContext(Dispatchers.Default) {
+                    runCatching { SourceLangs.groupsOf(list) }.getOrDefault(emptyList())
+                }
+                langGroups.value = groups
+                val kinds = withContext(Dispatchers.Default) {
+                    runCatching {
+                        list.mapNotNull { p ->
+                            val id = p.config.id
+                            val pkg = when {
+                                com.hikari.app.manga.MangaExtensionManager.isMangaProviderId(id) ->
+                                    com.hikari.app.manga.MangaExtensionManager.packageOf(p.config) to "manga"
+                                id.startsWith("aniyomi|") ->
+                                    com.hikari.app.aniyomi.AniyomiExtensionManager.packageOf(p.config) to "anime"
+                                else -> null
+                            }
+                            pkg
+                        }.toMap()
+                    }.getOrDefault(emptyMap())
+                }
+                installedKinds.value = kinds
             }
         }
     }
@@ -4143,7 +4191,15 @@ private const val REPO_LOAD_CEILING_MS = 75_000L
 
 @Composable
 fun ExtensionsScreen(nav: NavHostController? = null) {
-    val vm: ExtensionsViewModel = viewModel()
+    // Activity-scoped: tab switches dispose the tab destination, and a
+    // destination-scoped ViewModel would die with it — every return to this
+    // tab then re-ran manager.refresh() over every installed extension AND
+    // refetched every repo's plugin list over the network (an empty
+    // pluginsByRepo loads everything), which is the ~1s "extension tab
+    // loads late" on every visit. Scoped to the activity, the lists load
+    // once and a return is instant.
+    val activity = LocalContext.current as ComponentActivity
+    val vm: ExtensionsViewModel = viewModel(activity)
     val providers by vm.providers.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -4214,6 +4270,10 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
     }
     val repoState by vm.repoState.collectAsState()
     val bundleRepos by vm.bundleRepos.collectAsState()
+    // Background grouping shared by the landing and every page (see the
+    // ViewModel): read once here so folder visits never recompute it.
+    val langGroups by vm.langGroups.collectAsState()
+    val installedKinds by vm.installedKinds.collectAsState()
     val sites by vm.sites.collectAsState()
     val openRepo = repos.firstOrNull { it.url == openRepoUrl || it.url.trimEnd('/') == openRepoUrl?.trimEnd('/') }
     val context = LocalContext.current
@@ -4617,6 +4677,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             onTestInstalled = { vm.testInstalled(it) },
             onTestDownload = { vm.testDownload(it) },
             onTestAll = { vm.testRepoInstalled(pluginsByRepo[openRepo.url] ?: emptyList()) },
+            installedKinds = installedKinds,
         )
         folder != null -> SourceFolderView(
             folder = folder,
@@ -4764,6 +4825,7 @@ fun ExtensionsScreen(nav: NavHostController? = null) {
             pluginsByRepo = pluginsByRepo,
             repoState = repoState,
             providers = providers,
+            langGroups = langGroups,
             sites = sites,
             busy = busy,
             onEnsureReposLoaded = { vm.loadReposIfNeeded() },
@@ -5836,6 +5898,8 @@ private fun RepoBrowserView(
     pluginsByRepo: Map<String, List<Cs3RepoPlugin>>,
     repoState: Map<String, RepoLoadState>,
     providers: List<ContentProvider>,
+    /** Language groups shared from the ViewModel (see [ExtensionsViewModel.langGroups]). */
+    langGroups: List<SourceLangs.LangGroup> = emptyList(),
     sites: List<Site>,
     busy: Boolean,
     busyMsg: String,
@@ -5901,7 +5965,10 @@ private fun RepoBrowserView(
     // All-sources section used): a language-grouped view of every installed
     // source with an enable-all toggle per group.
     var showSourceLang by remember { mutableStateOf(false) }
-    val langGroups = remember(providers) { SourceLangs.groupsOf(providers) }
+    // Grouped in the ViewModel on a background thread and shared from the
+    // screen (see [ExtensionsViewModel.langGroups]): this page is disposed
+    // on every folder visit, so grouping here recomputed the whole library
+    // on the main thread on every return.
     val langOnCount = remember(providers) { providers.count { it.config.enabled } }
     // Static labels captured in composable scope (never call tr() inside
     // lazy content).
@@ -6501,83 +6568,133 @@ private fun SourceLanguageDialog(
     val allTitle = tr("All Languages")
     val cancel = tr("Cancel")
     val confirm = tr("Confirm")
+    val searchHint = tr("Search languages or sources…")
+    val noMatch = tr("No language or source matches that search.")
+    // One box answers both questions the user asked: a language name jumps
+    // straight to its group ("deu" -> Deutsch), and a source name shows the
+    // matching sources across every language group ("1shows" shows it even
+    // under whichever language it is banked in).
+    var langQuery by remember { mutableStateOf("") }
+    val filtered = remember(groups, langQuery) {
+        val q = langQuery.trim().lowercase()
+        if (q.isBlank()) groups
+        else groups.mapNotNull { g ->
+            val langHit = g.display.lowercase().contains(q) ||
+                g.code.lowercase().contains(q)
+            if (langHit) g
+            else {
+                val hits = g.members.filter { m ->
+                    m.config.name.lowercase().contains(q) ||
+                        m.config.type.groupLabel.lowercase().contains(q)
+                }
+                if (hits.isEmpty()) null else g.copy(members = hits)
+            }
+        }
+    }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 20.dp, bottom = 12.dp)
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                )
-                Spacer(Modifier.height(8.dp))
-                val allMembers = remember(groups) { groups.flatMap { it.members } }
-                val allOn = allMembers.isNotEmpty() && allMembers.all { it.config.enabled }
-                val allCount = allMembers.count { it.config.enabled }
-                Row(
+            // The action pills float OVER the list (like the Select Provider
+            // sheet's Close): the list runs full height underneath with a
+            // bottom pad clearing them, so no rows are lost to a dead bar.
+            Box(Modifier.fillMaxWidth()) {
+                Column(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            allTitle,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            "$allCount / ${allMembers.size}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                    }
-                    Switch(
-                        checked = allOn,
-                        onCheckedChange = { on ->
-                            allMembers.forEach { m -> onToggleProvider(m.config.id, on) }
-                        }
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
-                }
-                HorizontalDivider(Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-                LazyColumn(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 430.dp)
-                ) {
-                    groups.forEach { group ->
-                        item(key = "dlgheader-" + group.code) {
-                            SourceLangHeaderRow(group = group, onToggleProvider = onToggleProvider)
+                    GlassSearchField(
+                        value = langQuery,
+                        onValueChange = { langQuery = it },
+                        placeholder = searchHint,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    val allMembers = remember(groups) { groups.flatMap { it.members } }
+                    val allOn = allMembers.isNotEmpty() && allMembers.all { it.config.enabled }
+                    val allCount = allMembers.count { it.config.enabled }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                allTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "$allCount / ${allMembers.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
                         }
-                        items(group.members, key = { "dlgsrc-" + group.code + "-" + it.config.id }) { p ->
-                            SourceLangSourceRow(p = p, onToggleProvider = onToggleProvider)
+                        Switch(
+                            checked = allOn,
+                            onCheckedChange = { on ->
+                                allMembers.forEach { m -> onToggleProvider(m.config.id, on) }
+                            }
+                        )
+                    }
+                    LazyColumn(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 430.dp),
+                        contentPadding = PaddingValues(bottom = 84.dp)
+                    ) {
+                        if (filtered.isEmpty()) {
+                            item {
+                                Text(
+                                    noMatch,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 16.dp)
+                                )
+                            }
+                        }
+                        filtered.forEach { group ->
+                            item(key = "dlgheader-" + group.code) {
+                                SourceLangHeaderRow(group = group, onToggleProvider = onToggleProvider)
+                            }
+                            items(group.members, key = { "dlgsrc-" + group.code + "-" + it.config.id }) { p ->
+                                SourceLangSourceRow(p = p, onToggleProvider = onToggleProvider)
+                            }
                         }
                     }
                 }
                 Row(
                     Modifier
-                        .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 20.dp, bottom = 16.dp),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilledTonalButton(onClick = onDismiss) { Text(cancel) }
-                    Spacer(Modifier.width(12.dp))
-                    Button(onClick = onDismiss) { Text(confirm) }
+                    FilledTonalButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.shadow(6.dp, RoundedCornerShape(50))
+                    ) { Text(cancel) }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.shadow(6.dp, RoundedCornerShape(50))
+                    ) { Text(confirm) }
                 }
             }
         }
@@ -7036,6 +7153,12 @@ private fun RepoPluginsView(
     onTestDownload: (Cs3RepoPlugin) -> Unit = {},
     /** Probes every installed provider from this repo at once. */
     onTestAll: () -> Unit = {},
+    /**
+     * What the app has installed, by package name (see the ViewModel): the
+     * authoritative answer to "is this entry a manga engine or an anime
+     * one?", shared instead of re-derived on every page open.
+     */
+    installedKinds: Map<String, String> = emptyMap(),
 ) {
     val retryFocus = remember { FocusRequester() }
     val headerRefreshFocus = remember { FocusRequester() }
@@ -7060,22 +7183,6 @@ private fun RepoPluginsView(
     var filter by rememberSaveable { mutableStateOf("") }
     // Which of the two kinds to show, when this repo holds both. "" = all.
     var kindFilter by rememberSaveable { mutableStateOf("") }
-    // What the app has already installed, by package name — the authoritative
-    // answer to "is this entry a manga engine or an anime one?" (see
-    // Cs3RepoPlugin.contentKind for why the listing alone cannot be trusted).
-    val installedKinds = remember(providers) {
-        providers.mapNotNull { p ->
-            val id = p.config.id
-            val pkg = when {
-                com.hikari.app.manga.MangaExtensionManager.isMangaProviderId(id) ->
-                    com.hikari.app.manga.MangaExtensionManager.packageOf(p.config) to "manga"
-                id.startsWith("aniyomi|") ->
-                    com.hikari.app.aniyomi.AniyomiExtensionManager.packageOf(p.config) to "anime"
-                else -> null
-            }
-            pkg
-        }.toMap()
-    }
     fun kindOf(p: Cs3RepoPlugin): String =
         installedKinds[p.pkg] ?: p.contentKind
     val mangaCount = plugins.count { kindOf(it) == "manga" }
