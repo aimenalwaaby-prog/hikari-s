@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,7 +9,7 @@ plugins {
 
 // Hikari S keeps product identity in a fork-owned file so it can be reviewed
 // separately when changes from the original Hikari project are merged.
-val hikariS = java.util.Properties().apply {
+val hikariS = Properties().apply {
     val identityFile = rootProject.file("hikari-s.properties")
     if (identityFile.isFile) identityFile.inputStream().use { load(it) }
 }
