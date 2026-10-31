@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "hikari"
+rootProject.name = "hikari-s"
 include(":app")

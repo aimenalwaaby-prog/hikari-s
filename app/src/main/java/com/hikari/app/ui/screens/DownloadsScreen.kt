@@ -4,6 +4,7 @@ import com.hikari.app.i18n.tr
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,12 +50,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import coil.compose.AsyncImage
 import com.hikari.app.data.MediaType
 import com.hikari.app.download.DownloadKind
 import com.hikari.app.download.DownloadStatus
 import com.hikari.app.download.DownloadTask
 import com.hikari.app.download.DownloadsRepository
+import com.hikari.app.manga.MangaOfflineChapter
+import com.hikari.app.manga.MangaOfflineStore
 import com.hikari.app.player.PlayerActivity
 import com.hikari.app.ui.PosterLoader
 import com.hikari.app.ui.components.EmptyState
@@ -59,12 +66,30 @@ import com.hikari.app.ui.navigation.LocalTaskbarInset
 import com.hikari.app.ui.navigation.Routes
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
     val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val currentEntry by nav.currentBackStackEntryAsState()
     val tasks by DownloadsRepository.tasks.collectAsState()
-    LaunchedEffect(Unit) { DownloadsRepository.ensureLoaded(context) }
+    var offlineChapters by remember { mutableStateOf<List<MangaOfflineChapter>>(emptyList()) }
+    var offlineReadyIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    suspend fun refreshOfflineDownloads() {
+        val (saved, ready) = withContext(Dispatchers.IO) {
+            val all = MangaOfflineStore.all(context)
+            all to all.asSequence().filter { MangaOfflineStore.isComplete(context, it) }.map { it.id }.toSet()
+        }
+        offlineChapters = saved
+        offlineReadyIds = ready
+    }
+    LaunchedEffect(currentEntry) {
+        DownloadsRepository.ensureLoaded(context)
+        refreshOfflineDownloads()
+    }
 
     val active = tasks.filter { it.status != DownloadStatus.DONE }
     val done = tasks.filter { it.status == DownloadStatus.DONE }
@@ -96,7 +121,59 @@ fun DownloadsScreen(nav: NavHostController, embedded: Boolean = false) {
                 )
             }
         }
-        if (tasks.isEmpty()) {
+        if (offlineChapters.isNotEmpty()) {
+            item(key = "manga-offline-heading") {
+                Text(
+                    tr("Manga downloads"),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            item(key = "manga-offline-summary") {
+                Text(
+                    tr("%s chapters · %s MB")
+                        .replaceFirst("%s", offlineChapters.size.toString())
+                        .replaceFirst("%s", "%.1f".format(offlineChapters.sumOf { it.totalBytes } / 1_048_576.0)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
+            items(offlineChapters, key = { "manga-offline-${it.id}" }) { chapter ->
+                val complete = chapter.id in offlineReadyIds
+                MangaOfflineRow(
+                    chapter = chapter,
+                    complete = complete,
+                    onOpen = {
+                        if (complete) {
+                            nav.navigate(Routes.mangaReader(
+                                chapter.providerId,
+                                chapter.mangaUrl,
+                                chapter.chapterUrl,
+                                chapter.mangaTitle,
+                            ))
+                        } else {
+                            nav.navigate(Routes.mangaDetail(
+                                chapter.providerId,
+                                chapter.mangaUrl,
+                                chapter.mangaTitle,
+                                chapter.posterUrl,
+                            ))
+                        }
+                    },
+                    onDelete = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                MangaOfflineStore.delete(context, chapter.providerId, chapter.mangaUrl, chapter.chapterUrl)
+                            }
+                            refreshOfflineDownloads()
+                        }
+                    },
+                )
+            }
+        }
+        if (tasks.isEmpty() && offlineChapters.isEmpty()) {
             item {
                 EmptyState(
                     title = tr("No downloads yet"),                    subtitle = tr("Tap the Download button while watching a video to save it for " + "offline viewing inside Hikari, or into your phone's Downloads folder."),
@@ -327,6 +404,70 @@ private fun DownloadRow(t: DownloadTask, onDelete: () -> Unit) {
                     tint = MaterialTheme.colorScheme.error
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MangaOfflineRow(
+    chapter: MangaOfflineChapter,
+    complete: Boolean,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val poster = PosterLoader.model(chapter.posterUrl)
+        if (poster != null) {
+            AsyncImage(
+                model = poster,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Box(
+                Modifier.size(64.dp).clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.DownloadDone, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(chapter.mangaTitle, style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(chapter.chapterLabel, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val state = if (complete) tr("Available offline") else when (chapter.status) {
+                "downloading" -> tr("Downloading")
+                "paused" -> tr("Paused")
+                "failed" -> tr("Failed")
+                else -> tr("Incomplete")
+            }
+            Text(
+                "$state · ${chapter.downloadedPages}/${chapter.pages.size} pages · ${fmtBytes(chapter.totalBytes)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onOpen) {
+            Icon(
+                if (complete) Icons.Filled.PlayArrow else Icons.Filled.Refresh,
+                contentDescription = if (complete) tr("Read offline") else tr("Resume"),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Filled.Delete, contentDescription = tr("Delete"), tint = MaterialTheme.colorScheme.error)
         }
     }
 }

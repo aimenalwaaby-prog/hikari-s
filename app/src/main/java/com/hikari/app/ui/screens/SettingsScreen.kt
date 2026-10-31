@@ -1230,7 +1230,7 @@ fun SettingsScreen(nav: NavHostController) {
                                         )
                                     },
                                     headlineContent = { Text(tr("GitHub")) },
-                                    supportingContent = { Text(tr("github.com/codegeasse1/hikari — releases & source")) },
+                                    supportingContent = { Text(tr("github.com/aimenalwaaby-prog/hikari-s — releases & source")) },
                                     trailingContent = {
                                         Icon(
                                             Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -1242,7 +1242,7 @@ fun SettingsScreen(nav: NavHostController) {
                                         context.startActivity(
                                             Intent(
                                                 Intent.ACTION_VIEW,
-                                                Uri.parse("https://github.com/codegeasse1/hikari")
+                                                Uri.parse("https://github.com/aimenalwaaby-prog/hikari-s")
                                             )
                                         )
                                     }

@@ -48,6 +48,14 @@ class HikariPageSource(
     @Volatile
     var httpSource: HttpSource? = null
 
+    /** Durable offline page files, keyed by the synthetic URL used by the reader. */
+    @Volatile
+    private var offlineFiles: Map<String, File> = emptyMap()
+
+    fun setOfflineFiles(byPageUrl: Map<String, File>) {
+        offlineFiles = byPageUrl
+    }
+
     /**
      * Downloads one page through the extension's own client and
      * `imageRequest(page)` headers — Nekoread's `downloadPageImage`, verbatim.
@@ -60,6 +68,17 @@ class HikariPageSource(
      */
     override suspend fun downloadPageImage(page: MangaSource.PageDescriptor, target: File): File =
         withContext(Dispatchers.IO) {
+            if (page.imageUrl.startsWith("hikari-offline://")) {
+                val local = offlineFiles[page.imageUrl]
+                if (local?.isFile != true || local.length() <= 0L) {
+                    throw IOException("The saved offline page is missing")
+                }
+                target.parentFile?.mkdirs()
+                local.inputStream().use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+                return@withContext target
+            }
             val ext = httpSource
             if (ext == null) return@withContext downloadPlain(page, target)
             val spage = Page(0, url = page.pageUrl, imageUrl = page.imageUrl)

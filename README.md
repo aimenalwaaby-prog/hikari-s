@@ -1,6 +1,14 @@
-# Hikari
+# Hikari S
 
-**Hikari** (光) — a universal streaming app. One player, every ecosystem:
+**Hikari S** is an independent Android app built from the open-source Hikari project. It keeps Hikari's provider, extension, playback, and reader foundations while maintaining its own Android package, version, and release channel.
+
+The upstream source is [`codegeasse1/hikari`](https://github.com/codegeasse1/hikari). Hikari S retains the upstream history and license; updates are reviewed and merged rather than copied over local changes. See [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md) before syncing.
+
+Package: `com.aimenalwaaby.hikaris` · Initial Hikari S version: `0.1.0`
+
+[Browse extension catalogs and formats](docs/EXTENSIONS.md) · [Build a native `.hiki` extension](docs/HIKARI_EXTENSIONS.md) · [Extension settings](docs/EXTENSION_SETTINGS.md) · [Upstream sync guide](docs/UPSTREAM_SYNC.md)
+
+One player, every ecosystem:
 
 - **Stremio addons** — add any addon URL, browse catalogs, search, play.
 - **Universal scrapers** — JSON-rule site scrapers, no code needed.
@@ -55,25 +63,26 @@ Share or Save, and there is a **Clear all logs** button on the same page.
 
 ## Installing the app
 
-The latest signed APK is on the **latest release** page:
+The releases page is reserved for signed Hikari S builds. **No signed APK has been published yet.** Until a release is configured, use the GitHub Actions build artifact or build the app from source; do not treat an empty Releases page as a downloadable app.
 
-- **Latest release:** <https://github.com/codegeasse1/hikari/releases/latest>
+- **Releases:** <https://github.com/aimenalwaaby-prog/hikari-s/releases>
+- **Build workflow and artifacts:** <https://github.com/aimenalwaaby-prog/hikari-s/actions/workflows/build.yml>
 
-Download it on the phone and open it (allow "install unknown apps").
+Stable APK publishing requires the repository owner to configure these GitHub Actions secrets: `SIGNING_KEY` (base64-encoded keystore), `KEY_STORE_PASSWORD`, `ALIAS`, and `KEY_PASSWORD`. Keep the signing keystore and passwords private; never commit them to this repository.
 
 ## Add extensions
 
-### Official repos — add all sources in one tap
+### Preloaded starter catalogs
 
-The quickest way to load sources is to add our two official extension repos. Each is a single URL that installs a whole collection of extensions.
+Hikari S preloads two catalogs maintained by the upstream Hikari/community projects. They are not hosted or owned by this Hikari S repository; the app reads their live listings from the maintainers.
 
-**Hikari extensions repo** (native .hiki extensions)
+**Upstream Hikari extensions repo** (native `.hiki` extensions)
 
 ```
 https://raw.githubusercontent.com/codegeasse1/hikari-extensions/builds/repo.json
 ```
 
-That URL is a `repo.json` listing every official extension (trimmed here):
+That URL is a `repo.json` listing currently published extensions (sample):
 
 ```json
 {
@@ -100,9 +109,9 @@ Its `repo.json` points at the plugin list:
 {"name": "Codegeasse Repo", "description": "Anime4i CloudStream extensions", "manifestVersion": 1, "pluginLists": ["https://raw.githubusercontent.com/codegeasse1/codegeasse-cloudstream-repos/builds/plugins.json"]}
 ```
 
-#### Add the Hikari repo, step by step
+#### Browse the Hikari-compatible repo in the app
 
-1. Open **Hikari** and go to the **Extensions** tab (puzzle-piece icon at the bottom).
+1. Open **Hikari S** and go to the **Extensions** tab (puzzle-piece icon at the bottom).
 2. Tap **Add Hikari repo** (the top-left button with the puzzle-piece icon).
 3. Paste this URL and tap **Add**:
 
@@ -110,9 +119,9 @@ Its `repo.json` points at the plugin list:
 
 4. Tap the **Hikari Extensions** card that appears, then tap **Install** next to any extension you want (Anime4i, Anime, Castle TV, …).
 
-#### Add the CloudStream repo, step by step
+#### Browse the CloudStream repo in the app
 
-1. Open **Hikari** → **Extensions** tab.
+1. Open **Hikari S** → **Extensions** tab.
 2. Tap **Add CloudStream repo** (the top-left **+** button).
 3. Paste this URL and tap **Add**:
 
@@ -120,7 +129,9 @@ Its `repo.json` points at the plugin list:
 
 4. Tap the **Codegeasse Repo** card, then **Install** the providers you want (Anime4i, Anikoto, Anineko, …).
 
-> You can even paste a plain `github.com/owner/repo` link instead of the full raw URL — Hikari automatically finds the correct `repo.json`. Installed providers appear in **Home** and **Search** right away.
+> You can even paste a plain `github.com/owner/repo` link instead of the full raw URL — Hikari S tries to find the supported index. Installed providers appear in **Home** and **Search** right away.
+
+For manga, anime, novels, Vega, SkyStream, Nuvio, Zangetsu, Kotatsu, Sora/AnymeX, Stremio, and user-provided scrapers, see the [extension catalog index](docs/EXTENSIONS.md) for the format and maintainer links.
 
 **Stremio addon:** Extensions → *Add Stremio addon* → paste the addon URL (it must serve `manifest.json`).
 
@@ -282,8 +293,8 @@ The plugin's providers appear in Home/Search and play like any other source. One
 
 ## Changelog
 
-Every release's notes live in [`CHANGELOG.md`](CHANGELOG.md) and on the
-[releases page](https://github.com/codegeasse1/hikari/releases).
+Every Hikari S release's notes live in [`CHANGELOG.md`](CHANGELOG.md) and on the
+[Hikari S releases page](https://github.com/aimenalwaaby-prog/hikari-s/releases).
 
 ## Build
 

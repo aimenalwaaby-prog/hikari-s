@@ -9,3 +9,11 @@
 .cxx
 local.properties
 /app/build
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+/signing.properties
+/hikari-s.local.properties

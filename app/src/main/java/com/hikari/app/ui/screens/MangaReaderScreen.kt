@@ -66,6 +66,8 @@ import com.hikari.app.i18n.tr
 import com.hikari.app.manga.MangaChapter
 import com.hikari.app.manga.MangaFit
 import com.hikari.app.manga.MangaMark
+import com.hikari.app.manga.MangaOfflineStore
+import com.hikari.app.manga.MangaPageRepository
 import com.hikari.app.manga.MangaProgress
 import com.hikari.app.manga.MangaProvider
 import com.hikari.app.manga.MangaReadMode
@@ -284,21 +286,21 @@ fun MangaReaderScreen(
         chapters.firstOrNull { it.url == url }?.label.orEmpty()
 
     suspend fun fetchPages(url: String): List<StreamSource> = withContext(Dispatchers.IO) {
+        val offline = MangaOfflineStore.load(context, providerId, mangaUrl, url)
+        if (offline != null && MangaOfflineStore.isComplete(context, offline)) {
+            knownHeaders.clear()
+            pageSource.setOfflineFiles(MangaOfflineStore.filesByPageUrl(context, offline))
+            return@withContext MangaOfflineStore.streams(offline)
+        }
+        pageSource.setOfflineFiles(emptyMap())
         val p = app.providers.byId(providerId) ?: return@withContext emptyList()
         val idx = chapters.indexOfFirst { it.url == url }
         val ep = Episode(number = idx + 1, id = url, name = null, season = 1)
-        // The engines drop blank/chapter-URL/poster pages themselves; the
-        // reader keeps the same rule so a covers-only answer can never paint
-        // the detail poster as every page of every chapter.
-        val poster = posterUrl.trim()
-        fun isPreview(u: String): Boolean {
-            val low = u.lowercase()
-            return "thumb" in low || "preview" in low || "?type=" in low || "thumbnail" in low
-        }
-        fun norm(u: String): String = u.substringBefore("?").substringBefore("#").trim().lowercase()
-        val out = runCatching { p.getStreams(item, ep) }.getOrNull().orEmpty()
-            .filter { it.url.isNotBlank() && it.url != url && !isPreview(it.url) && (poster.isBlank() || (it.url != poster && norm(it.url) != norm(poster))) }
-            .distinctBy { norm(it.url) }
+        val out = MangaPageRepository.filter(
+            runCatching { p.getStreams(item, ep) }.getOrNull().orEmpty(),
+            chapterUrl = url,
+            posterUrl = posterUrl,
+        )
         // Every page is downloaded through the extension's OWN source (see
         // [HikariPageSource]): `getImage(page)` is what carries the extension's
         // imageRequest headers and its own interceptors, which is the whole
@@ -317,12 +319,12 @@ fun MangaReaderScreen(
         loading = true
         error = null
         pages = emptyList()
-        if (app.providers.byId(providerId) == null) {
-            error = I18n.t("This manga engine is not installed.") // any ContentProvider is ok
+        val out = fetchPages(chapter)
+        if (out.isEmpty() && app.providers.byId(providerId) == null) {
+            error = I18n.t("This manga engine is not installed and this chapter is not downloaded.")
             loading = false
             return@LaunchedEffect
         }
-        val out = fetchPages(chapter)
         // Where to start: the page saved for THIS chapter if the reader has been
         // here before, otherwise the top.
         val saved = MangaStore.progressFor(key)

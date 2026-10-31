@@ -60,12 +60,15 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.hikari.app.HikariApp
+import com.hikari.app.data.Episode
 import com.hikari.app.data.MediaItem
 import com.hikari.app.data.MediaType
 import com.hikari.app.i18n.I18n
 import com.hikari.app.i18n.tr
 import com.hikari.app.manga.MangaChapter
 import com.hikari.app.manga.MangaMark
+import com.hikari.app.manga.MangaOfflineChapter
+import com.hikari.app.manga.MangaOfflineStore
 import com.hikari.app.manga.MangaProvider
 import com.hikari.app.manga.MangaRecord
 import com.hikari.app.manga.MangaStore
@@ -75,6 +78,8 @@ import com.hikari.app.ui.navigation.LocalTaskbarInset
 import com.hikari.app.ui.navigation.Routes
 import com.hikari.app.web.WebViewActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -120,6 +125,11 @@ fun MangaDetailScreen(
     var meta by remember { mutableStateOf<MediaItem?>(null) }
     var chapters by remember { mutableStateOf<List<MangaChapter>>(MangaStore.chaptersFor(key).orEmpty()) }
     var followed by remember { mutableStateOf(MangaStore.isFollowed(key)) }
+    var offlineChapters by remember { mutableStateOf<List<MangaOfflineChapter>>(emptyList()) }
+    var offlineReadyUrls by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var downloadingChapter by remember { mutableStateOf<String?>(null) }
+    var downloadingJob by remember { mutableStateOf<Job?>(null) }
+    var downloadProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var newestFirst by remember { mutableStateOf(true) }
     // Bumped by the refresh button (and by the follow toggle, which changes what
     // the header draws) so the load effect runs again on demand.
@@ -136,6 +146,65 @@ fun MangaDetailScreen(
     }
     val mangaRead = remember(readMarks) {
         MangaStore.mangaReadState(key, chapters.map { it.url })
+    }
+    suspend fun refreshOfflineChapters() {
+        val (saved, ready) = withContext(Dispatchers.IO) {
+            val list = MangaOfflineStore.all(context).filter { it.providerId == providerId && it.mangaUrl == mangaUrl }
+            list to list.asSequence().filter { MangaOfflineStore.isComplete(context, it) }.map { it.chapterUrl }.toSet()
+        }
+        offlineChapters = saved
+        offlineReadyUrls = ready
+    }
+    fun launchChapterDownloads(targets: List<MangaChapter>) {
+        if (downloadingChapter != null || targets.isEmpty()) return
+        val source = app.providers.byId(providerId) ?: return
+        val mangaItem = meta ?: return
+        downloadingJob = scope.launch {
+            try {
+                for (target in targets) {
+                    if (target.url in offlineReadyUrls) continue
+                    downloadingChapter = target.url
+                    downloadProgress = null
+                    val episode = Episode(
+                        number = (chapters.indexOfFirst { it.url == target.url } + 1).coerceAtLeast(1),
+                        id = target.url,
+                        name = target.label,
+                        season = 1,
+                    )
+                    try {
+                        MangaOfflineStore.downloadChapter(
+                            context = context,
+                            providerId = providerId,
+                            mangaUrl = mangaUrl,
+                            mangaTitle = title,
+                            chapterUrl = target.url,
+                            chapterLabel = target.label,
+                            posterUrl = posterUrl,
+                            httpSource = (source as? MangaProvider)?.httpSource(),
+                            resolvePages = { source.getStreams(mangaItem, episode) },
+                            progress = { done, total, _ ->
+                                withContext(Dispatchers.Main) { downloadProgress = done to total }
+                            },
+                        )
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        // Keep the partial record and continue the remaining chapters in bulk mode.
+                        if (targets.size == 1) break
+                    }
+                }
+            } finally {
+                withContext(NonCancellable) {
+                    refreshOfflineChapters()
+                    downloadingChapter = null
+                    downloadProgress = null
+                    downloadingJob = null
+                }
+            }
+        }
+    }
+    LaunchedEffect(providerId, mangaUrl) {
+        refreshOfflineChapters()
     }
     LaunchedEffect(rev) { followed = MangaStore.isFollowed(key) }
 
@@ -500,6 +569,12 @@ fun MangaDetailScreen(
                             Text(if (newestFirst) tr("Newest first") else tr("Oldest first"))
                         }
                     }
+                    TextButton(
+                        onClick = { launchChapterDownloads(shown) },
+                        enabled = downloadingChapter == null && meta != null,
+                    ) {
+                        Text(tr("Download all"), maxLines = 1)
+                    }
                 }
             }
 
@@ -542,11 +617,45 @@ fun MangaDetailScreen(
 
             items(shown.size, key = { i -> "ch-" + shown[i].url + "#" + i }) { i ->
                 val chapter = shown[i]
+                val offline = offlineChapters.firstOrNull { it.chapterUrl == chapter.url }
+                val offlineReady = chapter.url in offlineReadyUrls
+                val activeDownload = downloadingChapter == chapter.url
+                val progressText = if (activeDownload) {
+                    downloadProgress?.let { tr("Downloading %s/%s").replaceFirst("%s", it.first.toString()).replaceFirst("%s", it.second.toString()) }
+                        ?: tr("Preparing download")
+                } else when {
+                    offlineReady -> tr("Available offline")
+                    offline?.status == "failed" -> tr("Download failed — tap to retry")
+                    offline != null -> tr("Saved %s/%s pages").replaceFirst("%s", offline.downloadedPages.toString()).replaceFirst("%s", offline.pages.size.toString())
+                    else -> null
+                }
                 ChapterRow(
                     chapter = chapter,
                     isCurrent = progress?.chapterUrl == chapter.url,
                     pageLabel = progress?.takeIf { it.chapterUrl == chapter.url }?.pageLabel,
                     readState = readMarks[chapter.url],
+                    downloadLabel = when {
+                        activeDownload -> tr("Pause")
+                        offlineReady -> tr("Remove")
+                        offline != null -> if (offline.status == "paused" || offline.status == "downloading") tr("Resume") else tr("Retry")
+                        else -> tr("Download")
+                    },
+                    downloadStatus = progressText,
+                    downloadEnabled = meta != null && (downloadingChapter == null || activeDownload),
+                    onDownload = {
+                        if (activeDownload) {
+                            downloadingJob?.cancel()
+                        } else if (offlineReady) {
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    MangaOfflineStore.delete(context, providerId, mangaUrl, chapter.url)
+                                }
+                                refreshOfflineChapters()
+                            }
+                        } else if (downloadingChapter == null) {
+                            launchChapterDownloads(listOf(chapter))
+                        }
+                    },
                     onClick = {
                         openChapter(nav, providerId, mangaUrl, title, posterUrl, chapter)
                     },
@@ -641,6 +750,10 @@ private fun ChapterRow(
     isCurrent: Boolean,
     pageLabel: String?,
     readState: com.hikari.app.manga.MangaChapterRead?,
+    downloadLabel: String,
+    downloadStatus: String?,
+    downloadEnabled: Boolean,
+    onDownload: () -> Unit,
     onClick: () -> Unit,
 ) {
     Row(
@@ -676,6 +789,7 @@ private fun ChapterRow(
                 chapter.scanlator?.takeIf { it.isNotBlank() },
                 fmtDate(chapter.dateUpload),
                 pageLabel?.let { tr("page %s").replace("%s", it) },
+                downloadStatus,
             ).joinToString("  ·  ")
             if (sub.isNotBlank()) {
                 Text(
@@ -706,6 +820,13 @@ private fun ChapterRow(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
+        }
+        TextButton(
+            onClick = onDownload,
+            enabled = downloadEnabled,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+        ) {
+            Text(downloadLabel, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
 }

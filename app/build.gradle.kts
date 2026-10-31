@@ -6,31 +6,48 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Hikari S keeps product identity in a fork-owned file so it can be reviewed
+// separately when changes from the original Hikari project are merged.
+val hikariS = java.util.Properties().apply {
+    val identityFile = rootProject.file("hikari-s.properties")
+    if (identityFile.isFile) identityFile.inputStream().use { load(it) }
+}
+val hikariSApplicationId = hikariS.getProperty("app.applicationId", "com.hikari.app")
+val hikariSUpdateRepository = System.getenv("UPDATE_REPO")
+    ?: hikariS.getProperty("app.updateRepository", "codegeasse1/hikari")
+val hikariSVersionName = System.getenv("APP_VERSION")
+    ?.takeIf { it.isNotBlank() }
+    ?: hikariS.getProperty("app.versionName", "0.12.15")
+val hikariSVersionCode = System.getenv("APP_VERSION_CODE")
+    ?.toIntOrNull()
+    ?: hikariS.getProperty("app.versionCode", "404").toInt()
+
 android {
     namespace = "com.hikari.app"
     // 36, not 35: OkHttp 5.4.0's Android artifact declares `minCompileSdk = 36`
     // in its AAR metadata (and every extension built on the current keiyoushi /
     // Aniyomi ecosystem links against OkHttp 5), so a project compiling against
-    // 35 cannot depend on it at all ÃÂ¢ÃÂÃÂ AGP fails the build outright. This is a
+    // 35 cannot depend on it at all — AGP fails the build outright. This is a
     // COMPILE-time level only: `targetSdk` below is untouched, so no runtime
     // behaviour changed. See the `agp` note in gradle/libs.versions.toml.
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.hikari.app"
+        applicationId = hikariSApplicationId
         minSdk = 24
        targetSdk = 34
-        versionCode = 404
-        versionName = "0.12.15"
+        versionCode = hikariSVersionCode
+        versionName = hikariSVersionName
         // CI injects the exact commit SHA the APK was built from, so the
         // in-app update checker can compare it against main's HEAD.
         val gitSha = System.getenv("GIT_SHA") ?: "unknown"
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "UPDATE_REPO", "\"$hikariSUpdateRepository\"")
         // ---- Processors this app is built for ----
         // armeabi-v7a is the 32-bit arm build (older/cheaper phones) and
         // arm64-v8a is the 64-bit one (every modern phone). x86 and x86_64 are
-        // only ever found in Android emulators, so their native libraries ÃÂ¢ÃÂÃÂ
-        // tens of MB of ffmpeg/media binaries ÃÂ¢ÃÂÃÂ were dead weight in every
+        // only ever found in Android emulators, so their native libraries —
+        // tens of MB of ffmpeg/media binaries — were dead weight in every
         // phone's download, which is what made the single APK so large.
         // ("remove x86 and x86_64, from our apk as its for emulator we dont
         // need it, its just increasing app size")
@@ -44,7 +61,7 @@ android {
     // `app-arm64-v8a-release.apk` and `app-universal-release.apk` instead of a
     // single file that carries every processor's libraries. A user can then
     // download just their own phone's build (much less data) or the universal
-    // one that works anywhere ÃÂ¢ÃÂÃÂ and because only the two arm ABIs are built at
+    // one that works anywhere — and because only the two arm ABIs are built at
     // all now, even the universal APK is smaller than it used to be.
     //
     // Every APK keeps the SAME applicationId, signing key and versionCode, so
@@ -70,7 +87,7 @@ android {
             //
             // It is safe HERE because app/proguard-rules.pro starts with
             // `-dontobfuscate` and keeps every namespace that a plugin or an
-            // extension links against by name ÃÂ¢ÃÂÃÂ read that file before changing
+            // extension links against by name — read that file before changing
             // anything in it, and re-read it before turning either of these
             // back off in a panic: the fix for a broken plugin is a kept
             // namespace there, not a lost 10 MB here.
@@ -121,7 +138,7 @@ android {
             //
             // okhttp-brotli, logging-interceptor and okhttp-dnsoverhttps are
             // published as MULTI-RELEASE jars: each one carries the same
-            // JVM-only metadata under `META-INF/versions/9/` ÃÂ¢ÃÂÃÂ a JPMS/OSGi
+            // JVM-only metadata under `META-INF/versions/9/` — a JPMS/OSGi
             // bundle manifest plus the `module-info.class` next to it. AGP's
             // Java-resource merger copies those like any other resource, so the
             // second copy of a path is a hard error and the build stops at
@@ -141,7 +158,7 @@ android {
             excludes += "META-INF/versions/**/OSGI-INF/MANIFEST.MF"
             excludes += "META-INF/versions/**/module-info.class"
             // The same two paths written literally, because these are the exact
-            // ones the failing build named ÃÂ¢ÃÂÃÂ no reliance on how the glob above
+            // ones the failing build named — no reliance on how the glob above
             // is interpreted.
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
             excludes += "META-INF/versions/9/module-info.class"
@@ -149,8 +166,8 @@ android {
         // Native libraries are stored COMPRESSED in the APK.
         //
         // The platform default since AGP 4.2 is uncompressed (and page-aligned)
-        // so the loader can mmap them straight out of the APK ÃÂ¢ÃÂÃÂ which is faster
-        // to start and is what 16 KB-page devices want ÃÂ¢ÃÂÃÂ but it also means the
+        // so the loader can mmap them straight out of the APK — which is faster
+        // to start and is what 16 KB-page devices want — but it also means the
         // biggest files in the download are stored at their raw size. Our two
         // biggest are TorrServer's Go binary (~12 MB per ABI) and Conscrypt
         // (~2 MB per ABI); compressing them costs a little install-time
@@ -164,13 +181,13 @@ android {
 // ---------------------------------------------------------------------------
 // TDLib's C++ runtime has to reach the APK under its SONAME
 //
-// TDLib's native library (libtdjni.so ÃÂ¢ÃÂÃÂ the Telegram client, see
+// TDLib's native library (libtdjni.so — the Telegram client, see
 // com.hikari.app.telegram.Td) links against libc++_shared.so, and Android's
 // linker resolves that by FILENAME: the file has to be `lib/<abi>/libc++_shared.so`
 // inside the APK or nothing loads.
 //
 // Its real name cannot be written into this repository: `libc++_shared.so`
-// contains a `+`, and `+` is not a writable path here ÃÂ¢ÃÂÃÂ the file that carries it
+// contains a `+`, and `+` is not a writable path here — the file that carries it
 // through the workspace and up to GitHub is called `libcxx_shared.so`
 // (app/src/main/jniLibs/<abi>/libcxx_shared.so), and this task puts the soname
 // back on the way into the build. Everything else in jniLibs is untouched: the
@@ -190,7 +207,7 @@ android.sourceSets.getByName("main").jniLibs.srcDir(tdJniStageDir)
 // The merge tasks are created by AGP after this file is evaluated, so the
 // dependency is matched by NAME rather than by type. (AGP 8's own validation
 // refuses to run otherwise: it sees the merge task read a directory another task
-// writes and insists the dependency be declared ÃÂ¢ÃÂÃÂ "Gradle detected a problem with
+// writes and insists the dependency be declared — "Gradle detected a problem with
 // the following location: app/build/td-jni".)
 tasks.matching {
     it.name.contains("JniLibFolders") || it.name.contains("NativeLibs") ||
@@ -201,7 +218,7 @@ tasks.matching {
 // every namespace it touches (androidx/activity/compose/R.class,
 // com.fleeksoft.charset.R, ...). Those collide with the real dependencies' R
 // classes during release dex merging ("Type ...R is defined multiple times").
-// Strip those before the jar reaches the classpath ÃÂ¢ÃÂÃÂ the real libraries provide
+// Strip those before the jar reaches the classpath — the real libraries provide
 // their R classes at runtime.
 //
 // EXCEPT com/lagradost/cloudstream3/R*: the CloudStream jar's OWN R classes.
@@ -232,26 +249,26 @@ val cloudstreamCleanJar = tasks.register<org.gradle.api.tasks.bundling.Jar>("clo
         // through a real WebView (TamilBlasters' StreamHG/Hgcloud hgcloud.to
         // dance, ÃÂ¢ÃÂÃÂ¦) pass a WebViewResolver to app.get(...) and silently got
         // zero servers. Shadow it with a real Android implementation in
-        // app/src/main/java/com/lagradost/cloudstream3/network/ ÃÂ¢ÃÂÃÂ so drop the
+        // app/src/main/java/com/lagradost/cloudstream3/network/ — so drop the
         // stub classes here to avoid a duplicate-class build failure.
         exclude("com/lagradost/cloudstream3/network/WebViewResolver*.class")
         // The jar's CloudflareKiller is the Android build of CloudStream's
         // auto Cloudflare solver: its init() WIPES the WebView cookie jar
         // (`CookieManager.removeAllCookies`), and on a 403/503 it loads the
-        // challenged site in a WebView all by itself ÃÂ¢ÃÂÃÂ no user tap. It also
+        // challenged site in a WebView all by itself — no user tap. It also
         // calls `WebViewResolver.Companion.getWebViewUserAgent1()`, which the
         // jar's own WebViewResolver stub never declared, so it crashed the app
         // with NoSuchMethodError any time an extension (Cinemacity's
         // Cloudflare-bypass interceptor) wrapped a request with it. Shadow it
         // with app/src/main/java/com/lagradost/cloudstream3/network/
         // CloudflareKiller.kt (same public method table as the jar's class, so
-        // plugin bytecode still links) ÃÂ¢ÃÂÃÂ a version that never opens a WebView,
+        // plugin bytecode still links) — a version that never opens a WebView,
         // never clears cookies, and simply reuses the clearance the user
         // earned with the app's own verify button.
         exclude("com/lagradost/cloudstream3/network/CloudflareKiller*.class")
         // The jar's CloudStreamApp is compiled against Coil 3 (it implements
         // coil3.SingletonImageLoader.Factory), which this app does NOT bundle
-        // (it ships Coil 2) ÃÂ¢ÃÂÃÂ so any plugin that touches the class dies with
+        // (it ships Coil 2) — so any plugin that touches the class dies with
         // NoClassDefFoundError the moment it resolves (seen with Cinemacity's
         // Cloudflare-bypass interceptor). Shadow it with a self-contained
         // host-side implementation in
@@ -262,14 +279,14 @@ val cloudstreamCleanJar = tasks.register<org.gradle.api.tasks.bundling.Jar>("clo
         // does not load in this app: a plugin that merely NAMES it (CineStream
         // builds an Intent to it from its settings dialog) dies with
         // `NoClassDefFoundError: Failed resolution of:
-        // Lcom/lagradost/cloudstream3/MainActivity;` ÃÂ¢ÃÂÃÂ on the MAIN thread, which
+        // Lcom/lagradost/cloudstream3/MainActivity;` — on the MAIN thread, which
         // takes the whole process down. Shadow it the same way CloudStreamApp is
         // shadowed: app/src/main/java/com/lagradost/cloudstream3/MainActivity.kt
         // provides a loadable class that hands the user to Hikari's own main
         // screen, and the jar's copy is dropped so the two cannot collide
         // ("Type ... is defined multiple times") during dex merging.
         //
-        // MainActivityKt (the file facade ÃÂ¢ÃÂÃÂ initCloudStream reads it for the
+        // MainActivityKt (the file facade — initCloudStream reads it for the
         // app/insecure Requests) is deliberately NOT matched: these patterns
         // require the '$' or the '.class' immediately after "MainActivity".
         exclude("com/lagradost/cloudstream3/MainActivity.class")
@@ -291,11 +308,11 @@ val cloudstreamCleanJar = tasks.register<org.gradle.api.tasks.bundling.Jar>("clo
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(files(cloudstreamCleanJar))
-    // nuvio provider runtime ÃÂ¢ÃÂÃÂ dokar quickjs-kt (the exact engine the real
+    // nuvio provider runtime — dokar quickjs-kt (the exact engine the real
     // NuvioMobile app bundles) vendored as an AAR in app/libs/. Runs provider
     // JS in an embedded QuickJS VM instead of a WebView.
     implementation(files("libs/quickjs-kt-android-1.0.5-nuvio.aar"))
-    // TorrServer ÃÂ¢ÃÂÃÂ the Go torrent engine CloudStream's own Torrent object uses.
+    // TorrServer — the Go torrent engine CloudStream's own Torrent object uses.
     // Lets Stremio torrent addons (Torrentio, Comet, MediaFusionÃÂ¢ÃÂÃÂ¦) actually play:
     // magnet/infoHash streams become HLS served from a local TorrServer process.
     implementation("com.github.recloudstream:torrentserver:7861970")
@@ -309,12 +326,12 @@ dependencies {
     // `com.cncverse.Settings`, ÃÂ¢ÃÂÃÂ¦) implement it as a
     // com.google.android.material.bottomsheet.BottomSheetDialogFragment. Without
     // the real Material Components library the plugin's `openSettings` callback
-    // dies with NoClassDefFoundError the instant the gear is tapped ÃÂ¢ÃÂÃÂ the click
+    // dies with NoClassDefFoundError the instant the gear is tapped — the click
     // looks like a no-op. cloudstream3.jar only carries Material's R classes
     // (stripped by cloudstreamJarClean), so this is the sole Material runtime.
     implementation("com.google.android.material:material:1.12.0")
     // Phisher/Kotlin plugins (Anikoto, ÃÂ¢ÃÂÃÂ¦) are compiled against Gson and call it
-    // at runtime (e.g. AnikotoExtractors.extractMegaPlayUrl) ÃÂ¢ÃÂÃÂ without it they
+    // at runtime (e.g. AnikotoExtractors.extractMegaPlayUrl) — without it they
     // die with NoClassDefFoundError: com.google.gson.JsonObject.
     implementation("com.google.code.gson:gson:2.11.0")
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -333,46 +350,46 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.ui)
-    // media3-effect ÃÂ¢ÃÂÃÂ the GPU video-effects pipeline (GlEffect / HslAdjustment /
+    // media3-effect — the GPU video-effects pipeline (GlEffect / HslAdjustment /
     // RgbAdjustment / Brightness / Contrast). ExoPlayer.setVideoEffects() is
     // inert without it: the classes are loaded reflectively by the frame
     // processor, so the dependency has to be on the classpath even though no
     // source file names it. Used by the player's "Video enhance" presets.
     implementation(libs.androidx.media3.effect)
-    // nextlib-media3ext ÃÂ¢ÃÂÃÂ prebuilt FFmpeg software decoders for Media3. Many
+    // nextlib-media3ext — prebuilt FFmpeg software decoders for Media3. Many
     // provider streams (e.g. 4kHDHub MKVs) carry EAC-3/AC-3/DTS/TrueHD audio
     // that the device's MediaCodec can't decode, so the video plays silently.
     // NextRenderersFactory adds FfmpegAudioRenderer/FfmpegVideoRenderer that
     // kick in (MODE_ON) whenever the hardware codecs can't handle a track.
-    // Built against media3 1.7.1 (see nextlib-media3ext POM) ÃÂ¢ÃÂÃÂ keep the media3
+    // Built against media3 1.7.1 (see nextlib-media3ext POM) — keep the media3
     // version in libs.versions.toml matched to it.
     implementation("io.github.anilbeesetti:nextlib-media3ext:1.7.1-0.9.0")
     implementation(libs.androidx.splashscreen)
     implementation(libs.okhttp)
     // The three classpath-only companions of OkHttp 5 that EXTENSIONS link
     // against. They are not used by Hikari's own code (nothing here calls
-    // Brotli/Zstd directly) ÃÂ¢ÃÂÃÂ they exist so the extensions that DO can link:
+    // Brotli/Zstd directly) — they exist so the extensions that DO can link:
     // extension-lib 1.6's `KeiSource` adds
     // `CompressionInterceptor(Brotli, Gzip, Zstd)` to the client it builds out
     // of ours, and imports `okhttp3.brotli.Brotli`, `okhttp3.zstd.Zstd` and
     // `com.squareup.zstd.okio.zstdCompress` (that last one for the zstd-
     // compressed filter cache it writes to disk). Every source in the keiyoushi
     // multisrc families is built on that base class, and on a classpath without
-    // these it throws NoClassDefFoundError on the first request ÃÂ¢ÃÂÃÂ the "extension
+    // these it throws NoClassDefFoundError on the first request — the "extension
     // shows no catalog, and there is no Cloudflare page either" report for a
     // whole family at once. Aniyomi's own app ships exactly this set.
     implementation(libs.okhttp.brotli)
     implementation(libs.okhttp.zstd)
     implementation(libs.zstd.kmp.okio)
     implementation(libs.jsoup)
-    // jsoup's nullability annotations (jspecify) leak into inferred types ÃÂ¢ÃÂÃÂ
+    // jsoup's nullability annotations (jspecify) leak into inferred types —
     // without the annotation classes on the classpath that inference is an
     // error, so they ride along (tiny, stable, no code impact).
     implementation("org.jspecify:jspecify:1.0.0")
     implementation(libs.coil.compose)
     // SVG decoding for extension logos: plenty of plugin/addon icons are
     // `.svg` (e.g. SkyStream's dramayo ÃÂ¢ÃÂÃÂ dramayo.stream/static/dramayo.svg),
-    // and Coil 2 answers those with a decode failure ÃÂ¢ÃÂÃÂ i.e. the monochrome
+    // and Coil 2 answers those with a decode failure — i.e. the monochrome
     // glyph placeholder on every row. Registered in HikariApp's ImageLoader.
     implementation(libs.coil.svg)
     // Animated GIF decoding, for collection/folder covers ("Animated GIF URL"
@@ -382,8 +399,8 @@ dependencies {
     //
     // Three libraries the ported viewer stack is built on, all of them the exact
     // artifacts Nekoread itself uses (a JitPack commit for the Tachiyomi fork of
-    // SubsamplingScaleImageView ÃÂ¢ÃÂÃÂ the view that region-decodes a long strip from
-    // its cache file instead of holding a page-sized bitmap in memory ÃÂ¢ÃÂÃÂ and the
+    // SubsamplingScaleImageView — the view that region-decodes a long strip from
+    // its cache file instead of holding a page-sized bitmap in memory — and the
     // Tachiyomi fork of DirectionalViewPager, which is the ONE view that can page
     // vertically as well as horizontally, i.e. the "paged vertical" reading mode).
     //
@@ -437,30 +454,30 @@ dependencies {
     implementation(libs.atomicfu)
     implementation(libs.newpipeextractor)
     // Mihon/Aniyomi's dependency-injection container. Aniyomi extension APKs
-    // don't receive their dependencies as constructor arguments ÃÂ¢ÃÂÃÂ the extension
+    // don't receive their dependencies as constructor arguments — the extension
     // loader instantiates a source and the source immediately pulls what it
     // needs (`Application`, `Json`, `NetworkHelper`, `JavaScriptEngine`, ÃÂ¢ÃÂÃÂ¦) out
     // of the global `Injekt` scope. Hikari has no DI container of its own, so
     // the same container (mihonapp's fork, which rebuilds injekt for modern
     // Kotlin and patches the registrar) is installed and primed in
-    // HikariApp.onCreate ÃÂ¢ÃÂÃÂ see AniyomiExtensionManager.
+    // HikariApp.onCreate — see AniyomiExtensionManager.
     implementation("com.github.mihonapp:injekt:91edab2317")
-    // RxJava 1 ÃÂ¢ÃÂÃÂ Aniyomi's `AnimeHttpSource` still carries the deprecated Rx
+    // RxJava 1 — Aniyomi's `AnimeHttpSource` still carries the deprecated Rx
     // `fetch*` API that `AnimeCatalogueSource`'s default methods delegate to
     // (extlib-14 extensions only implement the suspend methods, so the Rx bridge
     // vendored in RxCoroutineBridge is what actually runs them).
     implementation("io.reactivex:rxjava:1.3.8")
     // Aniyomi's `HttpServer` (a NanoHTTPD local proxy some extensions use for
     // streams that want same-origin requests). Hikari never starts one, but the
-    // class still has to LINK ÃÂ¢ÃÂÃÂ `AnimeHttpSource.createHttpServer()` and the
+    // class still has to LINK — `AnimeHttpSource.createHttpServer()` and the
     // video-resolving paths name it.
     implementation("org.nanohttpd:nanohttpd:2.3.1")
-    // `HttpLoggingInterceptor` ÃÂ¢ÃÂÃÂ NetworkHelper's OkHttp stack. (Kept on the same
+    // `HttpLoggingInterceptor` — NetworkHelper's OkHttp stack. (Kept on the same
     // version ref as `okhttp` itself: the logging interceptor's `Client`-facing
     // API moved in 5.x and a 4.x jar against a 5.x core is a link error.)
     implementation(libs.logging.interceptor)
     // Required to LINK the CloudStream jar's generated ViewBinding classes
-    // (ToastBinding et al.) ÃÂ¢ÃÂÃÂ they implement androidx.viewbinding.ViewBinding
+    // (ToastBinding et al.) — they implement androidx.viewbinding.ViewBinding
     // and call ViewBindings.findChildViewById. Without the viewbinding runtime
     // ART fails the class link and surfaces it as
     // NoClassDefFoundError: Lcom/lagradost/cloudstream3/databinding/ToastBinding;
@@ -470,20 +487,20 @@ dependencies {
     // res/layout/hikari_toast.xml), so the class must be on the compile+runtime
     // classpath too.
     implementation(libs.androidx.cardview)
-    // (The bundled yt-dlp "universal extractor" ÃÂ¢ÃÂÃÂ dev.ffmpegkit-maintained's
-    // yt-dlp-android, a full CPython 3.13 embedded through Chaquopy ÃÂ¢ÃÂÃÂ was
+    // (The bundled yt-dlp "universal extractor" — dev.ffmpegkit-maintained's
+    // yt-dlp-android, a full CPython 3.13 embedded through Chaquopy — was
     // removed in 0.9.1. It was ~15 MB of the APK, arm64-only, and only ever
     // ran on pages every other engine had already failed on. See CHANGELOG.)
     implementation(libs.cryptography.core)
     implementation(libs.cryptography.provider.optimal)
-    // Kotatsu parsers ÃÂ¢ÃÂÃÂ the official kotatsu-parsers library (the exact
+    // Kotatsu parsers — the official kotatsu-parsers library (the exact
     // extraction code the Kotatsu manga app runs: 1200+ manga/manhwa/manhua /
     // comics / novel sources). Pinned to the same commit Kotatsu itself ships
     // (via JitPack, already a repo). org.json excluded: Android carries it.
     implementation("com.github.KotatsuApp:kotatsu-parsers:4d1e521aef") {
         exclude(group = "org.json", module = "json")
     }
-    // Kototoro parsers ÃÂ¢ÃÂÃÂ skepsun's independent Kotatsu fork (manga/manhwa /
+    // Kototoro parsers — skepsun's independent Kotatsu fork (manga/manhwa /
     // novels PLUS video sources: anime clips, hentai video). A separate
     // package (org.skepsun.kototoro.parsers) with zero shared classes, so it
     // links beside the official library with no conflicts. Pinned to the
@@ -498,14 +515,14 @@ dependencies {
     // objects and a screen. Its two dependencies are what turn "the code on one
     // screen" into "the code on one screen that the other device can read":
     //
-    //  * zxing-core ÃÂ¢ÃÂÃÂ the QR encoder AND decoder, pure Java, no Android
+    //  * zxing-core — the QR encoder AND decoder, pure Java, no Android
     //    dependencies, no camera permission, ~500 KB. Encoding a pairing payload
     //    and decoding a camera frame are both one call into it
     //    (see com.hikari.app.pair.QrCode). It is the same library every Android
     //    scanner app is built on; the alternative (a barcode API that only
     //    exists on devices with Play Services) is exactly the wrong trade for an
     //    app whose whole point is that it runs on a cheap Chinese television.
-    //  * CameraX ÃÂ¢ÃÂÃÂ the scanner's camera. camera-view brings `PreviewView` (the
+    //  * CameraX — the scanner's camera. camera-view brings `PreviewView` (the
     //    surface that actually draws the preview and does the device's own
     //    rotation/scale handling, which doing it by hand is a week of bugs), and
     //    camera-camera2 the Camera2CameraImpl underneath it. The OTHER camera in
@@ -520,24 +537,25 @@ dependencies {
     implementation(libs.androidx.camera.view)
     // ---- The in-app lock (Settings ÃÂ¢ÃÂÃÂ Privacy & Browsing ÃÂ¢ÃÂÃÂ App lock) ----
     //
-    //  * biometric ÃÂ¢ÃÂÃÂ the fingerprint/face prompt itself. The androidx one, not
+    //  * biometric — the fingerprint/face prompt itself. The androidx one, not
     //    the platform's: this app runs from API 24 and the platform
     //    BiometricPrompt only exists from API 28, so the platform API would mean
     //    writing (and testing) two different prompts on two different paths.
-    //  * lifecycle-process ÃÂ¢ÃÂÃÂ ProcessLifecycleOwner, the ONE signal that means
+    //  * lifecycle-process — ProcessLifecycleOwner, the ONE signal that means
     //    "the app went to the background". Locking on the activity's own stop
     //    would re-lock behind the player (a separate activity), i.e. a password
     //    prompt every time a film ends.
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.lifecycle.process)
+    testImplementation("junit:junit:4.13.2")
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
 
 // ---------------------------------------------------------------------------
 // org.json must never be on the runtime classpath.
 //
-// Android already provides org.json ÃÂ¢ÃÂÃÂ it lives in
-// /apex/com.android.art/javalib/core-libart.jar ÃÂ¢ÃÂÃÂ and the boot class loader is
+// Android already provides org.json — it lives in
+// /apex/com.android.art/javalib/core-libart.jar — and the boot class loader is
 // consulted before ours, so a copy we ship is shadowed: the device runs the
 // platform's implementation whichever version we bundle.
 //
@@ -547,7 +565,7 @@ dependencies {
 // 0.9.2. Our own code calls the platform-compatible `JSONObject(s)`; but with
 // shrinking on, R8 treated the bundled copy as the definition and inlined its
 // constructor body into our classes, which turned that call into a direct
-// `new JSONTokener(String, JSONParserConfiguration)` ÃÂ¢ÃÂÃÂ a constructor that
+// `new JSONTokener(String, JSONParserConfiguration)` — a constructor that
 // exists only in the bundled copy. At runtime the name resolved to the
 // platform's JSONTokener, which has no such constructor, so the app died at
 // startup with NoSuchMethodError (0.9.2 / build 158, in AppStore.parseProviders).
@@ -563,7 +581,7 @@ configurations.configureEach {
 }
 
 // ---------------------------------------------------------------------------
-// NiceHttp drags a second OkHttp version onto the classpath ÃÂ¢ÃÂÃÂ pin it back
+// NiceHttp drags a second OkHttp version onto the classpath — pin it back
 //
 // NiceHttp (com.github.Blatzar:NiceHttp, the client CloudStream plugins link
 // against) declares `com.squareup.okhttp3:okhttp-jvm:5.3.2` and
@@ -572,13 +590,13 @@ configurations.configureEach {
 //
 //  * `okhttp-jvm` is only an ALIAS. Its Gradle metadata points at the
 //    multiplatform root `com.squareup.okhttp3:okhttp`, so the request takes part
-//    in normal conflict resolution and Hikari's own 5.4.0 wins ÃÂ¢ÃÂÃÂ which is why
+//    in normal conflict resolution and Hikari's own 5.4.0 wins — which is why
 //    no okhttp-jvm jar appears anywhere in the build, and why the Android
 //    artifact (`okhttp-android`, the one whose AAR metadata forced compileSdk
 //    36) is the only OkHttp core on the classpath.
 //  * `okhttp-dnsoverhttps` is a plain, standalone module. Nothing else asks for
 //    it at a newer version, so its 5.3.2 request stands and a 5.3.2 jar ends up
-//    beside a 5.4.0 core ÃÂ¢ÃÂÃÂ it is one of the three jars that broke
+//    beside a 5.4.0 core — it is one of the three jars that broke
 //    `:app:mergeDebugJavaResource` (see the packaging block above).
 //
 // A 5.3.x OkHttp module calling into 5.4.0 internals is a NoSuchMethodError

@@ -34,9 +34,13 @@ on:
         type: string
         default: ""
       version:
-        description: "Release version (e.g. 0.1.0)"
+        description: "Release version (e.g. 0.1.0); becomes the APK versionName"
         type: string
         default: "0.1.0"
+      version_code:
+        description: "Monotonically increasing Android versionCode"
+        type: string
+        default: "1"
 
 permissions:
   contents: write
@@ -84,6 +88,9 @@ jobs:
       - name: Build APKs (debug + release)
         env:
           GIT_SHA: ${{ github.sha }}
+          UPDATE_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+          APP_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.version_code || '' }}
           SIGNING_STORE_PATH: ${{ env.SIGNING_STORE_PATH }}
           SIGNING_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
@@ -107,7 +114,7 @@ jobs:
           code=1
           for attempt in 1 2 3 4 5; do
             echo "==== Gradle build attempt $attempt/5 ===="
-            timeout 1500 gradle assembleDebug assembleRelease --no-daemon --stacktrace \
+            timeout 1500 gradle assembleDebug testDebugUnitTest assembleRelease --no-daemon --stacktrace \
               -Dorg.gradle.internal.http.connectionTimeout=30000 \
               -Dorg.gradle.internal.http.socketTimeout=60000 > gradle-build.log 2>&1
             code=$?
@@ -163,6 +170,7 @@ jobs:
           echo "armv8=[$APK_ARM64] armv7=[$APK_ARM32] universal=[$APK_UNIVERSAL]"
 
       - name: Verify release APKs are signed
+        if: env.SIGNING_STORE_PATH != ''
         run: |
           if [ -z "$APK_UNIVERSAL" ]; then
             echo "::error::Release APK is missing - signing was not configured. Check the SIGNING_KEY / ALIAS / KEY_STORE_PASSWORD / KEY_PASSWORD secrets, and that the ABI splits still produce a universal APK."
@@ -195,7 +203,7 @@ jobs:
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: hikari-apk
+          name: hikari-s-apk
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
@@ -203,43 +211,43 @@ jobs:
 
       # ---- TEST CHANNELS: updated on every push to main ----
       - name: Publish test APK to build branch
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.SIGNING_STORE_PATH != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari.apk
-          SIZE_MB=$(du -m hikari.apk | cut -f1)
+          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari-s.apk
+          SIZE_MB=$(du -m hikari-s.apk | cut -f1)
           if [ "$SIZE_MB" -ge 100 ]; then
-            echo "hikari.apk is ${SIZE_MB}MB - over GitHub's 100MB file limit, skipping build-branch push (the release APK is still in the artifacts)."
+            echo "hikari-s.apk is ${SIZE_MB}MB - over GitHub's 100MB file limit, skipping build-branch push (the release APK is still in the artifacts)."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin build >/dev/null 2>&1 && git checkout build 2>/dev/null || git checkout --orphan build
-          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari.apk
-          git add hikari.apk
+          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari-s.apk
+          git add hikari-s.apk
           git commit -m "build: update test APK $(date -u +%Y%m%d%H%M)" || true
           git push origin build --force || { echo "build-branch push rejected (APK too large for GitHub's 100MB limit) - not fatal, release APK stays in artifacts."; exit 0; }
 
       - name: Publish test APK to continuous release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.SIGNING_STORE_PATH != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari-signed.apk
-          cp "app/build/outputs/apk/release/$APK_ARM64" hikari-arm64-v8a.apk
-          cp "app/build/outputs/apk/release/$APK_ARM32" hikari-armeabi-v7a.apk
+          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari-s-signed.apk
+          cp "app/build/outputs/apk/release/$APK_ARM64" hikari-s-arm64-v8a.apk
+          cp "app/build/outputs/apk/release/$APK_ARM32" hikari-s-armeabi-v7a.apk
           if gh release view continuous --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             for i in 1 2 3; do
-              gh release upload continuous hikari-signed.apk hikari-arm64-v8a.apk hikari-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" --clobber && break
+              gh release upload continuous hikari-s-signed.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" --clobber && break
               echo "continuous upload attempt $i failed (often a transient race with a concurrent build), retrying..."
               sleep 5
             done
           else
-            gh release create continuous hikari-signed.apk hikari-arm64-v8a.apk hikari-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
+            gh release create continuous hikari-s-signed.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
               --title "Continuous build" \
-              --notes "Signed test APKs, auto-built from main. hikari-signed.apk is the universal build; the arm64-v8a / armeabi-v7a ones are smaller and for that processor type only." || true
+              --notes "Signed test APKs, auto-built from main. hikari-s-signed.apk is the universal build; the arm64-v8a / armeabi-v7a ones are smaller and for that processor type only." || true
           fi
 
       # ---- MAIN RELEASE: manual only, and only with the typed confirmation ----
@@ -252,6 +260,16 @@ jobs:
         run: |
           echo "::warning title=Main release refused::A main release was requested but NOT published: the 'confirm_release' input must be set to exactly CONFIRM-RELEASE. Nothing was released - the continuous pre-release is unaffected."
 
+      - name: Require signing for a stable release
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' && github.event.inputs.confirm_release == 'CONFIRM-RELEASE'
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_STORE_PATH" ]; then
+            echo "::error::Stable Hikari S releases require this repository's own signing secrets. No release was published."
+            exit 1
+          fi
+
       - name: Publish main release (manual only)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' && github.event.inputs.confirm_release == 'CONFIRM-RELEASE'
         env:
@@ -259,13 +277,13 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.version }}"
           TAG="v${VERSION:-0.1.0}"
-          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari.apk
+          cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari-s.apk
           # Each release carries all three builds: the universal APK under the
           # name every existing link and the in-app updater already use, plus
           # the two processor-specific ones so a user can download the smaller
           # file that matches their phone.
-          cp "app/build/outputs/apk/release/$APK_ARM64" hikari-arm64-v8a.apk
-          cp "app/build/outputs/apk/release/$APK_ARM32" hikari-armeabi-v7a.apk
+          cp "app/build/outputs/apk/release/$APK_ARM64" hikari-s-arm64-v8a.apk
+          cp "app/build/outputs/apk/release/$APK_ARM32" hikari-s-armeabi-v7a.apk
           # The release body is that version's own CHANGELOG.md section, so the
           # releases page and the changelog can never drift apart.
           NOTES=""
@@ -278,27 +296,27 @@ jobs:
           fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             for i in 1 2 3; do
-              gh release upload "$TAG" hikari.apk hikari-arm64-v8a.apk hikari-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" --clobber && break
+              gh release upload "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" --clobber && break
               echo "release upload attempt $i failed (often a transient race with a concurrent build), retrying..."
               sleep 5
             done
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "Hikari $VERSION" --notes "$NOTES" || true
+              --title "Hikari S $VERSION" --notes "$NOTES" || true
           else
-            gh release create "$TAG" hikari.apk hikari-arm64-v8a.apk hikari-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
-              --title "Hikari $VERSION" \
+            gh release create "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
+              --title "Hikari S $VERSION" \
               --notes "$NOTES" || true
           fi
           # Give each file a readable name on the releases page. GitHub shows an
-          # asset's `label` INSTEAD of its file name, so "hikari.apk" reads as
+          # asset's `label` INSTEAD of its file name, so "hikari-s.apk" reads as
           # "Hikari Android & TV Universal" while the download URL keeps the
           # file name the in-app updater and every existing link already use.
           REL_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id 2>/dev/null || true)
           if [ -n "$REL_ID" ]; then
             for spec in \
-              "hikari.apk=Hikari Android & TV Universal" \
-              "hikari-arm64-v8a.apk=Hikari Android & TV 64-bit (arm64-v8a)" \
-              "hikari-armeabi-v7a.apk=Hikari Android & TV 32-bit (armeabi-v7a)"
+              "hikari-s.apk=Hikari Android & TV Universal" \
+              "hikari-s-arm64-v8a.apk=Hikari Android & TV 64-bit (arm64-v8a)" \
+              "hikari-s-armeabi-v7a.apk=Hikari Android & TV 32-bit (armeabi-v7a)"
             do
               FILE="${spec%%=*}"
               LABEL="${spec#*=}"

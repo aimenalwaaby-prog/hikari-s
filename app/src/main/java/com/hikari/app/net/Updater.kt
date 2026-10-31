@@ -14,9 +14,9 @@ import java.io.File
 
 object Updater {
 
-    const val REPO = "codegeasse1/hikari"
+    const val REPO = BuildConfig.UPDATE_REPO
     const val RELEASES_URL = "https://github.com/$REPO/releases/latest"
-    const val UPDATE_URL = "https://github.com/$REPO/releases/download/continuous/hikari-signed.apk"
+    const val UPDATE_URL = "https://github.com/$REPO/releases/download/continuous/hikari-s-signed.apk"
 
     data class UpdateStatus(
         val available: Boolean,
@@ -34,20 +34,20 @@ object Updater {
             "unknown"
         }
 
-    /** The build this phone should install: its own processor type's APK when
+    /** The Hikari S build this phone should install: its own processor type's APK when
      *  the release carries one, otherwise the universal one that works
      *  anywhere.
      *
-     *  Hikari is published as an ABI split (see app/build.gradle.kts): a
-     *  release holds `hikari-arm64-v8a.apk` for 64-bit arm phones,
-     *  `hikari-armeabi-v7a.apk` for the older 32-bit ones, and `hikari.apk`
+     *  Hikari S is published as an ABI split (see app/build.gradle.kts): a
+     *  release holds `hikari-s-arm64-v8a.apk` for 64-bit arm phones,
+     *  `hikari-s-armeabi-v7a.apk` for the older 32-bit ones, and `hikari-s.apk`
      *  which contains both. Every phone can install any of them (same
      *  applicationId, key and version), so picking the matching one is purely
      *  about not downloading a second set of native libraries the device can
      *  never load. */
     private fun preferredAssetName(): String =
-        if (Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }) "hikari-arm64-v8a.apk"
-        else "hikari-armeabi-v7a.apk"
+        if (Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }) "hikari-s-arm64-v8a.apk"
+        else "hikari-s-armeabi-v7a.apk"
 
     /** The newest non-draft, non-prerelease `v*` release (the `continuous` test
      *  channel is excluded) together with the asset name best suited to this
@@ -76,7 +76,7 @@ object Updater {
                 // asset failed to upload, still updates — with the universal APK.
                 val asset = when {
                     want in names -> want
-                    "hikari.apk" in names -> "hikari.apk"
+                    "hikari-s.apk" in names -> "hikari-s.apk"
                     else -> null
                 }
                 return Latest(tag, asset)
@@ -132,7 +132,7 @@ object Updater {
         url: String = UPDATE_URL,
     ): Result<File> = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates")
-        val apk = File(dir, "hikari-update.apk")
+        val apk = File(dir, "hikari-s-update.apk")
         val ok = Http.downloadTo(url, apk) { d, t -> onProgress(d, t) }
         if (ok && apk.length() > 1_000_000) {
             Result.success(apk)
