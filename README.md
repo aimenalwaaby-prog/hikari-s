@@ -68,9 +68,7 @@ The releases page is reserved for signed Hikari S builds. **No signed APK has be
 - **Releases:** <https://github.com/aimenalwaaby-prog/hikari-s/releases>
 - **Build workflow and artifacts:** <https://github.com/aimenalwaaby-prog/hikari-s/actions/workflows/build.yml>
 
-Signed builds require these repository-level GitHub Actions secrets under **Settings → Secrets and variables → Actions**: `KEYSTORE_BASE64` (the JKS keystore encoded as one-line Base64), `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`. The workflow validates the keystore and key entry, decodes the file only into the runner's temporary directory, verifies each APK with Android's `apksigner`, and uploads APKs with SHA-256 checksums. Never commit the keystore or passwords to this repository.
-
-Pushes to `main` update the continuous test channel; pushing a `v<version>` tag creates a signed versioned GitHub Release with APK assets.
+Stable APK publishing requires the repository owner to configure these GitHub Actions secrets: `SIGNING_KEY` (base64-encoded keystore), `KEY_STORE_PASSWORD`, `ALIAS`, and `KEY_PASSWORD`. Keep the signing keystore and passwords private; never commit them to this repository.
 
 ## Add extensions
 

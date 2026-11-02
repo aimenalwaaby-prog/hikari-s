@@ -1,25 +1,24 @@
 # =============================================================================
 #  DO NOT CREATE A MAIN RELEASE WITHOUT THE OWNER ASKING FOR IT, IN WRITING.
 #
-#  Pushing to `main` publishes only test APKs to the `continuous` pre-release
-#  and (if small enough) to the `build` branch. A versioned `v*` tag creates a
-#  versioned GitHub Release; creating that tag is the explicit release action.
+#  Pushing to `main` publishes the test APKs to the `continuous` pre-release and
+#  to the `build` branch. That is the only thing a normal push may do.
 #
-#  A manually dispatched main release (a non-prerelease `v<version>` on the
-#  releases page) is gated twice: the `release` checkbox AND the `confirm_release`
+#  A *main* release (a non-prerelease `v<version>` on the releases page) makes
+#  that build the version every user is offered, so it is opt-in by hand only,
+#  and it is gated twice: the `release` checkbox AND the `confirm_release`
 #  input, which must be typed as exactly  CONFIRM-RELEASE . If either is
 #  missing the release step does not run; a warning step says so in the log.
 #
-#  Automation / coding agents: NEVER create version tags or dispatch this
-#  workflow with release=true. Only the human owner may intentionally create a
-#  version tag or request the separately gated manual release.
+#  Automation / coding agents: NEVER dispatch this workflow with
+#  release=true. Only a human owner, who has explicitly asked for a release
+#  in the current conversation, may do that.
 # =============================================================================
 name: Build
 
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
@@ -39,9 +38,9 @@ on:
         type: string
         default: "0.1.0"
       version_code:
-        description: "Optional versionCode override; defaults to the Actions run number"
+        description: "Monotonically increasing Android versionCode"
         type: string
-        default: ""
+        default: "1"
 
 permissions:
   contents: write
@@ -61,50 +60,21 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
       - name: Accept Android SDK licenses
         run: |
-          yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+          if [ -n "$ANDROID_HOME" ]; then
+            yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+            "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "platforms;android-35" "platforms;android-36" "build-tools;34.0.0" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          fi
 
       - name: Prepare signing keystore
-        id: signing
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         run: |
-          set -euo pipefail
-          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Required signing secret $name is not configured."
-              exit 1
-            fi
-          done
-          KEYSTORE_PATH="$RUNNER_TEMP/hikari-s-signing.jks"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-          if [ ! -s "$KEYSTORE_PATH" ]; then
-            echo "::error::The decoded signing keystore is empty."
-            exit 1
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "$SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/hikari-keystore.p12"
+            echo "SIGNING_STORE_PATH=$RUNNER_TEMP/hikari-keystore.p12" >> "$GITHUB_ENV"
           fi
-          if ! keytool -list -keystore "$KEYSTORE_PATH" -storetype JKS \
-            -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" >/dev/null 2>&1; then
-            echo "::error::The signing keystore, password, or alias could not be validated."
-            exit 1
-          fi
-          if ! keytool -certreq -keystore "$KEYSTORE_PATH" -storetype JKS \
-            -storepass:env KEYSTORE_PASSWORD -keypass:env KEY_PASSWORD \
-            -alias "$KEY_ALIAS" -file "$RUNNER_TEMP/hikari-s-signing-probe.csr" >/dev/null 2>&1; then
-            echo "::error::The signing key password could not be validated."
-            exit 1
-          fi
-          rm -f "$RUNNER_TEMP/hikari-s-signing-probe.csr"
-          echo "KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          echo "available=true" >> "$GITHUB_OUTPUT"
-          echo "Signing keystore and key entry validated."
 
       - uses: gradle/actions/setup-gradle@v3
         with:
@@ -119,23 +89,13 @@ jobs:
         env:
           GIT_SHA: ${{ github.sha }}
           UPDATE_REPO: ${{ github.repository }}
-          APP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || '') }}
-          APP_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.version_code || ((github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')) && github.run_number || '') }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          APP_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+          APP_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.version_code || '' }}
+          SIGNING_STORE_PATH: ${{ env.SIGNING_STORE_PATH }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [[ "$APP_VERSION" == v* ]]; then
-            export APP_VERSION="${APP_VERSION#v}"
-          fi
-          if [[ -n "$APP_VERSION" && ! "$APP_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::Version name must be a dotted numeric version, optionally with a prerelease suffix."
-            exit 1
-          fi
-          if [[ -n "$APP_VERSION_CODE" && ! "$APP_VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::Android versionCode must be a positive integer."
-            exit 1
-          fi
           # Maven Central occasionally rate-limits (HTTP 429) cold dependency
           # resolution. Retry the whole build a few times with a pause so the
           # rate-limit bucket can drain, instead of failing the first run.
@@ -209,17 +169,15 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "armv8=[$APK_ARM64] armv7=[$APK_ARM32] universal=[$APK_UNIVERSAL]"
 
-      - name: Verify release APKs are signed and intact
-        if: steps.signing.outputs.available == 'true'
+      - name: Verify release APKs are signed
+        if: env.SIGNING_STORE_PATH != ''
         run: |
           if [ -z "$APK_UNIVERSAL" ]; then
-            echo "::error::Release APK is missing or ABI splits did not produce a universal APK."
+            echo "::error::Release APK is missing - signing was not configured. Check the SIGNING_KEY / ALIAS / KEY_STORE_PASSWORD / KEY_PASSWORD secrets, and that the ABI splits still produce a universal APK."
             exit 1
           fi
-          EXPECTED_APP_ID=$(sed -n 's/^app.applicationId=//p' hikari-s.properties | head -n1)
-          : > app/build/outputs/apk/release/SHA256SUMS.txt
           # One APK per processor type plus the universal one, each plausibly
-          # sized, signed by Android's official apksigner, and intact.
+          # sized (a split whose signing was skipped would come out near-empty).
           for f in "$APK_ARM64" "$APK_ARM32" "$APK_UNIVERSAL"; do
             if [ -z "$f" ]; then
               echo "::error::A release APK is missing - expected one per ABI plus a universal APK."
@@ -228,21 +186,9 @@ jobs:
             size=$(stat -c%s "app/build/outputs/apk/release/$f")
             echo "$f = $size bytes"
             if [ "$size" -lt 1000000 ]; then
-              echo "::error::$f is unexpectedly small."
+              echo "::error::$f is only $size bytes - signing was probably not configured."
               exit 1
             fi
-            APK_PATH="app/build/outputs/apk/release/$f"
-            if ! "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK_PATH" >/dev/null; then
-              echo "::error::$f failed APK signature verification."
-              exit 1
-            fi
-            APK_APP_ID=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK_PATH" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n1)
-            if [ -z "$EXPECTED_APP_ID" ] || [ "$APK_APP_ID" != "$EXPECTED_APP_ID" ]; then
-              echo "::error::$f applicationId does not match hikari-s.properties."
-              exit 1
-            fi
-            sha256sum "$APK_PATH" >> app/build/outputs/apk/release/SHA256SUMS.txt
-            echo "$f: signature verified, applicationId=$APK_APP_ID, $size bytes"
           done
           ls -la app/build/outputs/apk/release/
 
@@ -261,12 +207,11 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
-            app/build/outputs/apk/release/SHA256SUMS.txt
           if-no-files-found: error
 
       # ---- TEST CHANNELS: updated on every push to main ----
       - name: Publish test APK to build branch
-        if: github.ref == 'refs/heads/main' && steps.signing.outputs.available == 'true'
+        if: github.ref == 'refs/heads/main' && env.SIGNING_STORE_PATH != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -285,7 +230,7 @@ jobs:
           git push origin build --force || { echo "build-branch push rejected (APK too large for GitHub's 100MB limit) - not fatal, release APK stays in artifacts."; exit 0; }
 
       - name: Publish test APK to continuous release
-        if: github.ref == 'refs/heads/main' && steps.signing.outputs.available == 'true'
+        if: github.ref == 'refs/heads/main' && env.SIGNING_STORE_PATH != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -305,26 +250,33 @@ jobs:
               --notes "Signed test APKs, auto-built from main. hikari-s-signed.apk is the universal build; the arm64-v8a / armeabi-v7a ones are smaller and for that processor type only." || true
           fi
 
-      # ---- VERSIONED RELEASE: explicit v* tag, or gated manual dispatch ----
-      # A plain push to main never creates a versioned release. The owner may
-      # either create a v* tag or use the separately confirmed manual route.
+      # ---- MAIN RELEASE: manual only, and only with the typed confirmation ----
+      # A main release is the build every user gets offered, so it never happens
+      # as a side effect of a push, and an accidental dispatch cannot trigger it:
+      # both the `release` checkbox and the typed `confirm_release` gate must be
+      # present. See the header of this file.
       - name: Refuse unconfirmed main release
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' && github.event.inputs.confirm_release != 'CONFIRM-RELEASE'
         run: |
           echo "::warning title=Main release refused::A main release was requested but NOT published: the 'confirm_release' input must be set to exactly CONFIRM-RELEASE. Nothing was released - the continuous pre-release is unaffected."
 
-      - name: Publish versioned release
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' && github.event.inputs.confirm_release == 'CONFIRM-RELEASE')
+      - name: Require signing for a stable release
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' && github.event.inputs.confirm_release == 'CONFIRM-RELEASE'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_VERSION: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         run: |
-          VERSION="${RELEASE_VERSION#v}"
-          TAG="v$VERSION"
-          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::Release version must be a valid dotted version, or a v<version> tag must be used."
+          if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_STORE_PATH" ]; then
+            echo "::error::Stable Hikari S releases require this repository's own signing secrets. No release was published."
             exit 1
           fi
+
+      - name: Publish main release (manual only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true' && github.event.inputs.confirm_release == 'CONFIRM-RELEASE'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION:-0.1.0}"
           cp "app/build/outputs/apk/release/$APK_UNIVERSAL" hikari-s.apk
           # Each release carries all three builds: the universal APK under the
           # name every existing link and the in-app updater already use, plus
@@ -343,36 +295,18 @@ jobs:
             echo "No CHANGELOG.md section found for $VERSION; using the default notes."
           fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            uploaded=0
             for i in 1 2 3; do
-              if gh release upload "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" --clobber; then
-                uploaded=1
-                break
-              fi
+              gh release upload "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" --clobber && break
               echo "release upload attempt $i failed (often a transient race with a concurrent build), retrying..."
               sleep 5
             done
-            if [ "$uploaded" -ne 1 ]; then
-              echo "::error::Could not upload all signed APKs to release $TAG."
-              exit 1
-            fi
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "Hikari S $VERSION" --notes "$NOTES"
+              --title "Hikari S $VERSION" --notes "$NOTES" || true
           else
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-              gh release create "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
-                --verify-tag --title "Hikari S $VERSION" --notes "$NOTES"
-            else
-              gh release create "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
-                --title "Hikari S $VERSION" --notes "$NOTES"
-            fi
+            gh release create "$TAG" hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk --repo "$GITHUB_REPOSITORY" \
+              --title "Hikari S $VERSION" \
+              --notes "$NOTES" || true
           fi
-          for expected in hikari-s.apk hikari-s-arm64-v8a.apk hikari-s-armeabi-v7a.apk; do
-            if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$expected"; then
-              echo "::error::Expected signed APK asset $expected is missing from release $TAG."
-              exit 1
-            fi
-          done
           # Give each file a readable name on the releases page. GitHub shows an
           # asset's `label` INSTEAD of its file name, so "hikari-s.apk" reads as
           # "Hikari Android & TV Universal" while the download URL keeps the

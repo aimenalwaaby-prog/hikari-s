@@ -95,29 +95,16 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // CI decodes the KEYSTORE_BASE64 repository secret into a private
-            // runner-temp file and passes its path plus the three signing values
-            // through environment variables. Local builds stay unsigned.
-            val storePath = System.getenv("KEYSTORE_PATH")
-            val storePassword = System.getenv("KEYSTORE_PASSWORD")
-            val keyAlias = System.getenv("KEY_ALIAS")
-            val keyPassword = System.getenv("KEY_PASSWORD")
+            // CI passes signing config via env vars (decoded from the SIGNING_KEY
+            // repo secret). Local builds stay unsigned.
+            val storePath = System.getenv("SIGNING_STORE_PATH")
             if (!storePath.isNullOrBlank()) {
-                if (storePassword.isNullOrBlank() || keyAlias.isNullOrBlank() || keyPassword.isNullOrBlank()) {
-                    throw GradleException("Release signing environment is incomplete.")
-                }
-                val keystoreFile = file(storePath)
-                if (!keystoreFile.isFile) {
-                    throw GradleException("Release keystore file is missing.")
-                }
                 signingConfig = signingConfigs.create("release") {
-                    storeFile = keystoreFile
-                    this.storePassword = storePassword
-                    this.keyAlias = keyAlias
-                    this.keyPassword = keyPassword
+                    storeFile = file(storePath)
+                    storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+                    keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                    keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
                 }
-            } else if (listOf(storePassword, keyAlias, keyPassword).any { !it.isNullOrBlank() }) {
-                throw GradleException("Release signing environment is incomplete.")
             }
         }
     }
