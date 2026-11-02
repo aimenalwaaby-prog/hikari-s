@@ -816,6 +816,7 @@ fun HomeScreen(nav: NavHostController) {
     }
 
     val app = context.applicationContext as HikariApp
+    val externalSearchRequest by app.homeSearchRequest.collectAsState()
     // User-made collections: offered in the same picker as the extensions, and
     // a collection pick ("collection:<id>") swaps the feed for that
     // collection's folders.
@@ -1000,6 +1001,13 @@ fun HomeScreen(nav: NavHostController) {
             }
         }
     }
+    var handledExternalSearchRequest by remember { mutableStateOf(0) }
+    LaunchedEffect(externalSearchRequest) {
+        if (externalSearchRequest > handledExternalSearchRequest) {
+            handledExternalSearchRequest = externalSearchRequest
+            openSearch()
+        }
+    }
     // One genre page: the TMDB combined film+series grid for it.
     val openTmdbGenre: (String, String, String) -> Unit = { name, genresText, keywordsText ->
         Routes.safeNavigate(
@@ -1162,9 +1170,11 @@ fun HomeScreen(nav: NavHostController) {
                             onTranslate = { showTranslate = true },
                             onVerify = openVerify,
                             overlay = false,
-                            onSettings = openSettings,
+                            onSettings = null,
                             onMouse = { com.hikari.app.tv.MouseMode.toggle() },
                             mouseOn = com.hikari.app.tv.MouseMode.enabled,
+                            showBrand = false,
+                            showSearch = false,
                         )
                     }
                     if (featured.isNotEmpty()) {
@@ -3254,6 +3264,8 @@ private fun HomeHeader(
      *  this gear keeps the screen reachable instead of locking the user out. */
     onSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    showBrand: Boolean = true,
+    showSearch: Boolean = true,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val iconTint = if (overlay) Color.White else accent
@@ -3265,20 +3277,24 @@ private fun HomeHeader(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                tr("Hikari"),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = accent,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
-            Text(
-                tr("Every stream, one place."),
-                style = MaterialTheme.typography.bodyMedium,
-                color = subtitleColor,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
+        if (showBrand) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    tr("Hikari"),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = accent,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                Text(
+                    tr("Every stream, one place."),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = subtitleColor,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
+        } else {
+            Spacer(Modifier.weight(1f))
         }
         // Remote mouse: a D-pad-driven cursor over every screen, for the
         // Cloudflare "I'm not a robot" checkbox and any other target the
@@ -3293,8 +3309,10 @@ private fun HomeHeader(
                 )
             }
         }
-        IconButton(onClick = onSearch) {
-            Icon(Icons.Filled.Search, contentDescription = tr("Search"), tint = iconTint)
+        if (showSearch) {
+            IconButton(onClick = onSearch) {
+                Icon(Icons.Filled.Search, contentDescription = tr("Search"), tint = iconTint)
+            }
         }
         // Translate: per-extension toggle — turns this extension's titles/text
         // into English inside the app. Shown whenever a provider is selected.

@@ -22,10 +22,12 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Download
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -1009,6 +1012,173 @@ val BottomTabs = listOf(
     BottomTab(Routes.SETTINGS, "Settings", Icons.Filled.Settings),
 )
 
+/** One app-level Hikari S header. Screen content starts below it (see AppRoot),
+ *  so it replaces the old overlapping Home brand row instead of sitting on it. */
+@Composable
+private fun LuxuryHeader(
+    label: String,
+    isRoot: Boolean,
+    onBack: () -> Unit,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(22.dp)
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        shape = shape,
+        color = colors.surface.copy(alpha = 0.94f),
+        tonalElevation = 0.dp,
+        shadowElevation = 12.dp,
+        border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.28f)),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color(0xFF1B1E2F).copy(alpha = 0.96f),
+                            colors.surface.copy(alpha = 0.96f),
+                            colors.surfaceVariant.copy(alpha = 0.90f),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (!isRoot) {
+                IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = tr("Back"))
+                }
+                Spacer(Modifier.width(4.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(Brush.linearGradient(listOf(colors.primary, colors.tertiary))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "H",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "HIKARI S",
+                    color = colors.primary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.sp,
+                )
+                Text(
+                    tr(label),
+                    color = colors.onSurface,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onSearch, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Filled.Search, contentDescription = tr("Search"))
+            }
+            IconButton(onClick = onSettings, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Filled.Settings, contentDescription = tr("Settings"))
+            }
+        }
+    }
+}
+
+/** The single floating Hikari S dock. Its slots share the available width, so
+ *  even users who enable many extensions/tabs never get a clipped or doubled bar. */
+@Composable
+private fun LuxuryDock(
+    currentRoute: String?,
+    hidden: Set<String>,
+    navStyle: String,
+    expanded: Boolean,
+    showLabels: Boolean,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val tabs = BottomTabs.filter { it.route !in hidden }.ifEmpty { BottomTabs }
+    val withLabels = showLabels && expanded &&
+        NavStyles.normalize(navStyle) != NavStyles.COMPACT && tabs.size <= 5
+    val shape = RoundedCornerShape(26.dp)
+    Surface(
+        modifier = modifier
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        shape = shape,
+        color = colors.surface.copy(alpha = 0.97f),
+        tonalElevation = 0.dp,
+        shadowElevation = 18.dp,
+        border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.34f)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEach { tab ->
+                val selected = currentRoute == tab.route
+                val tabShape = RoundedCornerShape(18.dp)
+                val background = if (selected) {
+                    Brush.verticalGradient(
+                        listOf(
+                            colors.primary.copy(alpha = 0.30f),
+                            colors.tertiary.copy(alpha = 0.18f),
+                        ),
+                    )
+                } else {
+                    Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(if (withLabels) 60.dp else 46.dp)
+                        .clip(tabShape)
+                        .background(background, tabShape)
+                        .clickable { onNavigate(tab.route) }
+                        .padding(horizontal = 2.dp, vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        tab.icon,
+                        contentDescription = tr(tab.label),
+                        modifier = Modifier.size(if (selected) 23.dp else 21.dp),
+                        tint = if (selected) colors.primary else colors.onSurfaceVariant,
+                    )
+                    if (withLabels) {
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            tr(tab.label),
+                            color = if (selected) colors.primary else colors.onSurfaceVariant,
+                            fontSize = 9.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
     val nav = rememberNavController()
@@ -1087,6 +1257,9 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
     // padded in from the screen edges (see TvUi), and the focus ring every
     // clickable inherits from MainActivity's TvFocusProvider.
     val isTv = TvMode.current()
+    // The phone layout has one app-level Hikari S header. Readers keep their
+    // immersive canvas; every other page gets reserved space below the header.
+    val showLuxuryHeader = !isTv && currentRoute?.contains("reader", ignoreCase = true) != true
     // The gap kept clear of the screen's edges on a television ("overscan" —
     // see TvUi.DEFAULT_OVERSCAN_DP for why televisions need one at all).
     val overscanFlow = remember { app.store.tvOverscanFlow() }
@@ -1304,7 +1477,10 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                     val navBarBottom = with(LocalDensity.current) {
                         WindowInsets.navigationBars.getBottom(this).toDp()
                     }
-                    BarMetrics.inset(navStyle) + navBarBottom
+                    val visibleTabCount = BottomTabs.count { it.route !in visibleTabs }
+                    val showDockLabels = showTabLabels && barExpanded &&
+                        NavStyles.normalize(navStyle) != NavStyles.COMPACT && visibleTabCount <= 5
+                    (if (showDockLabels) 84.dp else 70.dp) + navBarBottom
                 } else 0.dp
             ) {
                 NavHost(
@@ -1312,6 +1488,9 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                     startDestination = Routes.HOME,
                     modifier = Modifier
                         .padding(padding)
+                        // This is a reserved row, not a graphic painted over
+                        // the old page header/content.
+                        .then(if (showLuxuryHeader) Modifier.padding(top = 72.dp) else Modifier)
                         // A page with no bottom bar (a detail page, a grid)
                         // would otherwise end under the three buttons; the bar
                         // itself already lifts above them.
@@ -1558,12 +1737,30 @@ fun AppRoot(themeKey: String = HikariThemeMode.DEFAULT.key) {
                 }
             }
         }
-        // The bar, drawn over the page rather than in a reserved slot (see the
-        // comment on the Scaffold). It is the last child of the Box, so it sits
-        // on top of every screen, and it is transparent wherever the pill is not
-        // — nothing around it is painted.
+        // One Hikari S shell header replaces the old Home brand row. NavHost
+        // reserves its height above, so the two interfaces cannot overlap.
+        if (showLuxuryHeader) {
+            val headerLabel = BottomTabs.firstOrNull { it.route == tabRoute }?.label
+                ?: currentRoute?.substringBefore("?")?.replace('-', ' ')?.replaceFirstChar { it.uppercase() }
+                ?: "Hikari S"
+            LuxuryHeader(
+                label = headerLabel,
+                isRoot = showBar,
+                onBack = { if (!nav.popBackStack()) Routes.navigateTab(nav, Routes.HOME) },
+                onSearch = {
+                    if (currentRoute == Routes.HOME) {
+                        app.homeSearchRequest.value = app.homeSearchRequest.value + 1
+                    } else {
+                        Routes.navigateTab(nav, Routes.SEARCH)
+                    }
+                },
+                onSettings = { Routes.navigateTab(nav, Routes.SETTINGS) },
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+        // The old navigation bar is not drawn underneath the Hikari S dock.
         if (showBar && !isTv) {
-            AppBottomBar(
+            LuxuryDock(
                 currentRoute = tabRoute,
                 hidden = visibleTabs,
                 navStyle = navStyle,

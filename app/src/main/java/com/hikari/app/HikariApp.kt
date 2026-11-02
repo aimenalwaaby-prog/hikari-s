@@ -150,6 +150,10 @@ class HikariApp : Application() {
      *  view instead of reloading the website's home page). */
     val homeTabRequest = MutableStateFlow(0)
 
+    /** Bumped by the Hikari S shell search button while Home is active. Home
+     *  consumes it to open its existing provider-scoped search in place. */
+    val homeSearchRequest = MutableStateFlow(0)
+
     /** A repo link handed in from a browser ("Open with → Hikari"); AppRoot
      *  watches this and switches to the Extensions tab, whose screen installs
      *  it into the section it belongs to and opens that repo's folder. Null
